@@ -1,0 +1,8 @@
+**/node_modules
+frontend/dist
+backend/datahunter.exe
+backend/datahunter
+backend/server.log
+**/*.log
+.git
+.playwright-mcp
