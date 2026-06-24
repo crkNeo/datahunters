@@ -184,6 +184,24 @@ func ScoreDetail(in DetailInput, w DetailWeights) DetailResult {
 	}
 }
 
+// ScoreTotal returns just the numeric total of ScoreDetail (same arithmetic,
+// no breakdown/strings) — a fast path for weight optimisation. Must stay in
+// sync with ScoreDetail's per-item math.
+func ScoreTotal(in DetailInput, w DetailWeights) int {
+	raw := round(smoothSat(in.OIChg1h, w.OIMax, w.OIHalf) + smoothSat(in.CVDRatio, w.CVDMax, w.CVDHalf))
+	raw += in.StructDir * round(w.StructPts)
+	raw += round(smoothSat(in.Mom1h, w.Mom1hMax, w.Mom1hHalf))
+	raw += round(smoothSat(in.Mom24h, w.Mom24hMax, w.Mom24hHalf))
+	raw += round(-smoothSat(in.FundingRate*100, w.FundingMax, w.FundingHalf))
+	raw += round(-smoothSat((in.LongAccount-0.5)*100, w.CrowdMax, w.CrowdHalf))
+	raw += round(smoothSat(in.RelStrength, w.RelMax, w.RelHalf))
+	liq := 1.0
+	if w.MinVol24h > 0 && in.Vol24h > 0 && in.Vol24h < w.MinVol24h {
+		liq = in.Vol24h / w.MinVol24h
+	}
+	return round(float64(raw) * liq)
+}
+
 // rationale builds the 4-row summary panel narrative.
 func rationale(in DetailInput, oiPts, cvdPts float64) []Rationale {
 	var out []Rationale

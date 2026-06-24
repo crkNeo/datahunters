@@ -33,14 +33,38 @@ type Store struct {
 	altDate      string     // UTC date of altToday
 	altToday     int
 	altYesterday int
+
+	radarMu   sync.RWMutex // guards the breakout-radar cache
+	radar     RadarData
+	radarTime time.Time
+
+	symMu    sync.Mutex // guards the coin-type (crypto vs equity) cache
+	symTypes map[string]string
+	symTime  time.Time
+
+	paperMu     sync.Mutex // guards both paper-trading books
+	paperMain   *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble *paperBook // loose: low bar, chases already-elevated coins
+
+	logMu     sync.Mutex // guards the score-cross log
+	scoreLog  []ScoreEvent
+	prevScore map[string]int
+	logSeeded bool
+
+	optMu   sync.Mutex // guards the BTC/ETH options dashboard cache
+	optData OptionsData
+	optTime time.Time
 }
 
 func NewStore(coins []string) *Store {
 	return &Store{
-		data:    map[string]Snapshot{},
-		details: map[string]CoinDetail{},
-		ex:      exchange.NewClient(),
-		coins:   coins,
+		data:        map[string]Snapshot{},
+		details:     map[string]CoinDetail{},
+		ex:          exchange.NewClient(),
+		coins:       coins,
+		paperMain:   newBook(55, true, 4*time.Hour),  // disciplined
+		paperGamble: newBook(45, false, 1*time.Hour), // gamble: low bar, chases
+		prevScore:   map[string]int{},
 	}
 }
 
@@ -80,6 +104,8 @@ func (s *Store) Refresh() {
 		nextDetails[coin] = d
 	}
 
+	s.logScoreCrosses(nextSnaps, tmap, time.Now())
+
 	s.mu.Lock()
 	s.data = nextSnaps
 	s.details = nextDetails
@@ -87,6 +113,54 @@ func (s *Store) Refresh() {
 	s.mu.Unlock()
 }
 
+// ScoreEvent records the moment a coin's directional score crossed into a
+// long/short signal (|score| >= 20), so it can be reviewed on the chart later.
+type ScoreEvent struct {
+	Coin  string    `json:"coin"`
+	Score int       `json:"score"`
+	Bias  string    `json:"bias"`
+	Price float64   `json:"price"`
+	Time  time.Time `json:"time"`
+}
+
+// logScoreCrosses appends an event whenever a coin's |score| goes from <20 to
+// >=20 (a fresh long/short signal). The first refresh only seeds the baseline.
+func (s *Store) logScoreCrosses(snaps map[string]Snapshot, tmap map[string]exchange.MarketTicker, now time.Time) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	for coin, snap := range snaps {
+		if s.logSeeded && abs(s.prevScore[coin]) < 20 && abs(snap.Score) >= 20 {
+			s.scoreLog = append(s.scoreLog, ScoreEvent{
+				Coin: coin, Score: snap.Score, Bias: snap.Bias,
+				Price: tmap[coin+"USDT"].Price, Time: now,
+			})
+		}
+		s.prevScore[coin] = snap.Score
+	}
+	s.logSeeded = true
+	if len(s.scoreLog) > 300 {
+		s.scoreLog = s.scoreLog[len(s.scoreLog)-300:]
+	}
+}
+
+// ScoreLog returns the recorded signal-cross events, newest first.
+func (s *Store) ScoreLog() []ScoreEvent {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	out := make([]ScoreEvent, len(s.scoreLog))
+	for i, e := range s.scoreLog {
+		out[len(s.scoreLog)-1-i] = e
+	}
+	return out
+}
+
 func round2(f float64) float64 {
 	return float64(int(f*100)) / 100
+}
+
+func abs(i int) int {
+	if i < 0 {
+		return -i
+	}
+	return i
 }

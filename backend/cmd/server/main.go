@@ -47,6 +47,33 @@ func main() {
 		}
 	}()
 
+	// keep the breakout radar warm so /api/radar responds instantly
+	go func() {
+		store.Radar()
+		log.Printf("breakout radar ready")
+		ticker := time.NewTicker(90 * time.Second)
+		for range ticker.C {
+			store.Radar()
+		}
+	}()
+
+	// paper-trading tracker: open/monitor/close simulated radar signals
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		for range ticker.C {
+			store.PaperTick()
+		}
+	}()
+
+	// BTC/ETH options dashboard (Deribit), kept warm
+	go func() {
+		store.Options()
+		ticker := time.NewTicker(3 * time.Minute)
+		for range ticker.C {
+			store.Options()
+		}
+	}()
+
 	srv := api.NewServer(store)
 	addr := ":8080"
 	if p := os.Getenv("PORT"); p != "" {

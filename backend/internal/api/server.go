@@ -3,8 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -25,14 +23,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/oi-cache", s.handleOICache)
 	mux.HandleFunc("/api/signals", s.handleSignals)
 	mux.HandleFunc("/api/home", s.handleHome)
+	mux.HandleFunc("/api/radar", s.handleRadar)
+	mux.HandleFunc("/api/paper", s.handlePaper)
+	mux.HandleFunc("/api/gamble", s.handleGamble)
+	mux.HandleFunc("/api/scorelog", s.handleScoreLog)
+	mux.HandleFunc("/api/options", s.handleOptions)
 	mux.HandleFunc("/api/coin/", s.handleCoinDetail)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	// serve the built frontend if STATIC_DIR is set (single-service deploy)
-	if dir := os.Getenv("STATIC_DIR"); dir != "" {
-		mux.Handle("/", spaHandler(dir))
-	}
 	return cors(mux)
 }
 
@@ -85,6 +84,31 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, home)
 }
 
+// handleRadar serves the breakout radar (potential pumps/dumps across market).
+func (s *Server) handleRadar(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Radar())
+}
+
+// handlePaper serves the disciplined paper-trading tracker.
+func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Paper())
+}
+
+// handleGamble serves the loose "gamble" paper-trading tracker.
+func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Gamble())
+}
+
+// handleScoreLog serves the log of when coins crossed the ±20 signal line.
+func (s *Server) handleScoreLog(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.ScoreLog())
+}
+
+// handleOptions serves the BTC/ETH options-derived dashboard.
+func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Options())
+}
+
 // handleCoinDetail serves the full per-coin score card at /api/coin/{COIN}.
 // Data is fetched fresh on each request for the requested coin.
 func (s *Server) handleCoinDetail(w http.ResponseWriter, r *http.Request) {
@@ -99,21 +123,6 @@ func (s *Server) handleCoinDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, detail)
-}
-
-// spaHandler serves static files from dir, falling back to index.html so the
-// single-page app handles client-side routing.
-func spaHandler(dir string) http.Handler {
-	fs := http.FileServer(http.Dir(dir))
-	index := filepath.Join(dir, "index.html")
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := filepath.Join(dir, filepath.Clean(r.URL.Path))
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			fs.ServeHTTP(w, r)
-			return
-		}
-		http.ServeFile(w, r, index)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

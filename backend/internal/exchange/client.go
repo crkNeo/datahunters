@@ -178,6 +178,28 @@ func (c *Client) BinanceKlines(symbol, interval string, limit int) ([]Candle, er
 	return parseKlines(raw), nil
 }
 
+// BinanceSymbolTypes returns coin -> underlyingType ("COIN" for crypto,
+// "EQUITY"/"COMMODITY"/"INDEX"/… for tokenized stocks etc.) for USDT perps,
+// so the radar can cleanly separate crypto from tokenized equities.
+func (c *Client) BinanceSymbolTypes() (map[string]string, error) {
+	var raw struct {
+		Symbols []struct {
+			Symbol         string `json:"symbol"`
+			UnderlyingType string `json:"underlyingType"`
+		} `json:"symbols"`
+	}
+	if err := c.get(binanceFapi+"/fapi/v1/exchangeInfo", &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(raw.Symbols))
+	for _, s := range raw.Symbols {
+		if strings.HasSuffix(s.Symbol, "USDT") && !strings.Contains(s.Symbol, "_") {
+			out[strings.TrimSuffix(s.Symbol, "USDT")] = s.UnderlyingType
+		}
+	}
+	return out, nil
+}
+
 // BinanceSpotKlines fetches SPOT klines from the spot API, e.g. "BTCUSDT".
 // Same array format as futures, so it carries taker-buy volume too.
 func (c *Client) BinanceSpotKlines(symbol, interval string, limit int) ([]Candle, error) {
