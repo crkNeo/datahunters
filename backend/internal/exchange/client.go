@@ -178,6 +178,25 @@ func (c *Client) BinanceKlines(symbol, interval string, limit int) ([]Candle, er
 	return parseKlines(raw), nil
 }
 
+// BinanceAllFunding returns the latest funding rate for every USDT perp in a
+// single call (premiumIndex), keyed by coin (e.g. "BTC" -> 0.0001).
+func (c *Client) BinanceAllFunding() (map[string]float64, error) {
+	var raw []struct {
+		Symbol          string `json:"symbol"`
+		LastFundingRate string `json:"lastFundingRate"`
+	}
+	if err := c.get(binanceFapi+"/fapi/v1/premiumIndex", &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(raw))
+	for _, p := range raw {
+		if strings.HasSuffix(p.Symbol, "USDT") && !strings.Contains(p.Symbol, "_") {
+			out[strings.TrimSuffix(p.Symbol, "USDT")] = atof(p.LastFundingRate)
+		}
+	}
+	return out, nil
+}
+
 // BinanceSymbolTypes returns coin -> underlyingType ("COIN" for crypto,
 // "EQUITY"/"COMMODITY"/"INDEX"/… for tokenized stocks etc.) for USDT perps,
 // so the radar can cleanly separate crypto from tokenized equities.

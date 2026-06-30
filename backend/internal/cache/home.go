@@ -94,6 +94,16 @@ func strength(score int) int {
 // single call, derives the header tickers / altcoin-season gauge from it, and
 // ranks recommendations from the cached per-coin scores.
 func (s *Store) Home() (HomeData, error) {
+	v, err := s.homeCache.get("home", func() (any, error) { return s.computeHome() })
+	if err != nil {
+		return HomeData{}, err
+	}
+	return v.(HomeData), nil
+}
+
+// computeHome does the actual work; Home() wraps it in a 15s shared cache so
+// user polls all share one all-tickers fetch instead of each hitting Binance.
+func (s *Store) computeHome() (HomeData, error) {
 	tickers, err := s.ex.BinanceAllTickers()
 	if err != nil {
 		return HomeData{}, err

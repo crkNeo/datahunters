@@ -1,0 +1,10 @@
+# runtime SQLite DB (signals + paper trades)
+datahunter.db
+datahunter.db-wal
+datahunter.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+# env / secrets
+.env

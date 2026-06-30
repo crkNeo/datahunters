@@ -58,6 +58,16 @@ func (s *Store) Radar() RadarData {
 	if !t.IsZero() && time.Since(t) < 80*time.Second {
 		return d
 	}
+	// stale: serialise the (heavy, all-coins) recompute so a burst of requests
+	// triggers ONE fetch, not one each — re-check freshness after acquiring.
+	s.radarCompute.Lock()
+	defer s.radarCompute.Unlock()
+	s.radarMu.RLock()
+	d, t = s.radar, s.radarTime
+	s.radarMu.RUnlock()
+	if !t.IsZero() && time.Since(t) < 80*time.Second {
+		return d
+	}
 	d = s.computeRadar()
 	s.radarMu.Lock()
 	s.radar, s.radarTime = d, time.Now()

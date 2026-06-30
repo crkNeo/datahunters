@@ -1,0 +1,198 @@
+
+> datahunter-frontend@0.1.0 dev
+> vite
+
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+Port 5175 is in use, trying another one...
+Port 5176 is in use, trying another one...
+Port 5177 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m767[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5178[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m上午7:25:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:27:25[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午7:36:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:36:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:37:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:39:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午7:42:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午7:42:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午7:43:01[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午7:52:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午7:52:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午7:52:29[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午7:53:07[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:53:07[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:54:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午7:54:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:04:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:04:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:04:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:04:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:07:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:07:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:08:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:08:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:08:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:08:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:09:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:09:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午8:39:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:39:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:39:43[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:39:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午8:44:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:45:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:46:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:46:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午8:46:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午9:19:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午9:19:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m上午9:20:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:20:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:20:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:20:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:49:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:49:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:49:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:49:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:50:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午9:50:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:43:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:52:54[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m上午10:53:27[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午10:53:27[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午11:53:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/home[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m上午11:53:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/oi-cache[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)

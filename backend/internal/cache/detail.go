@@ -77,18 +77,25 @@ func (s *Store) Detail(coin string) (CoinDetail, error) {
 	d, ok := s.details[coin]
 	s.mu.RUnlock()
 	if ok {
-		return d, nil
+		return d, nil // monitored coin: already refreshed on the ticker
 	}
 
-	t, _ := s.ex.Binance24h(coin + "USDT")
-	btc, _ := s.ex.Binance24h("BTCUSDT")
-	d, _ = s.computeDetailCore(coin, t.ChangePct, btc.ChangePct)
-	if d.Total == 0 && d.Stats.OIValue == 0 {
-		// nothing came back — coin isn't on the venues we query
-		return CoinDetail{}, fmt.Errorf("no data for %s", coin)
+	// non-monitored coin: live fetch, but shared-cached (30s) + singleflight so
+	// many users clicking the same coin trigger one fetch, not one each.
+	v, err := s.detailCache.get(coin, func() (any, error) {
+		t, _ := s.ex.Binance24h(coin + "USDT")
+		btc, _ := s.ex.Binance24h("BTCUSDT")
+		cd, _ := s.computeDetailCore(coin, t.ChangePct, btc.ChangePct)
+		if cd.Total == 0 && cd.Stats.OIValue == 0 {
+			return nil, fmt.Errorf("no data for %s", coin) // not on our venues
+		}
+		cd.Related = s.relatedCoins(coin)
+		return cd, nil
+	})
+	if err != nil {
+		return CoinDetail{}, err
 	}
-	d.Related = s.relatedCoins(coin)
-	return d, nil
+	return v.(CoinDetail), nil
 }
 
 // computeDetailCore fetches fresh data for one coin, scores it with the detail
