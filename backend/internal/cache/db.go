@@ -150,8 +150,10 @@ func (db *DB) upsertUser(username, passHash, role, status string) {
 }
 
 // userAuth returns (passHash, role, status) for a username, ok=false if absent.
+// COLLATE utf8mb4_bin forces a CASE-SENSITIVE match: "Hsuan" must not log into
+// "hsuan" (MySQL's default ci collation would otherwise treat them as equal).
 func (db *DB) userAuth(username string) (hash, role, status string, ok bool) {
-	row := db.sql.QueryRow(`SELECT pass_hash,role,status FROM users WHERE username=?`, username)
+	row := db.sql.QueryRow(`SELECT pass_hash,role,status FROM users WHERE username=? COLLATE utf8mb4_bin`, username)
 	if err := row.Scan(&hash, &role, &status); err != nil {
 		return "", "", "", false
 	}
@@ -161,7 +163,7 @@ func (db *DB) userAuth(username string) (hash, role, status string, ok bool) {
 // userRoleStatus returns the CURRENT role+status (no password), for live gating
 // so bans / role changes take effect immediately, not at token expiry.
 func (db *DB) userRoleStatus(username string) (role, status string, ok bool) {
-	row := db.sql.QueryRow(`SELECT role,status FROM users WHERE username=?`, username)
+	row := db.sql.QueryRow(`SELECT role,status FROM users WHERE username=? COLLATE utf8mb4_bin`, username)
 	if err := row.Scan(&role, &status); err != nil {
 		return "", "", false
 	}

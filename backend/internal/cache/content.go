@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -97,6 +98,46 @@ func (db *DB) delSub(endpoint string) {
 }
 
 func (db *DB) clearSubs() { db.sql.Exec(`DELETE FROM push_subs`) }
+
+// adminSubs returns the push subscription rows belonging to admin accounts, for
+// targeted admin-only alerts (e.g. a new registration to review).
+func (db *DB) adminSubs() []string {
+	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
+	  JOIN users u ON u.username = p.username WHERE u.role = 'admin'`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sub string
+		if rows.Scan(&sub) == nil {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// NotifyNewRegister alerts admins that a new account is awaiting review — via
+// Telegram (admin chat) and Web Push (admin subscribers only, not all members).
+func (s *Store) NotifyNewRegister(username, uid, notes string) {
+	if s.notifier.Enabled() {
+		go s.notifier.Send(fmt.Sprintf("🆕 <b>新用戶註冊</b>\n帳號 %s\nUID %s\n交易所 %s\n請至後台審核",
+			username, orDash(uid), orDash(notes)))
+	}
+	if s.pushMgr != nil && s.db != nil {
+		if subs := s.db.adminSubs(); len(subs) > 0 {
+			s.pushMgr.SendTo(subs, "🆕 新用戶註冊", username+" 待審核", "/")
+		}
+	}
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
 
 // ResetPush regenerates the VAPID keypair and drops all stored subscriptions
 // (they were made with the old key). Clients re-subscribe on next load.

@@ -22,7 +22,7 @@ const status = ref('')
 const authReady = ref(false)
 const authMsg = ref('')
 const authTab = ref('login')
-const regForm = ref({ u: '', p: '', uid: '', exchange: '' })
+const regForm = ref({ u: '', p: '', uid: '', email: '', exchange: '' })
 const regFile = ref(null)
 const regErr = ref('')
 const regDone = ref('')
@@ -116,14 +116,18 @@ async function doLogin() {
     loginOpen.value = false
     loginForm.value = { u: '', p: '' }
     showToast('登入成功,歡迎回來!', 'ok')
+    welcomeOpen.value = true // 使用須知 modal(續用資格 / 加入主畫面 / 訊號提醒)
     loadAll()
   } catch (e) {
     loginErr.value = '登入失敗'
     showToast('登入失敗,請稍後再試', 'err')
   }
 }
+const welcomeOpen = ref(false)
 function onRegFile(e) {
-  regFile.value = (e.target.files && e.target.files[0]) || null
+  const f = (e.target.files && e.target.files[0]) || null
+  if (f && !validImage(f)) { e.target.value = ''; regFile.value = null; return }
+  regFile.value = f
 }
 async function doRegister() {
   regErr.value = ''
@@ -138,11 +142,23 @@ async function doRegister() {
     showToast(regErr.value, 'err')
     return
   }
+  if (!regForm.value.uid.trim()) {
+    regErr.value = '請填寫 UID'
+    showToast(regErr.value, 'err')
+    return
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regForm.value.email.trim())) {
+    regErr.value = '請填寫有效的 Email'
+    showToast(regErr.value, 'err')
+    return
+  }
   const fd = new FormData()
   fd.append('username', regForm.value.u)
   fd.append('password', regForm.value.p)
   fd.append('uid', regForm.value.uid)
-  fd.append('exchange', regForm.value.exchange)
+  // email goes into the notes(備註) field alongside the optional exchange name,
+  // so the admin review card shows it without any backend schema change
+  fd.append('exchange', [regForm.value.email.trim(), regForm.value.exchange.trim()].filter(Boolean).join(' · '))
   if (regFile.value) fd.append('proof', regFile.value)
   try {
     const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
@@ -153,7 +169,7 @@ async function doRegister() {
     }
     regDone.value = '註冊成功!帳號審核中,待管理員通過後即可登入。'
     showToast('註冊成功!帳號審核中,待管理員通過', 'ok')
-    regForm.value = { u: '', p: '', uid: '', exchange: '' }
+    regForm.value = { u: '', p: '', uid: '', email: '', exchange: '' }
     regFile.value = null
     authTab.value = 'login'
   } catch (e) {
@@ -286,12 +302,30 @@ async function loadArticles() {
     /* secondary */
   }
 }
+// validImage: 3MB cap + common formats + iPhone photos (heic/heif). Shows a
+// toast and returns false when rejected (server enforces the same rules).
+const IMG_MAX = 3 * 1024 * 1024
+const IMG_EXT = /\.(png|jpe?g|webp|gif|heic|heif)$/i
+function validImage(f) {
+  if (!f) return false
+  if (!IMG_EXT.test(f.name)) {
+    showToast('僅接受圖片檔(png / jpg / webp / gif / heic)', 'err')
+    return false
+  }
+  if (f.size > IMG_MAX) {
+    showToast('圖片過大,上限 3MB', 'err')
+    return false
+  }
+  return true
+}
 async function uploadImage(file, sub) {
+  if (!validImage(file)) return ''
   const fd = new FormData()
   fd.append('file', file)
   fd.append('sub', sub)
   const res = await authFetch('/api/admin/upload', { method: 'POST', body: fd })
-  return res.ok ? (await res.json()).path : ''
+  if (!res.ok) { showToast((await res.text()).trim() || '上傳失敗', 'err'); return '' }
+  return (await res.json()).path
 }
 function newArticle() { artEdit.value = { id: 0, title: '', cover: '', tags: [], blocks: [{ type: 'text', text: '' }] } }
 function editArticle(a) { artEdit.value = JSON.parse(JSON.stringify(a)); articleView.value = null }
@@ -871,13 +905,23 @@ watch(mainTab, loadMe)
         </template>
 
         <template v-else>
+          <div class="regcond">
+            <b>註冊條件</b>
+            <span>① 使用我們推薦碼註冊的 Bitunix 帳戶,持有 300U 以上</span>
+            <span>② 填寫交易所 UID 與 Email</span>
+            <span>③ 上傳資產證明圖片</span>
+          </div>
+          <a class="bitunix-cta" href="https://www.bitunix.com/register?vipCode=jmch" target="_blank" rel="noopener">
+            🚀 還沒有 Bitunix 帳戶?點此註冊(專屬推薦碼 jmch)
+          </a>
           <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
           <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
           <input v-model="regForm.uid" class="authin" placeholder="UID" />
-          <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註)" />
+          <input v-model="regForm.email" class="authin" type="email" placeholder="Email" />
+          <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註,選填)" />
           <label class="authfile">
-            <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片' }}</span>
-            <input type="file" accept="image/*" @change="onRegFile" hidden />
+            <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片(300U 以上)' }}</span>
+            <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
           </label>
           <button class="authbtn" @click="doRegister">註冊</button>
           <div v-if="regErr" class="autherr">{{ regErr }}</div>
@@ -928,6 +972,34 @@ watch(mainTab, loadMe)
       <p v-if="loginErr" class="err">{{ loginErr }}</p>
       <button class="loginbtn" @click="doLogin">登入</button>
       <p class="loginhint">尚無帳號?請依公告填寫 Google 表單申請(附入金與 UID 證明)。</p>
+    </div>
+  </div>
+
+  <!-- 登入成功 使用須知 modal -->
+  <div v-if="welcomeOpen" class="overlay welcomeov" @click="welcomeOpen = false">
+    <div class="welcomebox" @click.stop>
+      <h3>📌 使用須知</h3>
+
+      <div class="wc-sec">
+        <div class="wc-title">👉 續用資格</div>
+        <p>根據申請進入的日期按月計算</p>
+        <p>🌟 第一個月無限制使用</p>
+        <p>🌟 第二個月開始享有三個月的交易額優惠</p>
+        <p>➡️ 每月達成 <b>50 萬合約交易額</b> 即可計入下月續用</p>
+      </div>
+
+      <div class="wc-sec">
+        <div class="wc-title">👉 加入主畫面・開啟通知</div>
+        <p>網址打開,右下選擇「分享」即可加入「手機主畫面」</p>
+        <p>打開書籤 ➡️ 畫面最上方開啟「通知📢」即可獲得即時訊號📶</p>
+      </div>
+
+      <div class="wc-sec">
+        <div class="wc-title">👉 下單前必讀</div>
+        <p>每種訊號請務必先熟知 <b>問號小泡泡 ?</b> 的建議提醒再下單</p>
+      </div>
+
+      <button class="authbtn" @click="welcomeOpen = false">我知道了</button>
     </div>
   </div>
 
@@ -1232,13 +1304,13 @@ watch(mainTab, loadMe)
         <div class="cfg-row">
           <span class="cfg-k">品牌 Logo</span>
           <img v-if="config.logo" :src="config.logo" class="cfg-logo" />
-          <label class="authfile cfg-file"><span>上傳 Logo</span><input type="file" accept="image/*" hidden @change="onLogoPick" /></label>
+          <label class="authfile cfg-file"><span>上傳 Logo</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onLogoPick" /></label>
           <button v-if="config.logo" class="delbtn" @click="setConfig('logo', '')">清除</button>
         </div>
         <div class="cfg-row">
           <span class="cfg-k">首頁 QR</span>
           <img v-if="config.qr" :src="config.qr" class="cfg-qr" />
-          <label class="authfile cfg-file"><span>上傳 QR 圖</span><input type="file" accept="image/*" hidden @change="onQrPick" /></label>
+          <label class="authfile cfg-file"><span>上傳 QR 圖</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onQrPick" /></label>
           <button v-if="config.qr" class="delbtn" @click="setConfig('qr', '')">清除</button>
         </div>
         <div class="cfg-row">
@@ -1621,7 +1693,7 @@ watch(mainTab, loadMe)
       <label class="ae-label">主圖</label>
       <div class="ae-cover">
         <img v-if="artEdit.cover" :src="artEdit.cover" />
-        <label class="authfile"><span>{{ artEdit.cover ? '更換主圖' : '＋ 上傳主圖' }}</span><input type="file" accept="image/*" hidden @change="onCoverPick" /></label>
+        <label class="authfile"><span>{{ artEdit.cover ? '更換主圖' : '＋ 上傳主圖' }}</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onCoverPick" /></label>
       </div>
       <label class="ae-label">內文區塊(圖文穿插)</label>
       <div v-for="(b, i) in artEdit.blocks" :key="i" class="ae-block">
@@ -1634,7 +1706,7 @@ watch(mainTab, loadMe)
         <textarea v-if="b.type === 'text'" v-model="b.text" class="ae-textarea" placeholder="輸入段落文字…"></textarea>
         <div v-else class="ae-imgblock">
           <img v-if="b.image" :src="b.image" />
-          <label class="authfile"><span>{{ b.image ? '更換圖片' : '＋ 上傳圖片' }}</span><input type="file" accept="image/*" hidden @change="onBlockImg($event, i)" /></label>
+          <label class="authfile"><span>{{ b.image ? '更換圖片' : '＋ 上傳圖片' }}</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onBlockImg($event, i)" /></label>
         </div>
       </div>
       <div class="ae-addrow">
@@ -2265,4 +2337,30 @@ footer { padding: 18px 0 30px; text-align: center; }
 .userfilter .datein { background: #0d0f13; border: 1px solid #2a2d35; color: #e8eaed;
   border-radius: 7px; padding: 3px 8px; font-size: 12px; color-scheme: dark; }
 .userfilter .tf-sep { color: #8b909a; font-size: 12px; }
+</style>
+
+<style>
+/* ---- register: conditions note + Bitunix referral CTA ---- */
+.regcond { display: flex; flex-direction: column; gap: 4px; background: #2a2410;
+  border: 1px solid #4a412a; border-radius: 10px; padding: 10px 12px; font-size: 12.5px;
+  color: #cdd0d6; line-height: 1.6; }
+.regcond b { color: #e8b84b; font-size: 13px; }
+.bitunix-cta { display: block; text-align: center; padding: 12px 10px; border-radius: 10px;
+  background: linear-gradient(180deg, #e6bd54, #c2902e); color: #201800; font-weight: 800;
+  font-size: 14px; text-decoration: none; box-shadow: 0 4px 16px rgba(216,173,72,.25); }
+.bitunix-cta:hover { filter: brightness(1.06); }
+</style>
+
+<style>
+/* ---- 登入成功 使用須知 modal ---- */
+.welcomeov { justify-content: center; align-items: center; }
+.welcomebox { width: min(420px, 92vw); max-height: 86vh; overflow-y: auto;
+  background: #14161c; border: 1px solid #4a412a; border-radius: 16px;
+  padding: 22px 20px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+.welcomebox h3 { margin: 0; color: #e8b84b; text-align: center; font-size: 17px; }
+.wc-sec { background: #0f1116; border: 1px solid #2a2e37; border-radius: 10px; padding: 10px 12px; }
+.wc-title { color: #e8b84b; font-weight: 800; font-size: 14px; margin-bottom: 6px; }
+.wc-sec p { margin: 3px 0; font-size: 13px; color: #cdd0d6; line-height: 1.7; }
+.wc-sec b { color: #e8b84b; }
 </style>

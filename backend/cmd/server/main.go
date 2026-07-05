@@ -173,12 +173,22 @@ func main() {
 			HostPolicy: autocert.HostWhitelist(doms...),
 			Cache:      autocert.DirCache(certDir),
 		}
-		go func() { log.Fatal(http.ListenAndServe(":80", m.HTTPHandler(nil))) }()
+		// :80 only answers ACME challenges + redirects — tight timeouts (slowloris)
+		go func() {
+			redirect := &http.Server{
+				Addr: ":80", Handler: m.HTTPHandler(nil),
+				ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+				WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
+			}
+			log.Fatal(redirect.ListenAndServe())
+		}()
 		s := &http.Server{
 			Addr:              ":443",
 			Handler:           handler,
 			TLSConfig:         m.TLSConfig(),
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second, // allows slow 3MB uploads on mobile
+			IdleTimeout:       120 * time.Second,
 		}
 		log.Printf("serving HTTPS for %v (certs cached in %q, static from %q)", doms, certDir, staticDir)
 		log.Fatal(s.ListenAndServeTLS("", ""))
@@ -190,7 +200,12 @@ func main() {
 		addr = ":" + p
 	}
 	log.Printf("listening on %s (static from %q)", addr, staticDir)
-	log.Fatal(http.ListenAndServe(addr, handler))
+	dev := &http.Server{
+		Addr: addr, Handler: handler,
+		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second,
+		IdleTimeout: 120 * time.Second,
+	}
+	log.Fatal(dev.ListenAndServe())
 }
 
 // withStatic serves the SPA from dir, delegating API paths to the api handler

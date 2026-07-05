@@ -24,9 +24,13 @@ import (
 )
 
 // tables are copied in FK-agnostic order (there are no FKs; order is cosmetic).
+// push_subs is intentionally SKIPPED: the MySQL schema keys it by sha256(endpoint)
+// ("id"), which the old SQLite table lacks — a generic column copy would be
+// silently dropped by INSERT IGNORE anyway, and browsers re-register their push
+// subscription automatically on next load.
 var tables = []string{
 	"score_events", "paper_trades", "liquidations",
-	"users", "site_config", "articles", "push_subs",
+	"users", "site_config", "articles",
 }
 
 func main() {

@@ -79,6 +79,12 @@ func (m *Manager) enabled() bool {
 
 // Send delivers a notification to every stored subscription (non-blocking).
 func (m *Manager) Send(title, body, url string) {
+	m.SendTo(m.store.AllSubs(), title, body, url)
+}
+
+// SendTo delivers a notification only to the given subscription JSON rows (used
+// for targeted alerts, e.g. admins-only). Non-blocking.
+func (m *Manager) SendTo(subs []string, title, body, url string) {
 	if !m.enabled() {
 		return
 	}
@@ -86,7 +92,6 @@ func (m *Manager) Send(title, body, url string) {
 		url = "/"
 	}
 	payload, _ := json.Marshal(map[string]string{"title": title, "body": body, "url": url})
-	subs := m.store.AllSubs()
 	log.Printf("web-push: sending %q to %d subscriber(s)", title, len(subs))
 	for _, raw := range subs {
 		var sub webpush.Subscription

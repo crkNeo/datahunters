@@ -108,7 +108,7 @@ type MarketBias struct {
 const (
 	paperMaxOpen   = 15
 	paperExpiry    = 24 * time.Hour
-	paperKeepClose = 500 // in-memory cap (full history still in SQLite)
+	paperKeepClose = 500 // in-memory cap (full history still in MySQL)
 )
 
 // paperBook is one simulated-trading account with its own entry rules. The main
@@ -171,24 +171,35 @@ func (s *Store) PaperTick() {
 	now := time.Now()
 
 	s.paperMu.Lock()
-	defer s.paperMu.Unlock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperEMAGamble, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
+	// persist only DIRTY trades (open, or closed within the last few ticks) —
+	// closed rows never change again, and rewriting the full history every tick
+	// held paperMu through ~2000 MySQL round-trips, blocking the /api/paper
+	// endpoints. Collected under the lock, written after release.
+	type dirtyRow struct {
+		book string
+		tr   *PaperTrade
+	}
+	var dirty []dirtyRow
 	if s.db != nil {
-		for _, t := range s.paperMain.trades {
-			s.db.upsertTrade("main", t)
+		collect := func(book string, b *paperBook) {
+			for _, t := range b.trades {
+				if t.Status == "open" || (t.CloseTime != nil && now.Sub(*t.CloseTime) < 3*time.Minute) {
+					dirty = append(dirty, dirtyRow{book, t})
+				}
+			}
 		}
-		for _, t := range s.paperGamble.trades {
-			s.db.upsertTrade("gamble", t)
-		}
-		for _, t := range s.paperEMAGamble.trades {
-			s.db.upsertTrade("emagamble", t)
-		}
-		for _, t := range s.paperEMA.trades {
-			s.db.upsertTrade("emaonly", t)
-		}
+		collect("main", s.paperMain)
+		collect("gamble", s.paperGamble)
+		collect("emagamble", s.paperEMAGamble)
+		collect("emaonly", s.paperEMA)
+	}
+	s.paperMu.Unlock()
+	for _, d := range dirty { // only PaperTick's goroutine mutates these fields
+		s.db.upsertTrade(d.book, d.tr)
 	}
 }
 

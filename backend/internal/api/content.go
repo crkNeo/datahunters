@@ -74,8 +74,9 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		http.Error(w, "表單過大或格式錯誤", http.StatusBadRequest)
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+512<<10)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		http.Error(w, "圖片過大(上限 3MB)或表單格式錯誤", http.StatusBadRequest)
 		return
 	}
 	sub := r.FormValue("sub")
@@ -90,9 +91,13 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	if hdr.Size > maxUploadBytes {
+		http.Error(w, errImageTooLarge.Error(), http.StatusBadRequest)
+		return
+	}
 	path, err := saveUpload(sub, "img", hdr.Filename, f)
 	if err != nil {
-		http.Error(w, "儲存失敗", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, map[string]any{"path": path})

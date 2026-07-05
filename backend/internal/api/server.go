@@ -17,10 +17,18 @@ import (
 type Server struct {
 	store  *cache.Store
 	secret string // token-signing secret
+
+	loginRL    *rateLimiter // brute-force guard: per IP+username
+	registerRL *rateLimiter // disk-fill guard: per IP
 }
 
 func NewServer(store *cache.Store, secret string) *Server {
-	return &Server{store: store, secret: secret}
+	return &Server{
+		store:      store,
+		secret:     secret,
+		loginRL:    newRateLimiter(5, time.Minute),    // 5 attempts / min / (ip+acct)
+		registerRL: newRateLimiter(3, 10*time.Minute), // 3 registrations / 10 min / ip
+	}
 }
 
 // roleOf extracts the caller's role from the Bearer token, then confirms it
@@ -72,8 +80,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/auth/me", s.handleMe)
 	mux.HandleFunc("/api/admin/users", s.gate(A, s.handleAdminUsers))
 
-	// uploaded images (asset proofs, article images, logo, QR), read-only
-	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
+	// uploaded images (asset proofs, article images, logo, QR), read-only.
+	// noDirListing: Go's FileServer would otherwise render an index for
+	// /uploads/proofs/ etc., letting anyone enumerate member asset proofs.
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", noDirListing(http.FileServer(http.Dir(uploadDir)))))
 
 	// public (no login)
 	mux.HandleFunc("/api/ranking", s.gate(P, s.handleRanking))
@@ -126,6 +136,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
+	if !s.loginRL.allow(clientIP(r) + "|" + in.Username) {
+		http.Error(w, "嘗試次數過多,請一分鐘後再試", http.StatusTooManyRequests)
+		return
+	}
 	role, status, ok := s.store.Authenticate(in.Username, in.Password)
 	if !ok {
 		http.Error(w, "帳號或密碼錯誤", http.StatusUnauthorized)
@@ -152,8 +166,13 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseMultipartForm(8 << 20); err != nil { // 8MB cap
-		http.Error(w, "表單過大或格式錯誤", http.StatusBadRequest)
+	if !s.registerRL.allow(clientIP(r)) {
+		http.Error(w, "註冊過於頻繁,請稍後再試", http.StatusTooManyRequests)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+512<<10) // image cap + form slack
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		http.Error(w, "圖片過大(上限 3MB)或表單格式錯誤", http.StatusBadRequest)
 		return
 	}
 	username := strings.TrimSpace(r.FormValue("username"))
@@ -161,12 +180,23 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	uid := strings.TrimSpace(r.FormValue("uid"))
 	exchange := strings.TrimSpace(r.FormValue("exchange"))
 
+	// validate the account BEFORE anything touches the disk, so an invalid /
+	// duplicate registration can never leave an orphan proof file behind.
+	if err := s.store.PrecheckRegister(username, password); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	proofPath := ""
 	if f, hdr, err := r.FormFile("proof"); err == nil {
 		defer f.Close()
+		if hdr.Size > maxUploadBytes {
+			http.Error(w, errImageTooLarge.Error(), http.StatusBadRequest)
+			return
+		}
 		p, err := saveUpload("proofs", username, hdr.Filename, f)
 		if err != nil {
-			http.Error(w, "資產證明圖片儲存失敗", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		proofPath = p
@@ -175,6 +205,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.store.NotifyNewRegister(username, uid, exchange) // alert admins to review
 	writeJSON(w, map[string]any{"ok": true, "status": "pending"})
 }
 
@@ -218,6 +249,24 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		var in struct{ Username, Role, Status string }
 		json.NewDecoder(r.Body).Decode(&in)
+		// whitelist the values (a typo like "vp" would silently brick the account)
+		// and never let an admin demote/disable THEMSELVES (self-lockout).
+		if in.Username == s.userOf(r) {
+			http.Error(w, "無法修改自己的權限/狀態", http.StatusBadRequest)
+			return
+		}
+		switch in.Role {
+		case auth.RoleMember, auth.RoleVIP, auth.RoleAdmin:
+		default:
+			http.Error(w, "無效的角色", http.StatusBadRequest)
+			return
+		}
+		switch in.Status {
+		case "active", "pending", "banned":
+		default:
+			http.Error(w, "無效的狀態", http.StatusBadRequest)
+			return
+		}
 		s.store.SetUserRole(in.Username, in.Role, in.Status)
 		writeJSON(w, map[string]any{"ok": true})
 	case http.MethodDelete:
@@ -411,10 +460,22 @@ func writeJSON(w http.ResponseWriter, v any) {
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// noDirListing 404s directory requests so FileServer can't render an index of
+// /uploads/* (member asset proofs must not be enumerable).
+func noDirListing(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
 			return
 		}
 		h.ServeHTTP(w, r)

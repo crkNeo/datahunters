@@ -94,10 +94,10 @@ type Store struct {
 	homeCache   *ttlCache // shared cache for per-request endpoints (public scale)
 	detailCache *ttlCache
 	klineCache  *ttlCache
-	oiCache     *ttlCache // OI-hist + long/short: 5-min TTL — /futures/data/* has its own ~1000req/5min IP cap
-	klCache     *ttlCache // 1h klines for detail/radar: cached 4 min (futures WS unusable on this net)
+	oiCache     *ttlCache // OI-hist + long/short: 10-min TTL — /futures/data/* has its own ~1000req/5min IP cap
+	klCache     *ttlCache // 1h klines for detail/radar: cached 8 min (futures WS unusable on this net)
 
-	db           *DB              // optional SQLite persistence (nil = disabled)
+	db           *DB              // optional MySQL persistence (nil = disabled)
 	notifier     *notify.Telegram // outbound alerts (no-op unless configured)
 	alertSignals bool             // push ±20 signal-cross alerts (ALERT_SIGNAL_CROSS=1)
 
@@ -458,9 +458,10 @@ func validPassword(p string) bool {
 	return up && lo && dig && sp
 }
 
-// Register creates a self-service account in "pending" review status (member
-// role). proof is the stored asset-proof image path; exchange goes in notes.
-func (s *Store) Register(username, password, uid, exchange, proof string) error {
+// PrecheckRegister runs the account/password/duplicate validation WITHOUT
+// creating anything — the register handler calls it before saving the proof
+// image, so an invalid registration can never leave an orphan file on disk.
+func (s *Store) PrecheckRegister(username, password string) error {
 	if s.db == nil {
 		return errors.New("persistence disabled")
 	}
@@ -472,6 +473,15 @@ func (s *Store) Register(username, password, uid, exchange, proof string) error 
 	}
 	if s.db.userExists(username) {
 		return errors.New("帳號已存在")
+	}
+	return nil
+}
+
+// Register creates a self-service account in "pending" review status (member
+// role). proof is the stored asset-proof image path; exchange goes in notes.
+func (s *Store) Register(username, password, uid, exchange, proof string) error {
+	if err := s.PrecheckRegister(username, password); err != nil {
+		return err
 	}
 	h, err := auth.HashPassword(password)
 	if err != nil {
