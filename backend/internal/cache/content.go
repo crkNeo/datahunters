@@ -10,7 +10,7 @@ import (
 
 func (db *DB) setConfig(k, v string) {
 	db.sql.Exec(`INSERT INTO site_config(k,v) VALUES(?,?)
-	  ON CONFLICT(k) DO UPDATE SET v=excluded.v`, k, v)
+	  ON DUPLICATE KEY UPDATE v=VALUES(v)`, k, v)
 }
 
 func (db *DB) allConfig() map[string]string {
@@ -63,7 +63,7 @@ func (s *Store) GetConfig(k string) string {
 
 func (db *DB) addSub(endpoint, username, sub string) {
 	db.sql.Exec(`INSERT INTO push_subs(endpoint,username,sub) VALUES(?,?,?)
-	  ON CONFLICT(endpoint) DO UPDATE SET username=excluded.username, sub=excluded.sub`,
+	  ON DUPLICATE KEY UPDATE username=VALUES(username), sub=VALUES(sub)`,
 		endpoint, username, sub)
 }
 

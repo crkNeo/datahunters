@@ -2,97 +2,114 @@ package cache
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // db.go persists the two things we want to verify across restarts: the score
-// cross log (±20 signals) and the paper-trade books. NOT snapshots — this only
-// durably stores the signals/trades already produced in memory.
+// cross log (±20 signals) and the paper-trade books, plus users / site config /
+// articles / push subs for the member platform. Backed by MySQL (same server).
 
-const dbSchema = `
+// Schema is the MySQL DDL. Each statement is executed separately (the driver
+// does not run multi-statement Exec unless multiStatements=true). VARCHAR(191)
+// is used for indexed/PK string columns so they fit the utf8mb4 index limit.
+const Schema = `
 CREATE TABLE IF NOT EXISTS score_events (
-  ts    INTEGER NOT NULL,
-  coin  TEXT NOT NULL,
-  score INTEGER,
-  bias  TEXT,
-  price REAL
-);
-CREATE INDEX IF NOT EXISTS idx_se_ts ON score_events(ts);
+  ts    BIGINT NOT NULL,
+  coin  VARCHAR(32) NOT NULL,
+  score INT,
+  bias  VARCHAR(16),
+  price DOUBLE,
+  KEY idx_se_ts (ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS paper_trades (
-  id         TEXT PRIMARY KEY,
-  book       TEXT NOT NULL,
-  coin       TEXT, dir TEXT, score INTEGER,
-  entry      REAL, tp REAL, sl REAL, cur REAL, pnl_pct REAL,
-  status     TEXT, outcome TEXT,
-  open_time  INTEGER, close_time INTEGER,
-  oi REAL DEFAULT 0, cvd REAL DEFAULT 0, funding REAL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_pt_open ON paper_trades(open_time);
+  id         VARCHAR(191) PRIMARY KEY,
+  book       VARCHAR(32) NOT NULL,
+  coin       VARCHAR(32), dir VARCHAR(8), score INT,
+  entry      DOUBLE, tp DOUBLE, sl DOUBLE, cur DOUBLE, pnl_pct DOUBLE,
+  status     VARCHAR(16), outcome VARCHAR(16),
+  open_time  BIGINT, close_time BIGINT,
+  oi DOUBLE DEFAULT 0, cvd DOUBLE DEFAULT 0, funding DOUBLE DEFAULT 0,
+  KEY idx_pt_open (open_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS liquidations (
-  ts INTEGER NOT NULL, coin TEXT NOT NULL, side TEXT, px REAL, usd REAL
-);
-CREATE INDEX IF NOT EXISTS idx_liq_ts ON liquidations(ts);
+  ts BIGINT NOT NULL, coin VARCHAR(32) NOT NULL, side VARCHAR(8), px DOUBLE, usd DOUBLE,
+  KEY idx_liq_ts (ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS users (
-  username  TEXT PRIMARY KEY,
-  pass_hash TEXT NOT NULL,
-  role      TEXT NOT NULL DEFAULT 'member',
-  status    TEXT NOT NULL DEFAULT 'active', -- active | pending | banned
-  uid       TEXT DEFAULT '',
-  created   INTEGER,
-  expiry    INTEGER DEFAULT 0,             -- 0 = none
-  notes     TEXT DEFAULT '',               -- exchange name (備註)
-  proof     TEXT DEFAULT ''                -- uploaded asset-proof image path
-);
+  username  VARCHAR(191) PRIMARY KEY,
+  pass_hash VARCHAR(255) NOT NULL,
+  role      VARCHAR(16) NOT NULL DEFAULT 'member',
+  status    VARCHAR(16) NOT NULL DEFAULT 'active',
+  uid       VARCHAR(64)  NOT NULL DEFAULT '',
+  created   BIGINT,
+  expiry    BIGINT DEFAULT 0,
+  notes     VARCHAR(255) NOT NULL DEFAULT '',
+  proof     VARCHAR(512) NOT NULL DEFAULT ''
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS site_config (
-  k TEXT PRIMARY KEY,
-  v TEXT
-);
+  k VARCHAR(191) PRIMARY KEY,
+  v LONGTEXT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS articles (
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  title   TEXT NOT NULL DEFAULT '',
-  cover   TEXT DEFAULT '',            -- cover image path
-  tags    TEXT DEFAULT '',            -- comma-separated
-  blocks  TEXT DEFAULT '[]',          -- JSON: [{type:"text"|"image", text, image}]
-  created INTEGER,
-  updated INTEGER
-);
+  id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  title   VARCHAR(512) NOT NULL DEFAULT '',
+  cover   VARCHAR(512) NOT NULL DEFAULT '',
+  tags    VARCHAR(512) NOT NULL DEFAULT '',
+  blocks  LONGTEXT,
+  created BIGINT,
+  updated BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS push_subs (
-  endpoint TEXT PRIMARY KEY,
-  username TEXT,
-  sub      TEXT                       -- JSON webpush.Subscription
-);
+  endpoint VARCHAR(191) PRIMARY KEY,
+  username VARCHAR(191),
+  sub      LONGTEXT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
-// DB wraps the SQLite handle for persistence.
+// DB wraps the SQL handle for persistence.
 type DB struct{ sql *sql.DB }
 
-func openDB(path string) (*DB, error) {
-	d, err := sql.Open("sqlite", path)
+// OpenMySQL opens a MySQL connection, verifies it, and ensures the schema. It
+// returns the raw *sql.DB so the migration tool can reuse it. dsn is the
+// go-sql-driver DSN, e.g. "user:pass@tcp(127.0.0.1:3306)/datahunter?charset=utf8mb4".
+func OpenMySQL(dsn string) (*sql.DB, error) {
+	d, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
-	d.SetMaxOpenConns(1) // sqlite is single-writer
-	if _, err := d.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+	d.SetConnMaxLifetime(3 * time.Minute)
+	d.SetMaxOpenConns(10)
+	d.SetMaxIdleConns(5)
+	if err := d.Ping(); err != nil {
 		d.Close()
 		return nil, err
 	}
-	if _, err := d.Exec(dbSchema); err != nil {
-		d.Close()
+	for _, stmt := range strings.Split(Schema, ";") {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		if _, err := d.Exec(stmt); err != nil {
+			d.Close()
+			return nil, err
+		}
+	}
+	return d, nil
+}
+
+func openDB(dsn string) (*DB, error) {
+	d, err := OpenMySQL(dsn)
+	if err != nil {
 		return nil, err
 	}
-	// migrations for older DBs (errors ignored if the column already exists)
-	d.Exec("ALTER TABLE paper_trades ADD COLUMN oi REAL DEFAULT 0")
-	d.Exec("ALTER TABLE paper_trades ADD COLUMN cvd REAL DEFAULT 0")
-	d.Exec("ALTER TABLE paper_trades ADD COLUMN funding REAL DEFAULT 0")
-	d.Exec("ALTER TABLE users ADD COLUMN proof TEXT DEFAULT ''")
 	return &DB{d}, nil
 }
 
@@ -110,7 +127,7 @@ type User struct {
 
 func (db *DB) upsertUser(username, passHash, role, status string) {
 	db.sql.Exec(`INSERT INTO users(username,pass_hash,role,status,created) VALUES(?,?,?,?,?)
-	  ON CONFLICT(username) DO UPDATE SET role=excluded.role, status=excluded.status`,
+	  ON DUPLICATE KEY UPDATE role=VALUES(role), status=VALUES(status)`,
 		username, passHash, role, status, time.Now().UnixMilli())
 }
 
@@ -208,9 +225,9 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 	db.sql.Exec(`INSERT INTO paper_trades
 	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding)
 	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-	  ON CONFLICT(id) DO UPDATE SET
-	    cur=excluded.cur, pnl_pct=excluded.pnl_pct, status=excluded.status,
-	    outcome=excluded.outcome, close_time=excluded.close_time, sl=excluded.sl`,
+	  ON DUPLICATE KEY UPDATE
+	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
+	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl)`,
 		t.ID, book, t.Coin, t.Dir, t.Score, t.Entry, t.TP, t.SL, t.Cur, t.PnLPct,
 		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding)
 }

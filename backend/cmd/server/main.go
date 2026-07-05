@@ -7,10 +7,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	_ "time/tzdata" // embed tz database so America/New_York works on Windows
+
+	"golang.org/x/crypto/acme/autocert"
 
 	"datahunter/internal/api"
 	"datahunter/internal/cache"
@@ -139,10 +142,86 @@ func main() {
 	}()
 
 	srv := api.NewServer(store, secret)
+
+	// one process serves everything: the frontend SPA plus /api and /uploads.
+	// STATIC_DIR overrides; otherwise auto-detect so it works whether you run from
+	// backend/, cmd/server/, or the repo root.
+	staticDir := os.Getenv("STATIC_DIR")
+	if staticDir == "" {
+		for _, c := range []string{"../frontend/dist", "../../../frontend/dist", "frontend/dist", "dist"} {
+			if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+				staticDir = c
+				break
+			}
+		}
+		if staticDir == "" {
+			staticDir = "../frontend/dist"
+		}
+	}
+	handler := withStatic(srv.Routes(), staticDir)
+
+	// DOMAINS set → terminate HTTPS ourselves with Let's Encrypt (autocert):
+	// :443 serves the app, :80 answers ACME challenges and redirects to https.
+	// Needs root (or setcap) to bind 80/443 — you already run with sudo.
+	if doms := splitTrim(os.Getenv("DOMAINS")); len(doms) > 0 {
+		certDir := os.Getenv("CERT_DIR")
+		if certDir == "" {
+			certDir = "certs" // cached certs survive restarts (avoid LE rate limits)
+		}
+		m := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(doms...),
+			Cache:      autocert.DirCache(certDir),
+		}
+		go func() { log.Fatal(http.ListenAndServe(":80", m.HTTPHandler(nil))) }()
+		s := &http.Server{
+			Addr:              ":443",
+			Handler:           handler,
+			TLSConfig:         m.TLSConfig(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		log.Printf("serving HTTPS for %v (certs cached in %q, static from %q)", doms, certDir, staticDir)
+		log.Fatal(s.ListenAndServeTLS("", ""))
+	}
+
+	// no DOMAINS → plain HTTP (local dev, or behind an external proxy)
 	addr := ":8080"
 	if p := os.Getenv("PORT"); p != "" {
 		addr = ":" + p
 	}
-	log.Printf("listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
+	log.Printf("listening on %s (static from %q)", addr, staticDir)
+	log.Fatal(http.ListenAndServe(addr, handler))
+}
+
+// withStatic serves the SPA from dir, delegating API paths to the api handler
+// and falling back to index.html for client-side routes (Vue Router history mode).
+func withStatic(apiHandler http.Handler, dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	index := filepath.Join(dir, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/uploads/") || p == "/healthz" {
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+		// real file (asset) → serve it; anything else → SPA index.html
+		if p != "/" {
+			if st, err := os.Stat(filepath.Join(dir, filepath.Clean("/"+p))); err == nil && !st.IsDir() {
+				fs.ServeHTTP(w, r)
+				return
+			}
+		}
+		http.ServeFile(w, r, index)
+	})
+}
+
+// splitTrim splits a comma list and drops blanks (e.g. DOMAINS).
+func splitTrim(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -142,8 +142,8 @@ func NewStore(coins []string) *Store {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
 	}
-	if db, err := openDB(dbPath()); err != nil {
-		log.Printf("sqlite persistence disabled: %v", err)
+	if db, err := openDB(mysqlDSN()); err != nil {
+		log.Printf("mysql persistence disabled: %v", err)
 	} else {
 		s.db = db
 		s.pushMgr = push.New(s) // VAPID keypair (persisted in site_config)
@@ -152,7 +152,7 @@ func NewStore(coins []string) *Store {
 		s.paperGamble.trades = db.loadTrades("gamble")
 		s.paperEMAGamble.trades = db.loadTrades("emagamble")
 		s.paperEMA.trades = db.loadTrades("emaonly")
-		log.Printf("sqlite loaded: %d score events, main=%d gamble=%d emagamble=%d emaonly=%d trades",
+		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emagamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
 			len(s.paperEMAGamble.trades), len(s.paperEMA.trades))
 	}
@@ -206,11 +206,25 @@ func (s *Store) emaCoins() []string {
 	return s.coins
 }
 
-func dbPath() string {
-	if p := os.Getenv("DB_PATH"); p != "" {
-		return p
+// mysqlDSN builds the go-sql-driver DSN. Set MYSQL_DSN directly, or the pieces
+// DB_HOST / DB_PORT / DB_USER / DB_PASS / DB_NAME (sensible localhost defaults).
+func mysqlDSN() string {
+	if v := os.Getenv("MYSQL_DSN"); v != "" {
+		return v
 	}
-	return "datahunter.db"
+	get := func(k, def string) string {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+		return def
+	}
+	host := get("DB_HOST", "127.0.0.1")
+	port := get("DB_PORT", "3306")
+	user := get("DB_USER", "root")
+	pass := os.Getenv("DB_PASS")
+	name := get("DB_NAME", "datahunter")
+	// epochs are stored as BIGINT so parseTime is unnecessary; force UTC + utf8mb4.
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=false&loc=UTC", user, pass, host, port, name)
 }
 
 // notifySignalCross pushes a Telegram alert when a coin crosses into a ±20
