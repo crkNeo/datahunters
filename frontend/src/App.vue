@@ -997,6 +997,9 @@ watch(mainTab, loadMe)
       <div class="wc-sec">
         <div class="wc-title">👉 下單前必讀</div>
         <p>每種訊號請務必先熟知 <b>問號小泡泡 ?</b> 的建議提醒再下單</p>
+        <p>交易有任何問題請私訊 IG 或加入社群詢問:</p>
+        <p>📷 <a class="wc-link" href="https://www.instagram.com/jmch_crypto?igsh=NzJ0bTJ0b3VhdWdw&utm_source=qr" target="_blank" rel="noopener">JMCH|加密貨幣技術分析</a></p>
+        <p>💬 <a class="wc-link" href="https://line.me/ti/g2/v_YR0Oqc-BHmRf1jXsfbNgvbO_GOm-FuRFZqdA?utm_source=invitation&utm_medium=link_copy&utm_campaign=default" target="_blank" rel="noopener">社群《Crypto JMCH》</a></p>
       </div>
 
       <button class="authbtn" @click="welcomeOpen = false">我知道了</button>
@@ -2363,4 +2366,9 @@ footer { padding: 18px 0 30px; text-align: center; }
 .wc-title { color: #e8b84b; font-weight: 800; font-size: 14px; margin-bottom: 6px; }
 .wc-sec p { margin: 3px 0; font-size: 13px; color: #cdd0d6; line-height: 1.7; }
 .wc-sec b { color: #e8b84b; }
+</style>
+
+<style>
+.wc-link { color: #e8b84b; font-weight: 700; text-decoration: underline; }
+.wc-link:hover { filter: brightness(1.15); }
 </style>
