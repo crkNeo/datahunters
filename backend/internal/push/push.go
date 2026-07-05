@@ -47,6 +47,23 @@ func New(store Backend) *Manager {
 	return m
 }
 
+// Reset generates a fresh VAPID keypair and persists it. Existing browser
+// subscriptions (made with the old public key) become invalid and must be
+// recreated — the caller should also clear stored subscriptions.
+func (m *Manager) Reset() error {
+	priv, pub, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.priv, m.pub = priv, pub
+	m.mu.Unlock()
+	m.store.SetConfig("vapid_pub", pub)
+	m.store.SetConfig("vapid_priv", priv)
+	log.Printf("web-push: VAPID keys reset")
+	return nil
+}
+
 // PublicKey returns the VAPID public key for the browser to subscribe with.
 func (m *Manager) PublicKey() string {
 	m.mu.RLock()
@@ -82,7 +99,7 @@ func (m *Manager) Send(title, body, url string) {
 
 func (m *Manager) sendOne(payload []byte, sub webpush.Subscription) {
 	resp, err := webpush.SendNotification(payload, &sub, &webpush.Options{
-		Subscriber:      "mailto:admin@jmch.app",
+		Subscriber:      "mailto:admin@jmchcompass.com",
 		VAPIDPublicKey:  m.pub,
 		VAPIDPrivateKey: m.priv,
 		TTL:             60,

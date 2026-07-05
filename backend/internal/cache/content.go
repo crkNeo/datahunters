@@ -96,6 +96,19 @@ func (db *DB) delSub(endpoint string) {
 	db.sql.Exec(`DELETE FROM push_subs WHERE id=?`, subID(endpoint))
 }
 
+func (db *DB) clearSubs() { db.sql.Exec(`DELETE FROM push_subs`) }
+
+// ResetPush regenerates the VAPID keypair and drops all stored subscriptions
+// (they were made with the old key). Clients re-subscribe on next load.
+func (s *Store) ResetPush() {
+	if s.pushMgr != nil {
+		s.pushMgr.Reset()
+	}
+	if s.db != nil {
+		s.db.clearSubs()
+	}
+}
+
 // AllSubs / DelSub / AddSub satisfy push.Backend + the subscribe handler.
 func (s *Store) AllSubs() []string {
 	if s.db == nil {

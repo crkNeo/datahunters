@@ -40,6 +40,13 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "subs": subs})
 }
 
+// handlePushReset (admin): regenerate VAPID keys and clear subscriptions, then
+// return the new public key so the caller can re-subscribe immediately.
+func (s *Server) handlePushReset(w http.ResponseWriter, r *http.Request) {
+	s.store.ResetPush()
+	writeJSON(w, map[string]any{"ok": true, "key": s.store.PushKey()})
+}
+
 // handleConfig (public): returns site settings (logo, social links JSON, QR).
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SiteConfig())

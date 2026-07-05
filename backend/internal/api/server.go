@@ -91,6 +91,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
 	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
+	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))

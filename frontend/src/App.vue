@@ -786,6 +786,14 @@ async function testPush() {
     showToast('已送出測試推播 · 伺服器訂閱數 ' + (d.subs ?? '?'), d.subs > 0 ? 'ok' : 'err')
   } catch (e) { showToast('測試推播失敗', 'err') }
 }
+async function resetPush() {
+  try {
+    await authFetch('/api/admin/push-reset', { method: 'POST' })
+    notifState.value = '' // force ensurePush to resubscribe with the new key
+    await ensurePush(true)
+    showToast('已重置金鑰並重新訂閱,請再按「測試」', 'ok')
+  } catch (e) { showToast('重置金鑰失敗', 'err') }
+}
 async function installApp() {
   if (!deferredPrompt.value) return
   deferredPrompt.value.prompt()
@@ -885,6 +893,7 @@ watch(mainTab, loadMe)
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
         <button v-if="can('admin')" class="regbtn" @click="testPush" title="發送一則測試推播以驗證管線">🔔 測試</button>
+        <button v-if="can('admin')" class="regbtn" @click="resetPush" title="重新產生 VAPID 金鑰並重新訂閱(BadJwtToken 時用)">🔁 金鑰</button>
         <button class="regbtn" @click="logout">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
