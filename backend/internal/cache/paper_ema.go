@@ -305,8 +305,8 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 		}
 		tr := &PaperTrade{
 			ID:   fmt.Sprintf("emaonly|%s|%s|%d", coin, dir, now.UnixMilli()),
-			Coin: coin, Dir: dir, Entry: p, TP: tp, SL: sl,
-			Cur: p, Status: "open", OpenTime: now,
+			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),
+			Cur: roundPx(p), Status: "open", OpenTime: now,
 		}
 		b.trades = append(b.trades, tr)
 		s.notifyTradeOpen(b, tr)

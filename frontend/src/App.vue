@@ -1268,7 +1268,7 @@ watch(mainTab, loadMe)
       </div>
       <table class="grid">
         <thead>
-          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r">OKX%</th><th class="r">OI 1h%</th><th class="r">CVD%</th><th class="r">資金費率</th></tr>
+          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%（來源 OKX）">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th><th class="r">資金費率</th></tr>
         </thead>
         <tbody>
           <tr v-for="r in boardRows" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">

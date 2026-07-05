@@ -2,9 +2,48 @@ package cache
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
+
+// fmtPx formats a price for human display (notifications), picking decimals by
+// magnitude and trimming trailing zeros — never scientific notation (%.4g turned
+// 62995.2 into "6.3e+04").
+func fmtPx(v float64) string {
+	dec := 2
+	switch {
+	case v != 0 && v < 0.01:
+		dec = 8
+	case v < 1:
+		dec = 6
+	case v < 100:
+		dec = 4
+	}
+	s := strconv.FormatFloat(v, 'f', dec, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
+}
+
+// roundPx rounds a computed price (TP/SL) to fmtPx's precision so stored/exported
+// values are clean (no 63531.799999999996 float noise).
+func roundPx(v float64) float64 {
+	dec := 2
+	switch {
+	case v != 0 && v < 0.01:
+		dec = 8
+	case v < 1:
+		dec = 6
+	case v < 100:
+		dec = 4
+	}
+	f := math.Pow10(dec)
+	return math.Round(v*f) / f
+}
 
 // PaperTrade is one simulated trade taken from a breakout-radar signal. Entry is
 // the market price when the signal fired; TP/SL are the radar's fib levels.
@@ -298,8 +337,8 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 			}
 			tr := &PaperTrade{
 				ID:   fmt.Sprintf("%s|%s|%s|%d", b.name, it.Coin, dir, now.UnixMilli()),
-				Coin: it.Coin, Dir: dir, Score: it.Score, Entry: p, TP: it.TP, SL: it.SL,
-				Cur: p, Status: "open", OpenTime: now, OI: it.OIChg, CVD: it.CVD,
+				Coin: it.Coin, Dir: dir, Score: it.Score, Entry: roundPx(p), TP: roundPx(it.TP), SL: roundPx(it.SL),
+				Cur: roundPx(p), Status: "open", OpenTime: now, OI: it.OIChg, CVD: it.CVD,
 				Funding: s.Funding(it.Coin),
 			}
 			if b.trail > 0 { // trailing book: derive R, set peak + initial 0.5R stop
@@ -375,7 +414,7 @@ func abs2(f float64) float64 {
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
-		fmt.Sprintf("%s %s · 進場 $%.4g", tr.Coin, dirCN(tr.Dir), tr.Entry), "/")
+		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/")
 	if !s.notifier.Enabled() {
 		return
 	}
@@ -384,14 +423,14 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 		if tr.Dir == "short" {
 			sig = "死叉 + 跌破EMA50"
 		}
-		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n訊號 %s(1h 收K)\n進場 $%.4g · TP $%.4g (%+.2f%%) · SL $%.4g (%+.2f%%) · 盈虧比 1:1(SL=前20根極值)",
-			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), sig, tr.Entry,
-			tr.TP, pnl(tr.Dir, tr.Entry, tr.TP), tr.SL, pnl(tr.Dir, tr.Entry, tr.SL)))
+		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n訊號 %s(1h 收K)\n進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%) · 盈虧比 1:1(SL=前20根極值)",
+			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), sig, fmtPx(tr.Entry),
+			fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL)))
 		return
 	}
-	go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n點火 %d · 進場 $%.4g · TP $%.4g (%+.2f%%) · SL $%.4g (%+.2f%%)\n進場 OI %+.2f%% · CVD %+.2f%% · 費率 %+.4f%%",
-		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), tr.Score, tr.Entry,
-		tr.TP, pnl(tr.Dir, tr.Entry, tr.TP), tr.SL, pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
+	go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n點火 %d · 進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%)\n進場 OI %+.2f%% · CVD %+.2f%% · 費率 %+.4f%%",
+		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), tr.Score, fmtPx(tr.Entry),
+		fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
 }
 
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
@@ -400,12 +439,12 @@ func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	}
 	hold := fmtDur(now.Sub(tr.OpenTime))
 	if b.name == "emaonly" {
-		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%.4g → 出 $%.4g",
-			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, tr.Entry, tr.Cur))
+		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s",
+			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, fmtPx(tr.Entry), fmtPx(tr.Cur)))
 		return
 	}
-	go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%.4g → 出 $%.4g · 進場 OI %+.2f%% / CVD %+.2f%% / 費率 %+.4f%%",
-		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, tr.Entry, tr.Cur, tr.OI, tr.CVD, tr.Funding*100))
+	go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s · 進場 OI %+.2f%% / CVD %+.2f%% / 費率 %+.4f%%",
+		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, fmtPx(tr.Entry), fmtPx(tr.Cur), tr.OI, tr.CVD, tr.Funding*100))
 }
 
 func pnl(dir string, entry, cur float64) float64 {

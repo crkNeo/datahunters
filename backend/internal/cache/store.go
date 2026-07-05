@@ -247,8 +247,8 @@ func (s *Store) notifySignalCross(coin string, snap Snapshot, price, btcChg floa
 	} else {
 		tags += " 逆勢⚠"
 	}
-	go s.notifier.Send(fmt.Sprintf("📊 <b>訊號穿越</b> %s %s 評分 %+d\n現價 $%.4g · %s",
-		coin, dir, snap.Score, price, tags))
+	go s.notifier.Send(fmt.Sprintf("📊 <b>訊號穿越</b> %s %s 評分 %+d\n現價 $%s · %s",
+		coin, dir, snap.Score, fmtPx(price), tags))
 }
 
 // refreshFunding refreshes the all-coins funding map — from the WS feed if it's
