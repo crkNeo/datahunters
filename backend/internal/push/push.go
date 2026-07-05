@@ -99,7 +99,10 @@ func (m *Manager) Send(title, body, url string) {
 
 func (m *Manager) sendOne(payload []byte, sub webpush.Subscription) {
 	resp, err := webpush.SendNotification(payload, &sub, &webpush.Options{
-		Subscriber:      "mailto:admin@jmchcompass.com",
+		// NOTE: pass the bare address — webpush-go prepends "mailto:" itself. Passing
+		// "mailto:…" here yields a double "mailto:mailto:…" sub claim, which Apple
+		// rejects with 403 BadJwtToken (FCM ignores it, which masked the bug).
+		Subscriber:      "admin@jmchcompass.com",
 		VAPIDPublicKey:  m.pub,
 		VAPIDPrivateKey: m.priv,
 		TTL:             60,
