@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS articles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS push_subs (
-  id       VARCHAR(64) PRIMARY KEY,   -- sha256(endpoint) hex; endpoints exceed the 191 index limit
+  id       VARCHAR(64) PRIMARY KEY,   -- sha256(endpoint) hex, endpoints exceed the 191 index limit
   endpoint TEXT NOT NULL,
   username VARCHAR(191),
   sub      LONGTEXT
@@ -103,7 +103,15 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 	if tbl > 0 && hasID == 0 {
 		d.Exec("DROP TABLE push_subs")
 	}
-	for _, stmt := range strings.Split(Schema, ";") {
+	// strip "-- ..." line comments before splitting on ';' so a ';' inside a
+	// comment can never cut a statement in half.
+	lines := strings.Split(Schema, "\n")
+	for i, ln := range lines {
+		if idx := strings.Index(ln, "--"); idx >= 0 {
+			lines[i] = ln[:idx]
+		}
+	}
+	for _, stmt := range strings.Split(strings.Join(lines, "\n"), ";") {
 		if strings.TrimSpace(stmt) == "" {
 			continue
 		}
