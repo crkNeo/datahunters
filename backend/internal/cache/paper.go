@@ -389,6 +389,16 @@ func bookLabel(name string) string {
 	return "星軌"
 }
 
+// bookTab maps a book name to the frontend mainTab, so a push notification can
+// deep-link straight to that strategy page (via /?tab=<tab>).
+func bookTab(name string) string {
+	switch name {
+	case "gamble", "emagamble", "emaonly":
+		return name
+	}
+	return "paper" // main
+}
+
 func dirCN(dir string) string {
 	if dir == "short" {
 		return "做空"
@@ -425,7 +435,7 @@ func abs2(f float64) float64 {
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
-		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/")
+		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
 	if !s.notifier.Enabled() {
 		return
 	}
@@ -449,7 +459,7 @@ func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	// (tp / sl / trail / reversed / expired).
 	s.PushSend(bookLabel(b.name)+" 平倉",
 		fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
-			tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur)), "/")
+			tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur)), "/?tab="+bookTab(b.name))
 	if !s.notifier.Enabled() {
 		return
 	}

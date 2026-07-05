@@ -871,13 +871,26 @@ async function installApp() {
   canInstall.value = false
 }
 
+// tabs a push notification may deep-link to (from the ?tab= query on cold start
+// or a SW postMessage when the app is already open).
+const NAV_TABS = ['paper', 'gamble', 'emagamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog']
+function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 onMounted(async () => {
   loadConfig()
   await loadMe()
   loadAll()
   timer = setInterval(tick, 15000)
+  // deep-link: notification opened the app cold with /?tab=gamble → switch to it
+  const qtab = new URLSearchParams(location.search).get('tab')
+  if (qtab) { gotoTab(qtab); history.replaceState({}, '', location.pathname) }
   // register service worker for PWA + push
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+    // app already open → SW tells us which tab the tapped notification wants
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'nav') gotoTab(e.data.tab)
+    })
+  }
   // silent self-heal: if notifications were already granted, make sure this
   // device actually has a live subscription registered on the server.
   if (can('member')) ensurePush(false)
@@ -1697,7 +1710,8 @@ watch(mainTab, loadMe)
 
   <!-- asset-proof lightbox (admin) -->
   <div v-if="proofView" class="overlay proofbox" @click="proofView = ''">
-    <img :src="proofView" class="prooffull" @click.stop alt="資產證明" />
+    <button class="proofclose" @click.stop="proofView = ''" aria-label="關閉">✕</button>
+    <img :src="proofView" class="prooffull" @click="proofView = ''" alt="資產證明" />
   </div>
 
   <!-- article editor (admin) -->
@@ -2137,8 +2151,14 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .okbtn { flex: 1; padding: 6px 0; border: none; border-radius: 7px; cursor: pointer; background: #17643c; color: #d4f7e2; font-weight: 700; }
 .nobtn { flex: 1; padding: 6px 0; border: none; border-radius: 7px; cursor: pointer; background: #5a1f1f; color: #f7d4d4; font-weight: 700; }
 .proofthumb { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; cursor: zoom-in; border: 1px solid #23262d; }
-.proofbox { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.85); }
-.prooffull { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+.proofbox { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.85); z-index: 9998; }
+.prooffull { max-width: 90vw; max-height: 82vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6); cursor: zoom-out; }
+.proofclose { position: fixed; z-index: 9999; cursor: pointer;
+  top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+  width: 44px; height: 44px; border-radius: 50%; border: none;
+  background: rgba(255,255,255,.14); color: #fff; font-size: 22px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; }
+.proofclose:active { background: rgba(255,255,255,.28); }
 .qtag.warn { background: #4a3a10; color: #e8b84b; }
 .qtag.bad { background: #4a1414; color: #ef8a8a; }
 .regbtn.on { background: linear-gradient(180deg, #d8ad48, #b8862a); color: #201800; border-color: #d8ad48; }
