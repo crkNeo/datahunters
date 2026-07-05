@@ -1647,7 +1647,8 @@ body::before {
 .r { text-align: right; }
 
 /* top bar */
-.topbar { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid #1c1f25; background: #0c0e12; position: sticky; top: 0; z-index: 10; }
+.topbar { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #1c1f25; background: #0c0e12; position: sticky; top: 0; z-index: 10;
+  padding: calc(10px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) 10px calc(20px + env(safe-area-inset-left)); }
 .tickers { display: flex; gap: 18px; font-size: 13px; }
 .tk b { color: #8b909a; font-weight: 600; margin-right: 4px; }
 .tk em { font-style: normal; margin-left: 4px; font-size: 12px; }
@@ -1801,7 +1802,7 @@ body::before {
 .gauge { display: flex; flex-direction: column; align-items: center; }
 .gauge-title { font-weight: 600; font-size: 14px; align-self: center; margin-bottom: 4px; }
 .gsvg { width: 100%; max-width: 240px; }
-.gauge-val { font-size: 34px; font-weight: 800; line-height: 1; margin-top: -18px; }
+.gauge-val { font-size: 34px; font-weight: 800; line-height: 1; margin-top: -4px; }
 .gauge-label { font-size: 13px; margin-top: 4px; }
 .gauge-prev { font-size: 11px; color: #8b909a; margin-top: 4px; }
 .gauge-prev em { font-style: normal; }
@@ -2122,7 +2123,8 @@ footer { padding: 18px 0 30px; text-align: center; }
   html, body { overflow-x: hidden; }
 
   /* top bar: wrap, drop the decorative search box, let controls flow to row 2 */
-  .topbar { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+  .topbar { flex-wrap: wrap; gap: 8px 10px;
+    padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left)); }
   .topbar .search { display: none; }
   .tickers { gap: 12px; font-size: 12px; }
   .topmeta { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 6px; }
