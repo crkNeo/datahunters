@@ -4,24 +4,166 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// Binance IP-rate-limit guards. All Binance REST calls funnel through get(),
+// which routes each request onto a "lane" — a distinct outbound source IP (the
+// direct connection, plus any proxies in BINANCE_PROXIES). Each lane enforces,
+// PER IP:
+//  1. pacing        — a minimum gap between requests, so cold-start bursts can't
+//     spike the per-minute weight;
+//  2. circuit breaker — on 418/429 the lane's ban-until is remembered and it's
+//     skipped (rotate to the next lane) until it clears, so we never extend a
+//     ban by hammering, and one banned IP doesn't take the whole app down;
+//  3. weight watch  — X-MBX-USED-WEIGHT-1M (limit 2400/min per IP); past a soft
+//     cap the lane is paused until the next minute window.
+const (
+	binMinGap        = 100 * time.Millisecond // ≥100ms between requests on ONE lane
+	binSoftWeightCap = 1200                   // pause a lane past this used weight (per IP)
+)
+
+var bannedUntilRe = regexp.MustCompile(`banned until (\d{10,})`)
+
+// nextMinute is the start of the next clock minute — where Binance's 1-minute
+// used-weight window resets. We hold until then (not a short Retry-After) so a
+// 429 can't escalate to a long 418 by resuming while the weight is still maxed.
+func nextMinute(t time.Time) time.Time { return t.Truncate(time.Minute).Add(time.Minute) }
+
+// lane is one outbound path for Binance requests — a source IP (direct or a
+// proxy). Each has its OWN per-minute weight budget and ban state, so when one
+// IP is rate-limit-banned we simply fail over to the next lane.
+type lane struct {
+	name     string
+	http     *http.Client
+	mu       sync.Mutex
+	last     time.Time // pacing
+	banUntil time.Time // 418/429 circuit breaker (per IP)
+	pauseTo  time.Time // soft-weight backoff (per IP)
+}
 
 // Client wraps public market-data calls to OKX and Binance.
 // All endpoints used here are public and require no authentication.
 type Client struct {
-	http *http.Client
+	http  *http.Client // direct client — OKX / Yahoo / etc. (non-Binance)
+	lanes []*lane      // Binance request lanes; lanes[0] is the direct connection
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: 10 * time.Second}}
+	direct := &http.Client{Timeout: 10 * time.Second}
+	c := &Client{http: direct, lanes: []*lane{{name: "direct", http: direct}}}
+	// extra source IPs via proxies (HTTP or SOCKS5), comma-separated:
+	//   BINANCE_PROXIES=http://user:pass@ip1:port,socks5://ip2:port
+	if env := strings.TrimSpace(os.Getenv("BINANCE_PROXIES")); env != "" {
+		for _, p := range strings.Split(env, ",") {
+			if p = strings.TrimSpace(p); p == "" {
+				continue
+			}
+			pu, err := url.Parse(p)
+			if err != nil {
+				log.Printf("binance proxy skipped (bad url %q): %v", p, err)
+				continue
+			}
+			c.lanes = append(c.lanes, &lane{
+				name: pu.Host,
+				http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(pu)}},
+			})
+		}
+	}
+	if len(c.lanes) > 1 {
+		log.Printf("binance: %d lanes (1 direct + %d proxy) — rotates to the next IP on a ban", len(c.lanes), len(c.lanes)-1)
+	}
+	return c
+}
+
+func isBinance(url string) bool { return strings.Contains(url, "binance.com") }
+
+// pickBinanceLane returns the first lane available now (not banned, not weight-
+// paused), reserving its pacing slot. Fails fast if EVERY lane is down.
+func (c *Client) pickBinanceLane() (*lane, error) {
+	now := time.Now()
+	var soonest time.Time
+	for _, ln := range c.lanes {
+		ln.mu.Lock()
+		if now.Before(ln.banUntil) || now.Before(ln.pauseTo) {
+			t := ln.banUntil
+			if ln.pauseTo.After(t) {
+				t = ln.pauseTo
+			}
+			if soonest.IsZero() || t.Before(soonest) {
+				soonest = t
+			}
+			ln.mu.Unlock()
+			continue
+		}
+		next := ln.last.Add(binMinGap)
+		if next.Before(now) {
+			next = now
+		}
+		ln.last = next
+		ln.mu.Unlock()
+		if d := time.Until(next); d > 0 {
+			time.Sleep(d)
+		}
+		return ln, nil
+	}
+	return nil, fmt.Errorf("binance: all %d lanes rate-limited (next free in %s)",
+		len(c.lanes), time.Until(soonest).Round(time.Second))
+}
+
+// observeBinance updates one lane's ban / weight state from its response.
+func (c *Client) observeBinance(ln *lane, resp *http.Response, body []byte) {
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 418 {
+		until := nextMinute(time.Now())
+		if m := bannedUntilRe.FindSubmatch(body); m != nil {
+			if ms, err := strconv.ParseInt(string(m[1]), 10, 64); err == nil {
+				if t := time.UnixMilli(ms); t.After(until) {
+					until = t
+				}
+			}
+		}
+		ln.mu.Lock()
+		if until.After(ln.banUntil) {
+			ln.banUntil = until
+			log.Printf("binance[%s]: rate-limited (HTTP %d) — lane down until %s, rotating to next lane",
+				ln.name, resp.StatusCode, until.Format("15:04:05"))
+		}
+		ln.mu.Unlock()
+		return
+	}
+	if w := resp.Header.Get("X-Mbx-Used-Weight-1m"); w != "" {
+		if used, err := strconv.Atoi(w); err == nil && used >= binSoftWeightCap {
+			pause := nextMinute(time.Now())
+			ln.mu.Lock()
+			if pause.After(ln.pauseTo) {
+				ln.pauseTo = pause
+				log.Printf("binance[%s]: used weight %d/2400 ≥ soft cap %d — lane paused until %s",
+					ln.name, used, binSoftWeightCap, pause.Format("15:04:05"))
+			}
+			ln.mu.Unlock()
+		}
+	}
 }
 
 func (c *Client) get(url string, out any) error {
-	resp, err := c.http.Get(url)
+	client := c.http
+	var ln *lane
+	if isBinance(url) {
+		var err error
+		if ln, err = c.pickBinanceLane(); err != nil {
+			return err
+		}
+		client = ln.http
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
@@ -29,6 +171,9 @@ func (c *Client) get(url string, out any) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+	if ln != nil {
+		c.observeBinance(ln, resp, body)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
@@ -41,9 +186,9 @@ func (c *Client) get(url string, out any) error {
 const okxBase = "https://www.okx.com"
 
 type okxEnvelope struct {
-	Code string            `json:"code"`
-	Msg  string            `json:"msg"`
-	Data [][]string        `json:"data"`
+	Code string     `json:"code"`
+	Msg  string     `json:"msg"`
+	Data [][]string `json:"data"`
 }
 
 // Candle is a normalised OHLCV bar.
@@ -384,6 +529,25 @@ type MarketTicker struct {
 
 // BinanceAllTickers fetches the 24h ticker for every contract in one call and
 // returns only USDT-margined perpetuals (excludes dated futures like *_240927).
+// BinanceAllPrices returns the last price for every futures symbol in one
+// cheap call (/fapi/v1/ticker/price, weight 2 — vs 40 for the full 24h stats).
+// Use it when only prices are needed (e.g. the paper-book tick).
+func (c *Client) BinanceAllPrices() (map[string]float64, error) {
+	url := fmt.Sprintf("%s/fapi/v1/ticker/price", binanceFapi)
+	var raw []struct {
+		Symbol string `json:"symbol"`
+		Price  string `json:"price"`
+	}
+	if err := c.get(url, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(raw))
+	for _, r := range raw {
+		out[r.Symbol] = atof(r.Price)
+	}
+	return out, nil
+}
+
 func (c *Client) BinanceAllTickers() ([]MarketTicker, error) {
 	url := fmt.Sprintf("%s/fapi/v1/ticker/24hr", binanceFapi)
 	var raw []struct {

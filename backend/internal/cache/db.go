@@ -32,13 +32,6 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 );
 CREATE INDEX IF NOT EXISTS idx_pt_open ON paper_trades(open_time);
 
-CREATE TABLE IF NOT EXISTS orderbook_snaps (
-  ts INTEGER NOT NULL, coin TEXT NOT NULL,
-  mid REAL, bid_usd REAL, ask_usd REAL, imbal REAL,
-  bid_wall REAL, bid_wall_usd REAL, ask_wall REAL, ask_wall_usd REAL
-);
-CREATE INDEX IF NOT EXISTS idx_ob_ts ON orderbook_snaps(ts);
-
 CREATE TABLE IF NOT EXISTS liquidations (
   ts INTEGER NOT NULL, coin TEXT NOT NULL, side TEXT, px REAL, usd REAL
 );
@@ -52,7 +45,29 @@ CREATE TABLE IF NOT EXISTS users (
   uid       TEXT DEFAULT '',
   created   INTEGER,
   expiry    INTEGER DEFAULT 0,             -- 0 = none
-  notes     TEXT DEFAULT ''
+  notes     TEXT DEFAULT '',               -- exchange name (備註)
+  proof     TEXT DEFAULT ''                -- uploaded asset-proof image path
+);
+
+CREATE TABLE IF NOT EXISTS site_config (
+  k TEXT PRIMARY KEY,
+  v TEXT
+);
+
+CREATE TABLE IF NOT EXISTS articles (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  title   TEXT NOT NULL DEFAULT '',
+  cover   TEXT DEFAULT '',            -- cover image path
+  tags    TEXT DEFAULT '',            -- comma-separated
+  blocks  TEXT DEFAULT '[]',          -- JSON: [{type:"text"|"image", text, image}]
+  created INTEGER,
+  updated INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS push_subs (
+  endpoint TEXT PRIMARY KEY,
+  username TEXT,
+  sub      TEXT                       -- JSON webpush.Subscription
 );
 `
 
@@ -77,6 +92,7 @@ func openDB(path string) (*DB, error) {
 	d.Exec("ALTER TABLE paper_trades ADD COLUMN oi REAL DEFAULT 0")
 	d.Exec("ALTER TABLE paper_trades ADD COLUMN cvd REAL DEFAULT 0")
 	d.Exec("ALTER TABLE paper_trades ADD COLUMN funding REAL DEFAULT 0")
+	d.Exec("ALTER TABLE users ADD COLUMN proof TEXT DEFAULT ''")
 	return &DB{d}, nil
 }
 
@@ -89,6 +105,7 @@ type User struct {
 	Created  int64  `json:"created"`
 	Expiry   int64  `json:"expiry"`
 	Notes    string `json:"notes"`
+	Proof    string `json:"proof"` // asset-proof image URL path
 }
 
 func (db *DB) upsertUser(username, passHash, role, status string) {
@@ -106,8 +123,25 @@ func (db *DB) userAuth(username string) (hash, role, status string, ok bool) {
 	return hash, role, status, true
 }
 
+// userRoleStatus returns the CURRENT role+status (no password), for live gating
+// so bans / role changes take effect immediately, not at token expiry.
+func (db *DB) userRoleStatus(username string) (role, status string, ok bool) {
+	row := db.sql.QueryRow(`SELECT role,status FROM users WHERE username=?`, username)
+	if err := row.Scan(&role, &status); err != nil {
+		return "", "", false
+	}
+	return role, status, true
+}
+
+// registerUser inserts a self-registered account in "pending" review status.
+func (db *DB) registerUser(username, passHash, uid, notes, proof string) {
+	db.sql.Exec(`INSERT INTO users(username,pass_hash,role,status,uid,created,notes,proof)
+	  VALUES(?,?,?,?,?,?,?,?)`,
+		username, passHash, "member", "pending", uid, time.Now().UnixMilli(), notes, proof)
+}
+
 func (db *DB) listUsers() []User {
-	rows, err := db.sql.Query(`SELECT username,role,status,uid,created,expiry,notes FROM users ORDER BY created DESC`)
+	rows, err := db.sql.Query(`SELECT username,role,status,uid,created,expiry,notes,proof FROM users ORDER BY created DESC`)
 	if err != nil {
 		return nil
 	}
@@ -115,7 +149,7 @@ func (db *DB) listUsers() []User {
 	var out []User
 	for rows.Next() {
 		var u User
-		if rows.Scan(&u.Username, &u.Role, &u.Status, &u.UID, &u.Created, &u.Expiry, &u.Notes) == nil {
+		if rows.Scan(&u.Username, &u.Role, &u.Status, &u.UID, &u.Created, &u.Expiry, &u.Notes, &u.Proof) == nil {
 			out = append(out, u)
 		}
 	}
@@ -124,6 +158,11 @@ func (db *DB) listUsers() []User {
 
 func (db *DB) setUserRole(username, role, status string) {
 	db.sql.Exec(`UPDATE users SET role=?, status=? WHERE username=?`, role, status, username)
+}
+
+func (db *DB) deleteUser(username string) {
+	db.sql.Exec(`DELETE FROM users WHERE username=?`, username)
+	db.sql.Exec(`DELETE FROM push_subs WHERE username=?`, username) // clean their push subs too
 }
 
 func (db *DB) userExists(username string) bool {
@@ -174,14 +213,6 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 	    outcome=excluded.outcome, close_time=excluded.close_time, sl=excluded.sl`,
 		t.ID, book, t.Coin, t.Dir, t.Score, t.Entry, t.TP, t.SL, t.Cur, t.PnLPct,
 		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding)
-}
-
-func (db *DB) insertOrderBook(t time.Time, r OrderBookRow) {
-	db.sql.Exec(`INSERT INTO orderbook_snaps
-	  (ts,coin,mid,bid_usd,ask_usd,imbal,bid_wall,bid_wall_usd,ask_wall,ask_wall_usd)
-	  VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		t.UnixMilli(), r.Coin, r.Mid, r.BidUSD, r.AskUSD, r.Imbal,
-		r.BidWall, r.BidWallU, r.AskWall, r.AskWallU)
 }
 
 func (db *DB) insertLiquidation(r LiqRow) {

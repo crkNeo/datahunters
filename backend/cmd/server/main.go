@@ -83,7 +83,7 @@ func main() {
 		log.Printf("priming cache for %d coins...", len(coins))
 		store.Refresh()
 		log.Printf("initial cache ready")
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(120 * time.Second) // lowered from 60s to cut REST load
 		for range ticker.C {
 			store.Refresh()
 			log.Printf("cache refreshed")
@@ -94,7 +94,7 @@ func main() {
 	go func() {
 		store.Radar()
 		log.Printf("breakout radar ready")
-		ticker := time.NewTicker(90 * time.Second)
+		ticker := time.NewTicker(180 * time.Second) // lowered from 90s to cut REST load
 		for range ticker.C {
 			store.Radar()
 		}
@@ -117,14 +117,8 @@ func main() {
 		}
 	}()
 
-	// order-book wall/imbalance board, kept warm
-	go func() {
-		store.OrderBook()
-		ticker := time.NewTicker(90 * time.Second)
-		for range ticker.C {
-			store.OrderBook()
-		}
-	}()
+	// (order-book wall board removed: its per-coin Binance depth polling was the
+	// biggest steady API-weight consumer and unrelated to the paper strategy.)
 
 	// liquidation feed (OKX), polled + accumulated
 	go func() {
@@ -132,6 +126,15 @@ func main() {
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.LiqTick()
+		}
+	}()
+
+	// Upbit announcement watcher → Telegram (no-op unless Telegram is configured)
+	go func() {
+		store.UpbitTick() // first call seeds the baseline (no history replay)
+		ticker := time.NewTicker(20 * time.Second)
+		for range ticker.C {
+			store.UpbitTick()
 		}
 	}()
 

@@ -104,12 +104,11 @@ func (s *Store) Detail(coin string) (CoinDetail, error) {
 // caller (from one batched all-tickers call during Refresh).
 func (s *Store) computeDetailCore(coin string, mom24h, btcChg float64) (CoinDetail, Snapshot) {
 	inst := coin + "-USDT-SWAP"
-	sym := coin + "USDT"
 
 	funding, _ := s.ex.OKXFundingRate(inst)
-	ls, _ := s.ex.BinanceLongShort(sym, "5m")
-	kl, _ := s.ex.BinanceKlines(sym, "1h", 24)    // oldest..newest, carries taker-buy
-	oiHist, _ := s.ex.BinanceOIHist(sym, "1h", 2) // oldest-first
+	ls := s.longShortCached(coin)    // cached 5 min (no WS)
+	kl := s.klines1hCached(coin, 24) // cached 4 min (shared) — avoids 418 ban
+	oiHist := s.oiHist1h(coin, 2)    // cached 5 min (no WS)
 
 	// 1h price momentum from the latest 1H bar
 	var mom1h float64

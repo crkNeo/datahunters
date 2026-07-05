@@ -5,38 +5,6 @@ import (
 	"strconv"
 )
 
-// PriceLevel is one order-book level (price, quantity in base units).
-type PriceLevel struct{ Px, Qty float64 }
-
-// Depth is a futures order-book snapshot.
-type Depth struct {
-	Bids []PriceLevel
-	Asks []PriceLevel
-}
-
-// BinanceDepth fetches the current order book for a USDT-M perp (free, no auth).
-func (c *Client) BinanceDepth(symbol string, limit int) (Depth, error) {
-	var raw struct {
-		Bids [][]string `json:"bids"`
-		Asks [][]string `json:"asks"`
-	}
-	url := fmt.Sprintf("%s/fapi/v1/depth?symbol=%s&limit=%d", binanceFapi, symbol, limit)
-	if err := c.get(url, &raw); err != nil {
-		return Depth{}, err
-	}
-	conv := func(rows [][]string) []PriceLevel {
-		out := make([]PriceLevel, 0, len(rows))
-		for _, r := range rows {
-			if len(r) < 2 {
-				continue
-			}
-			out = append(out, PriceLevel{Px: atof(r[0]), Qty: atof(r[1])})
-		}
-		return out
-	}
-	return Depth{Bids: conv(raw.Bids), Asks: conv(raw.Asks)}, nil
-}
-
 // LiqEvent is one liquidation fill (the side that got liquidated, price, size).
 type LiqEvent struct {
 	Px      float64

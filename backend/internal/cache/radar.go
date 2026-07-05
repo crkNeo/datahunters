@@ -50,12 +50,14 @@ func (s *Store) coinTypes() map[string]string {
 	return s.symTypes
 }
 
-// Radar returns the cached breakout radar (recomputed at most every ~90s).
+// Radar returns the cached breakout radar (recomputed at most every ~150s —
+// PaperTick calls this every 60s, so the TTL is what actually paces the heavy
+// all-coins recompute and its Binance weight).
 func (s *Store) Radar() RadarData {
 	s.radarMu.RLock()
 	d, t := s.radar, s.radarTime
 	s.radarMu.RUnlock()
-	if !t.IsZero() && time.Since(t) < 80*time.Second {
+	if !t.IsZero() && time.Since(t) < 240*time.Second {
 		return d
 	}
 	// stale: serialise the (heavy, all-coins) recompute so a burst of requests
@@ -65,7 +67,7 @@ func (s *Store) Radar() RadarData {
 	s.radarMu.RLock()
 	d, t = s.radar, s.radarTime
 	s.radarMu.RUnlock()
-	if !t.IsZero() && time.Since(t) < 80*time.Second {
+	if !t.IsZero() && time.Since(t) < 240*time.Second {
 		return d
 	}
 	d = s.computeRadar()
@@ -82,7 +84,9 @@ func (s *Store) Radar() RadarData {
 func (s *Store) computeRadar() RadarData {
 	tickers, err := s.ex.BinanceAllTickers()
 	if err != nil {
-		return RadarData{UpdatedAt: time.Now().Format(time.RFC3339)}
+		// no data (e.g. rate-limit ban) — return empty (not nil) slices so the
+		// frontend renders the empty state instead of crashing on .length.
+		return RadarData{Pump: []RadarItem{}, Dump: []RadarItem{}, Stocks: []RadarItem{}, UpdatedAt: time.Now().Format(time.RFC3339)}
 	}
 
 	type tk struct {
@@ -97,6 +101,12 @@ func (s *Store) computeRadar() RadarData {
 			continue // skip stablecoins and near-dead markets only
 		}
 		pool = append(pool, tk{coin, t.Price, t.ChgPct, t.QuoteVol})
+	}
+	// cap the scan to the top-N most liquid names: halves the kline/OI weight
+	// per sweep, and the paper books trade liquid movers anyway.
+	sort.Slice(pool, func(i, j int) bool { return pool[i].vol > pool[j].vol })
+	if len(pool) > radarPoolMax {
+		pool = pool[:radarPoolMax]
 	}
 
 	// concurrent kline scan across the whole pool
@@ -114,9 +124,8 @@ func (s *Store) computeRadar() RadarData {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			sym := c.coin + "USDT"
-			kl, err := s.ex.BinanceKlines(sym, "1h", 48)
-			if err != nil || len(kl) < 28 {
+			kl := s.klines1hCached(c.coin, 48) // cached 4 min (shared) — avoids 418 ban
+			if len(kl) < 28 {
 				return
 			}
 			n := len(kl)
@@ -158,7 +167,7 @@ func (s *Store) computeRadar() RadarData {
 
 			// OI accumulation over ~12h (backtest: strongest pump-ahead signal)
 			oiAccum := 0.0
-			oiHist, _ := s.ex.BinanceOIHist(sym, "1h", 13)
+			oiHist := s.oiHist1h(c.coin, 13) // cached 3 min (no WS)
 			if len(oiHist) >= 2 && oiHist[0].SumOIValue > 0 {
 				oiAccum = indicator.PctChange(oiHist[0].SumOIValue, oiHist[len(oiHist)-1].SumOIValue)
 			}
@@ -251,6 +260,10 @@ func earlyScore(volSpike, oiAccum, whale, accel, cvd, earliness float64) int {
 // TP/SL multipliers in units of the recent swing range R. Backtest-optimized
 // (TP 0.618R / SL 0.5R) — the tight-TP/tight-SL combo gave the best win-rate and
 // expectancy across 12h & 24h, beating the original far 1.382 extension.
+// radarPoolMax caps the radar sweep to the most liquid names (by 24h quote
+// volume) so the per-sweep Binance weight stays modest.
+const radarPoolMax = 200
+
 const tpMult, slMult = 0.618, 0.5
 
 // entryLevels derives entry, trigger and TP/SL from the recent ~12h swing.

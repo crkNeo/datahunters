@@ -1,0 +1,245 @@
+package cache
+
+import (
+	"encoding/json"
+	"strings"
+	"time"
+)
+
+// ---- site config: logo, social links, QR (admin-editable key/value) ----
+
+func (db *DB) setConfig(k, v string) {
+	db.sql.Exec(`INSERT INTO site_config(k,v) VALUES(?,?)
+	  ON CONFLICT(k) DO UPDATE SET v=excluded.v`, k, v)
+}
+
+func (db *DB) allConfig() map[string]string {
+	out := map[string]string{}
+	rows, err := db.sql.Query(`SELECT k,v FROM site_config`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// SiteConfig returns all public site settings (logo, social JSON, qr, etc.).
+func (s *Store) SiteConfig() map[string]string {
+	if s.db == nil {
+		return map[string]string{}
+	}
+	return s.db.allConfig()
+}
+
+// SetConfig upserts one config key (admin only).
+func (s *Store) SetConfig(k, v string) {
+	if s.db != nil {
+		s.db.setConfig(k, v)
+	}
+}
+
+func (db *DB) getConfig(k string) string {
+	var v string
+	db.sql.QueryRow(`SELECT v FROM site_config WHERE k=?`, k).Scan(&v)
+	return v
+}
+
+// GetConfig returns one config value ("" if unset). Used by the push manager
+// for the VAPID keypair.
+func (s *Store) GetConfig(k string) string {
+	if s.db == nil {
+		return ""
+	}
+	return s.db.getConfig(k)
+}
+
+// ---- web-push subscriptions (push.Backend) ----
+
+func (db *DB) addSub(endpoint, username, sub string) {
+	db.sql.Exec(`INSERT INTO push_subs(endpoint,username,sub) VALUES(?,?,?)
+	  ON CONFLICT(endpoint) DO UPDATE SET username=excluded.username, sub=excluded.sub`,
+		endpoint, username, sub)
+}
+
+func (db *DB) allSubs() []string {
+	rows, err := db.sql.Query(`SELECT sub FROM push_subs`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sub string
+		if rows.Scan(&sub) == nil {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+func (db *DB) delSub(endpoint string) {
+	db.sql.Exec(`DELETE FROM push_subs WHERE endpoint=?`, endpoint)
+}
+
+// AllSubs / DelSub / AddSub satisfy push.Backend + the subscribe handler.
+func (s *Store) AllSubs() []string {
+	if s.db == nil {
+		return nil
+	}
+	return s.db.allSubs()
+}
+
+func (s *Store) DelSub(endpoint string) {
+	if s.db != nil {
+		s.db.delSub(endpoint)
+	}
+}
+
+// Subscribe stores a browser push subscription (parses its endpoint as the key).
+func (s *Store) Subscribe(username, subJSON string) {
+	if s.db == nil {
+		return
+	}
+	var e struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if json.Unmarshal([]byte(subJSON), &e) != nil || e.Endpoint == "" {
+		return
+	}
+	s.db.addSub(e.Endpoint, username, subJSON)
+}
+
+// PushKey returns the VAPID public key ("" if push is unavailable).
+func (s *Store) PushKey() string {
+	if s.pushMgr == nil {
+		return ""
+	}
+	return s.pushMgr.PublicKey()
+}
+
+// PushSend delivers a Web Push notification to all subscribers (best-effort).
+func (s *Store) PushSend(title, body, url string) {
+	if s.pushMgr != nil {
+		s.pushMgr.Send(title, body, url)
+	}
+}
+
+// ---- articles (block-based: paragraphs + images) ----
+
+// ArticleBlock is one piece of article body: a text paragraph or an image.
+type ArticleBlock struct {
+	Type  string `json:"type"` // "text" | "image"
+	Text  string `json:"text,omitempty"`
+	Image string `json:"image,omitempty"` // /uploads/... path
+}
+
+// Article is one column post.
+type Article struct {
+	ID      int64          `json:"id"`
+	Title   string         `json:"title"`
+	Cover   string         `json:"cover"` // /uploads/... path
+	Tags    []string       `json:"tags"`
+	Blocks  []ArticleBlock `json:"blocks"`
+	Created int64          `json:"created"`
+	Updated int64          `json:"updated"`
+}
+
+func splitTags(s string) []string {
+	out := []string{}
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func scanArticle(scan func(...any) error) (Article, error) {
+	var a Article
+	var tags, blocks string
+	if err := scan(&a.ID, &a.Title, &a.Cover, &tags, &blocks, &a.Created, &a.Updated); err != nil {
+		return a, err
+	}
+	a.Tags = splitTags(tags)
+	if json.Unmarshal([]byte(blocks), &a.Blocks) != nil || a.Blocks == nil {
+		a.Blocks = []ArticleBlock{}
+	}
+	return a, nil
+}
+
+const articleCols = `id,title,cover,tags,blocks,created,updated`
+
+func (db *DB) articleList() []Article {
+	rows, err := db.sql.Query(`SELECT ` + articleCols + ` FROM articles ORDER BY created DESC`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []Article{}
+	for rows.Next() {
+		if a, err := scanArticle(rows.Scan); err == nil {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func (db *DB) articleGet(id int64) (Article, bool) {
+	row := db.sql.QueryRow(`SELECT `+articleCols+` FROM articles WHERE id=?`, id)
+	a, err := scanArticle(row.Scan)
+	return a, err == nil
+}
+
+func (db *DB) articleUpsert(a *Article) int64 {
+	tags := strings.Join(a.Tags, ",")
+	blocks, _ := json.Marshal(a.Blocks)
+	now := time.Now().UnixMilli()
+	if a.ID == 0 {
+		res, err := db.sql.Exec(`INSERT INTO articles(title,cover,tags,blocks,created,updated) VALUES(?,?,?,?,?,?)`,
+			a.Title, a.Cover, tags, string(blocks), now, now)
+		if err != nil {
+			return 0
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	db.sql.Exec(`UPDATE articles SET title=?,cover=?,tags=?,blocks=?,updated=? WHERE id=?`,
+		a.Title, a.Cover, tags, string(blocks), now, a.ID)
+	return a.ID
+}
+
+func (db *DB) articleDelete(id int64) { db.sql.Exec(`DELETE FROM articles WHERE id=?`, id) }
+
+// Store wrappers.
+func (s *Store) Articles() []Article {
+	if s.db == nil {
+		return []Article{}
+	}
+	return s.db.articleList()
+}
+
+func (s *Store) Article(id int64) (Article, bool) {
+	if s.db == nil {
+		return Article{}, false
+	}
+	return s.db.articleGet(id)
+}
+
+func (s *Store) SaveArticle(a *Article) int64 {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.articleUpsert(a)
+}
+
+func (s *Store) DeleteArticle(id int64) {
+	if s.db != nil {
+		s.db.articleDelete(id)
+	}
+}

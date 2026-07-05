@@ -109,7 +109,7 @@ func (s *Store) computeHome() (HomeData, error) {
 		return HomeData{}, err
 	}
 
-	bySym := make(map[string]float64, len(tickers))   // symbol -> change%
+	bySym := make(map[string]float64, len(tickers)) // symbol -> change%
 	priceBySym := make(map[string]float64, len(tickers))
 	for _, t := range tickers {
 		bySym[t.Symbol] = t.ChgPct

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,17 +23,32 @@ func NewServer(store *cache.Store, secret string) *Server {
 	return &Server{store: store, secret: secret}
 }
 
-// roleOf extracts the caller's role from the Bearer token (default public).
+// roleOf extracts the caller's role from the Bearer token, then confirms it
+// against the LIVE DB (token is only a hint): a banned/pending/deleted user, or
+// one whose role changed, takes effect immediately rather than at token expiry.
 func (s *Server) roleOf(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") {
 		return auth.RolePublic
 	}
-	_, role, err := auth.ParseToken(strings.TrimPrefix(h, "Bearer "), s.secret)
+	user, _, err := auth.ParseToken(strings.TrimPrefix(h, "Bearer "), s.secret)
 	if err != nil {
 		return auth.RolePublic
 	}
+	role, status, ok := s.store.LiveRoleStatus(user)
+	if !ok || status != "active" {
+		return auth.RolePublic // banned / pending / removed → no access
+	}
 	return role
+}
+
+// userOf returns the caller's username from a valid token ("" otherwise).
+func (s *Server) userOf(r *http.Request) string {
+	u, _, err := auth.ParseToken(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), s.secret)
+	if err != nil {
+		return ""
+	}
+	return u
 }
 
 // gate wraps a handler with a minimum-role requirement.
@@ -50,16 +68,28 @@ func (s *Server) Routes() http.Handler {
 
 	// auth
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
+	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
 	mux.HandleFunc("/api/admin/users", s.gate(A, s.handleAdminUsers))
+
+	// uploaded images (asset proofs, article images, logo, QR), read-only
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
 
 	// public (no login)
 	mux.HandleFunc("/api/ranking", s.gate(P, s.handleRanking))
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
 	mux.HandleFunc("/api/events", s.gate(P, s.handleEvents))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
-	mux.HandleFunc("/api/orderbook", s.gate(P, s.handleOrderBook))
 	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
+	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
+	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
+	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
+
+	// admin content management
+	mux.HandleFunc("/api/admin/config", s.gate(A, s.handleAdminConfig))
+	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
+	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
+	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport)) // strategy trades → CSV
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -72,7 +102,12 @@ func (s *Server) Routes() http.Handler {
 	// VIP (live entries with TP/SL)
 	mux.HandleFunc("/api/paper", s.gate(V, s.handlePaper))
 	mux.HandleFunc("/api/gamble", s.gate(V, s.handleGamble))
-	mux.HandleFunc("/api/premium", s.gate(V, s.handlePremium))
+	mux.HandleFunc("/api/ema-gamble", s.gate(V, s.handleEMAGamble))
+	mux.HandleFunc("/api/ema-only", s.gate(V, s.handleEMAOnly))
+
+	// web push (PWA notifications)
+	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
+	mux.HandleFunc("/api/push/subscribe", s.gate(M, s.handlePushSubscribe))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return cors(mux)
@@ -89,24 +124,74 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	role, ok := s.store.Authenticate(in.Username, in.Password)
+	role, status, ok := s.store.Authenticate(in.Username, in.Password)
 	if !ok {
 		http.Error(w, "帳號或密碼錯誤", http.StatusUnauthorized)
 		return
 	}
-	token := auth.IssueToken(in.Username, role, s.secret, 7*24*time.Hour)
+	switch status {
+	case "active":
+		// ok
+	case "pending":
+		http.Error(w, "帳號審核中,請待管理員審核通過後再登入", http.StatusForbidden)
+		return
+	default: // banned / anything else
+		http.Error(w, "帳號已停用,請聯繫管理員", http.StatusForbidden)
+		return
+	}
+	token := auth.IssueToken(in.Username, role, s.secret, 24*time.Hour) // 1-day session
 	writeJSON(w, map[string]any{"token": token, "username": in.Username, "role": role})
 }
 
-// handleMe: returns the caller's username/role from their token.
+// handleRegister: multipart self-registration → pending review.
+// fields: username, password, uid, exchange (備註), proof (image file).
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseMultipartForm(8 << 20); err != nil { // 8MB cap
+		http.Error(w, "表單過大或格式錯誤", http.StatusBadRequest)
+		return
+	}
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	uid := strings.TrimSpace(r.FormValue("uid"))
+	exchange := strings.TrimSpace(r.FormValue("exchange"))
+
+	proofPath := ""
+	if f, hdr, err := r.FormFile("proof"); err == nil {
+		defer f.Close()
+		p, err := saveUpload("proofs", username, hdr.Filename, f)
+		if err != nil {
+			http.Error(w, "資產證明圖片儲存失敗", http.StatusInternalServerError)
+			return
+		}
+		proofPath = p
+	}
+	if err := s.store.Register(username, password, uid, exchange, proofPath); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "status": "pending"})
+}
+
+// handleMe returns the caller's LIVE role + status (from the DB, not just the
+// token) so the frontend can gate on every page load: an expired token → public
+// (idle timeout), a banned/pending user → status back so the SPA kicks them out.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	h := r.Header.Get("Authorization")
-	user, role, err := auth.ParseToken(strings.TrimPrefix(h, "Bearer "), s.secret)
+	user, _, err := auth.ParseToken(strings.TrimPrefix(h, "Bearer "), s.secret)
 	if !strings.HasPrefix(h, "Bearer ") || err != nil {
 		writeJSON(w, map[string]any{"role": auth.RolePublic})
 		return
 	}
-	writeJSON(w, map[string]any{"username": user, "role": role})
+	role, status, ok := s.store.LiveRoleStatus(user)
+	if !ok {
+		writeJSON(w, map[string]any{"role": auth.RolePublic})
+		return
+	}
+	writeJSON(w, map[string]any{"username": user, "role": role, "status": status})
 }
 
 // handleAdminUsers: GET lists users; POST creates; PUT sets role/status. Admin only.
@@ -132,6 +217,14 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Username, Role, Status string }
 		json.NewDecoder(r.Body).Decode(&in)
 		s.store.SetUserRole(in.Username, in.Role, in.Status)
+		writeJSON(w, map[string]any{"ok": true})
+	case http.MethodDelete:
+		u := r.URL.Query().Get("username")
+		if u == "" || u == s.userOf(r) { // never delete yourself
+			http.Error(w, "無法刪除此帳號", http.StatusBadRequest)
+			return
+		}
+		s.store.DeleteUser(u)
 		writeJSON(w, map[string]any{"ok": true})
 	default:
 		http.Error(w, "method", http.StatusMethodNotAllowed)
@@ -207,9 +300,48 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Gamble())
 }
 
-// handlePremium serves the aligned + funding-fuel control-group tracker.
-func (s *Server) handlePremium(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.Premium())
+// handleExport streams a strategy book's full trade history as CSV (admin only).
+// ?book=main|gamble|emagamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
+// Chinese/number columns correctly.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	book := r.URL.Query().Get("book")
+	switch book {
+	case "main", "gamble", "emagamble", "emaonly":
+	default:
+		http.Error(w, "unknown book", http.StatusBadRequest)
+		return
+	}
+	trades := s.store.ExportTrades(book)
+	fname := fmt.Sprintf("%s-%s.csv", book, time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+fname)
+	w.Write([]byte{0xEF, 0xBB, 0xBF}) // UTF-8 BOM for Excel
+	cw := csv.NewWriter(w)
+	cw.Write([]string{"coin", "dir", "score", "entry", "tp", "sl", "exit", "pnl_pct",
+		"status", "outcome", "oi", "cvd", "funding", "open_time", "close_time"})
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	for _, t := range trades {
+		closeT := ""
+		if t.CloseTime != nil {
+			closeT = t.CloseTime.UTC().Format(time.RFC3339)
+		}
+		cw.Write([]string{
+			t.Coin, t.Dir, strconv.Itoa(t.Score), f(t.Entry), f(t.TP), f(t.SL), f(t.Cur),
+			f(t.PnLPct), t.Status, t.Outcome, f(t.OI), f(t.CVD), f(t.Funding),
+			t.OpenTime.UTC().Format(time.RFC3339), closeT,
+		})
+	}
+	cw.Flush()
+}
+
+// handleEMAGamble serves the "狙擊+EMA" tracker (gamble ignition + EMA trend).
+func (s *Server) handleEMAGamble(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.EMAGamble())
+}
+
+// handleEMAOnly serves the standalone "EMA策略" tracker (1h cross + 15m EMA200).
+func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.EMAOnly())
 }
 
 // handleScoreLog serves the log of when coins crossed the ±20 signal line.
@@ -220,11 +352,6 @@ func (s *Server) handleScoreLog(w http.ResponseWriter, r *http.Request) {
 // handleRisk serves the US/macro risk-backdrop strip.
 func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Risk())
-}
-
-// handleOrderBook serves the order-book wall/imbalance board.
-func (s *Server) handleOrderBook(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.OrderBook())
 }
 
 // handleLiquidations serves the recent liquidation feed.

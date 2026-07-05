@@ -17,11 +17,11 @@ type LiqRow struct {
 
 // LiqData is the /api/liquidations payload: a recent feed + 1h side totals.
 type LiqData struct {
-	Recent    []LiqRow `json:"recent"`     // newest first
-	LongUSD1h float64  `json:"long_usd_1h"`  // longs liquidated in last 1h
-	ShortUSD1h float64 `json:"short_usd_1h"` // shorts liquidated in last 1h
-	UpdatedAt string   `json:"updated_at"`
-	Note      string   `json:"note"`
+	Recent     []LiqRow `json:"recent"`       // newest first
+	LongUSD1h  float64  `json:"long_usd_1h"`  // longs liquidated in last 1h
+	ShortUSD1h float64  `json:"short_usd_1h"` // shorts liquidated in last 1h
+	UpdatedAt  string   `json:"updated_at"`
+	Note       string   `json:"note"`
 }
 
 // LiqTick polls OKX liquidations for the tracked coins, de-dupes, persists new

@@ -13,6 +13,8 @@ import (
 	"datahunter/internal/auth"
 	"datahunter/internal/exchange"
 	"datahunter/internal/notify"
+	"datahunter/internal/push"
+	"datahunter/internal/upbit"
 )
 
 // Snapshot is the per-coin aggregated row for the board. Its Score/Bias come
@@ -35,6 +37,7 @@ type Store struct {
 	details map[string]CoinDetail
 	updated time.Time
 	ex      *exchange.Client
+	feed    *exchange.WSFeed // live WS prices/funding/klines (REST fallback) — avoids 418 bans
 	coins   []string
 
 	altMu        sync.Mutex // guards altcoin-season day tracking
@@ -51,10 +54,19 @@ type Store struct {
 	symTypes map[string]string
 	symTime  time.Time
 
-	paperMu     sync.Mutex // guards the paper-trading books
-	paperMain    *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble  *paperBook // loose: low bar, chases already-elevated coins
-	paperPremium *paperBook // control group: gamble bar + OI/CVD aligned + funding-fuel
+	paperMu        sync.Mutex // guards the paper-trading books
+	paperMain      *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble    *paperBook // loose: low bar, chases already-elevated coins
+	paperEMAGamble *paperBook // gamble ignition + 15m>EMA200 & 1h EMA5/20 trend filter
+	paperEMA       *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+
+	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
+	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
+	emaPrev map[string]emaReady // coin -> last OBSERVED readiness (for live transition detection)
+	emaHour int64               // UTC hour bucket last evaluated (1 eval per hourly close)
+
+	emaUniMu    sync.Mutex // guards the EMA-strategy coin universe
+	emaUniverse []string   // top-N-by-volume coins the EMA strategy scans (set in Refresh)
 
 	logMu     sync.Mutex // guards the score-cross log
 	scoreLog  []ScoreEvent
@@ -64,14 +76,10 @@ type Store struct {
 	riskMu      sync.Mutex // guards the US/macro risk-backdrop cache
 	riskData    RiskData
 	riskTime    time.Time
-	calRaw      []MacroEvent    // cached high-impact US calendar (refetched ~30 min)
+	calRaw      []MacroEvent // cached high-impact US calendar (refetched ~30 min)
 	calTime     time.Time
 	lastPushKey string          // dedupe Telegram push-warning alerts
 	sentEvents  map[string]bool // dedupe high-impact event "30 min before" alerts
-
-	obMu   sync.Mutex // guards the order-book wall/imbalance cache
-	obData OrderBookData
-	obTime time.Time
 
 	liqMu     sync.Mutex // guards the liquidation feed
 	liqFeed   []LiqRow
@@ -86,34 +94,50 @@ type Store struct {
 	homeCache   *ttlCache // shared cache for per-request endpoints (public scale)
 	detailCache *ttlCache
 	klineCache  *ttlCache
+	oiCache     *ttlCache // OI-hist + long/short: 5-min TTL — /futures/data/* has its own ~1000req/5min IP cap
+	klCache     *ttlCache // 1h klines for detail/radar: cached 4 min (futures WS unusable on this net)
 
 	db           *DB              // optional SQLite persistence (nil = disabled)
 	notifier     *notify.Telegram // outbound alerts (no-op unless configured)
 	alertSignals bool             // push ±20 signal-cross alerts (ALERT_SIGNAL_CROSS=1)
+
+	upbitW            *upbit.Watcher // Upbit announcement watcher → Telegram
+	upbitListingsOnly bool           // only push listing/거래지원 notices (UPBIT_LISTINGS_ONLY=1)
+
+	pushMgr *push.Manager // Web Push (VAPID) sender
 }
 
 func NewStore(coins []string) *Store {
 	s := &Store{
-		data:        map[string]Snapshot{},
-		details:     map[string]CoinDetail{},
-		ex:          exchange.NewClient(),
-		coins:       coins,
-		paperMain:    newBook("main", 55, true, 4*time.Hour, 0),     // disciplined, fixed TP/SL
-		paperGamble:  newBook("gamble", 45, false, 1*time.Hour, 0),  // gamble, fixed TP/SL
-		paperPremium: newBook("premium", 45, false, 1*time.Hour, 0), // control: aligned + fuel
-		prevScore:    map[string]int{},
-		sentEvents:   map[string]bool{},
-		liqSeen:      map[string]bool{},
-		notifier:     notify.NewTelegram(),
-		alertSignals: os.Getenv("ALERT_SIGNAL_CROSS") == "1", // default off
-		homeCache:    newTTLCache(15 * time.Second),
-		detailCache:  newTTLCache(30 * time.Second),
-		klineCache:   newTTLCache(30 * time.Second),
+		data:              map[string]Snapshot{},
+		details:           map[string]CoinDetail{},
+		ex:                exchange.NewClient(),
+		coins:             coins,
+		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),       // disciplined, fixed TP/SL
+		paperGamble:       newBook("gamble", 45, false, 1*time.Hour, 0),    // gamble, fixed TP/SL
+		paperEMAGamble:    newBook("emagamble", 45, false, 1*time.Hour, 0), // gamble + EMA trend filter
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),              // standalone EMA cross (no time cooldown; signal-hour dedup)
+		prevScore:         map[string]int{},
+		sentEvents:        map[string]bool{},
+		liqSeen:           map[string]bool{},
+		notifier:          notify.NewTelegram(),
+		alertSignals:      os.Getenv("ALERT_SIGNAL_CROSS") == "1", // default off
+		upbitW:            upbit.NewWatcher(),
+		upbitListingsOnly: os.Getenv("UPBIT_LISTINGS_ONLY") == "1",
+		homeCache:         newTTLCache(15 * time.Second),
+		detailCache:       newTTLCache(30 * time.Second),
+		klineCache:        newTTLCache(30 * time.Second),
+		oiCache:           newTTLCache(10 * time.Minute),
+		klCache:           newTTLCache(8 * time.Minute),
 	}
+	// live WebSocket feed: prices/funding/klines over one connection instead of
+	// per-coin REST polling (the cause of recurring 418 bans). REST stays as seed
+	// + fallback; OI/long-short have no WS stream and use oiCache (low-freq REST).
+	s.feed = exchange.NewWSFeed(s.ex, coins, 260)
+	s.feed.Start()
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
-	s.paperPremium.requireAlign = true // control group: OI/CVD aligned …
-	s.paperPremium.requireFuel = true  // … AND funding-fuel (contrarian)
+	s.paperEMAGamble.requireEMA = true // gamble ignition + multi-TF EMA trend confirm
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -122,14 +146,64 @@ func NewStore(coins []string) *Store {
 		log.Printf("sqlite persistence disabled: %v", err)
 	} else {
 		s.db = db
+		s.pushMgr = push.New(s) // VAPID keypair (persisted in site_config)
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
-		s.paperPremium.trades = db.loadTrades("premium")
-		log.Printf("sqlite loaded: %d score events, main=%d gamble=%d premium=%d trades",
-			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperPremium.trades))
+		s.paperEMAGamble.trades = db.loadTrades("emagamble")
+		s.paperEMA.trades = db.loadTrades("emaonly")
+		log.Printf("sqlite loaded: %d score events, main=%d gamble=%d emagamble=%d emaonly=%d trades",
+			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
+			len(s.paperEMAGamble.trades), len(s.paperEMA.trades))
 	}
 	return s
+}
+
+// emaTopN is how many coins (by 24h quote volume) the standalone EMA strategy
+// scans — the same broad universe as the momentum radar, capped so per-hour REST
+// stays trivial on this network.
+const emaTopN = 80
+
+// setEMAUniverse picks the top-N coins by 24h quote volume (excluding
+// dollar-stablecoin perps like USDCUSDT, which never trend) as the EMA
+// strategy's scan universe. Called from Refresh, which already has the
+// all-tickers snapshot.
+func (s *Store) setEMAUniverse(tickers []exchange.MarketTicker, n int) {
+	type cv struct {
+		coin string
+		vol  float64
+	}
+	list := make([]cv, 0, len(tickers))
+	for _, t := range tickers {
+		coin := coinOf(t.Symbol)
+		if stableLike[coin] || t.QuoteVol <= 0 {
+			continue
+		}
+		list = append(list, cv{coin, t.QuoteVol})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].vol > list[j].vol })
+	if len(list) > n {
+		list = list[:n]
+	}
+	coins := make([]string, len(list))
+	for i, c := range list {
+		coins[i] = c.coin
+	}
+	s.emaUniMu.Lock()
+	s.emaUniverse = coins
+	s.emaUniMu.Unlock()
+}
+
+// emaCoins returns the EMA strategy's scan universe (top-N by volume), falling
+// back to the configured coins until the first Refresh populates it.
+func (s *Store) emaCoins() []string {
+	s.emaUniMu.Lock()
+	u := s.emaUniverse
+	s.emaUniMu.Unlock()
+	if len(u) > 0 {
+		return u
+	}
+	return s.coins
 }
 
 func dbPath() string {
@@ -163,8 +237,17 @@ func (s *Store) notifySignalCross(coin string, snap Snapshot, price, btcChg floa
 		coin, dir, snap.Score, price, tags))
 }
 
-// refreshFunding pulls the all-coins funding map (one premiumIndex call).
+// refreshFunding refreshes the all-coins funding map — from the WS feed if it's
+// healthy (no REST at all), else one REST premiumIndex call as fallback.
 func (s *Store) refreshFunding() {
+	if s.feed != nil && s.feed.Healthy() {
+		if m := s.feed.FundingMap(); len(m) > 0 {
+			s.fundMu.Lock()
+			s.fundMap = m
+			s.fundMu.Unlock()
+			return
+		}
+	}
 	m, err := s.ex.BinanceAllFunding()
 	if err != nil || len(m) == 0 {
 		return
@@ -172,6 +255,121 @@ func (s *Store) refreshFunding() {
 	s.fundMu.Lock()
 	s.fundMap = m
 	s.fundMu.Unlock()
+}
+
+// livePrices returns a coin->price map from the WS feed if healthy (no REST),
+// else one cheap all-prices REST call (weight 2, vs 40 for full 24h tickers).
+func (s *Store) livePrices() map[string]float64 {
+	if s.feed != nil && s.feed.Healthy() {
+		px := make(map[string]float64, len(s.coins))
+		for _, coin := range s.coins {
+			if p, ok := s.feed.Price(coin); ok {
+				px[coin] = p
+			}
+		}
+		if len(px) > 0 {
+			return px
+		}
+	}
+	prices, err := s.ex.BinanceAllPrices()
+	if err != nil {
+		return nil
+	}
+	px := make(map[string]float64, len(prices))
+	for sym, p := range prices {
+		px[coinOf(sym)] = p
+	}
+	return px
+}
+
+// klines1h returns 1h candles for a coin, preferring the live WS feed (last bar
+// = current forming bar, matching REST shape) and falling back to REST only when
+// the feed hasn't got enough history yet. This removes the per-coin kline REST
+// fan-out that caused 418 bans.
+func (s *Store) klines1h(coin string, limit int) []exchange.Candle {
+	if s.feed != nil && s.feed.Healthy() { // only trust the feed while it's LIVE
+		if kl := s.feed.KlinesLive(coin); len(kl) >= limit {
+			return kl[len(kl)-limit:]
+		}
+	}
+	kl, _ := s.ex.BinanceKlines(coin+"USDT", "1h", limit)
+	return kl
+}
+
+// klines1hCached is like klines1h but the REST fallback is cached ~4 min and
+// shared across the HIGH-frequency callers (detail every ~2 min, radar every
+// ~3 min), so repeated per-coin kline fetching can't accumulate into a 418 ban.
+// (Futures WS is unreachable on this network, so the fallback is the live path.)
+// refreshEMA keeps the fresh klines1h — it runs only once per hour.
+func (s *Store) klines1hCached(coin string, limit int) []exchange.Candle {
+	if s.feed != nil && s.feed.Healthy() { // only trust the feed while it's LIVE
+		if kl := s.feed.KlinesLive(coin); len(kl) >= limit {
+			return kl[len(kl)-limit:]
+		}
+	}
+	v, err := s.klCache.get(coin, func() (any, error) {
+		return s.ex.BinanceKlines(coin+"USDT", "1h", 120)
+	})
+	if err != nil || v == nil {
+		return nil
+	}
+	kl, _ := v.([]exchange.Candle)
+	if len(kl) >= limit {
+		return kl[len(kl)-limit:]
+	}
+	return kl
+}
+
+// oiHist1h returns recent 1h open-interest points for a coin (no WS stream
+// exists), cached 5 min so 36 coins don't hammer REST every cycle.
+func (s *Store) oiHist1h(coin string, limit int) []exchange.OIPoint {
+	v, err := s.oiCache.get("oi|"+coin, func() (any, error) {
+		return s.ex.BinanceOIHist(coin+"USDT", "1h", 15)
+	})
+	if err != nil || v == nil {
+		return nil
+	}
+	pts, _ := v.([]exchange.OIPoint)
+	if len(pts) > limit {
+		return pts[len(pts)-limit:]
+	}
+	return pts
+}
+
+// longShortCached returns the latest long/short account ratio, cached 5 min
+// (Binance futures/data endpoint, no WS stream).
+func (s *Store) longShortCached(coin string) exchange.LongShort {
+	v, err := s.oiCache.get("ls|"+coin, func() (any, error) {
+		return s.ex.BinanceLongShort(coin+"USDT", "5m")
+	})
+	if err != nil || v == nil {
+		return exchange.LongShort{}
+	}
+	ls, _ := v.(exchange.LongShort)
+	return ls
+}
+
+// UpbitTick polls Upbit announcements and pushes any new ones to Telegram. It
+// no-ops (and skips the Upbit fetch) when Telegram isn't configured.
+func (s *Store) UpbitTick() {
+	if s.upbitW == nil {
+		return // sends below no-op if their channel (Telegram / push) isn't set up
+	}
+	fresh, err := s.upbitW.Fresh()
+	if err != nil {
+		return
+	}
+	for _, n := range fresh {
+		if s.upbitListingsOnly && !n.IsListing() {
+			continue
+		}
+		tag := "Upbit 公告"
+		if n.IsListing() {
+			tag = "🚀 Upbit 上架"
+		}
+		s.PushSend(tag, n.Title, "https://upbit.com/service_center/notice?id="+strconv.Itoa(n.ID))
+		go s.notifier.Send(n.TelegramText())
+	}
 }
 
 // Funding returns the latest funding rate for a coin (0 if unknown).
@@ -196,16 +394,86 @@ func (s *Store) SeedAdmin(username, password string) {
 	log.Printf("seeded admin user: %s", username)
 }
 
-// Authenticate verifies credentials; returns the role if valid and not banned.
-func (s *Store) Authenticate(username, password string) (string, bool) {
+// Authenticate verifies the password and returns (role, status, ok). ok means
+// the password matched; the caller must additionally require status=="active"
+// to allow login (so it can message "審核中" / "已停用" distinctly).
+func (s *Store) Authenticate(username, password string) (role, status string, ok bool) {
 	if s.db == nil {
-		return "", false
+		return "", "", false
 	}
-	h, role, status, ok := s.db.userAuth(username)
-	if !ok || status == "banned" || !auth.CheckPassword(h, password) {
-		return "", false
+	h, r, st, found := s.db.userAuth(username)
+	if !found || !auth.CheckPassword(h, password) {
+		return "", "", false
 	}
-	return role, true
+	return r, st, true
+}
+
+// validAcct: 4–16 chars, ASCII letters/digits only.
+func validAcct(s string) bool {
+	if len(s) < 4 || len(s) > 16 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// validPassword: 4–16 ASCII chars with at least one upper, lower, digit and special.
+func validPassword(p string) bool {
+	if len(p) < 4 || len(p) > 16 {
+		return false
+	}
+	var up, lo, dig, sp bool
+	for _, r := range p {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			up = true
+		case r >= 'a' && r <= 'z':
+			lo = true
+		case r >= '0' && r <= '9':
+			dig = true
+		case r >= 0x21 && r <= 0x7e: // printable ASCII, non-alnum = special
+			sp = true
+		default:
+			return false // space / non-ASCII not allowed
+		}
+	}
+	return up && lo && dig && sp
+}
+
+// Register creates a self-service account in "pending" review status (member
+// role). proof is the stored asset-proof image path; exchange goes in notes.
+func (s *Store) Register(username, password, uid, exchange, proof string) error {
+	if s.db == nil {
+		return errors.New("persistence disabled")
+	}
+	if !validAcct(username) {
+		return errors.New("帳號需 4–16 碼英文或數字")
+	}
+	if !validPassword(password) {
+		return errors.New("密碼需 4–16 碼,且含大寫、小寫、數字與特殊符號")
+	}
+	if s.db.userExists(username) {
+		return errors.New("帳號已存在")
+	}
+	h, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	s.db.registerUser(username, h, uid, exchange, proof)
+	return nil
+}
+
+// LiveRoleStatus returns a user's CURRENT role+status from the DB (for the
+// per-request gate: bans and role changes take effect immediately).
+func (s *Store) LiveRoleStatus(username string) (role, status string, ok bool) {
+	if s.db == nil {
+		return "", "", false
+	}
+	return s.db.userRoleStatus(username)
 }
 
 func (s *Store) Users() []User {
@@ -236,6 +504,13 @@ func (s *Store) CreateUser(username, password, role, status string) error {
 func (s *Store) SetUserRole(username, role, status string) {
 	if s.db != nil {
 		s.db.setUserRole(username, role, status)
+	}
+}
+
+// DeleteUser removes an account (and its push subscriptions).
+func (s *Store) DeleteUser(username string) {
+	if s.db != nil {
+		s.db.deleteUser(username)
 	}
 }
 
@@ -326,6 +601,9 @@ func (s *Store) Refresh() {
 		tmap[t.Symbol] = t
 	}
 	btcChg := tmap["BTCUSDT"].ChgPct
+	if len(tickers) > 0 {
+		s.setEMAUniverse(tickers, emaTopN) // top-N by volume → EMA strategy universe
+	}
 
 	nextSnaps := make(map[string]Snapshot, len(s.coins))
 	nextDetails := make(map[string]CoinDetail, len(s.coins))

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 
 // ---- shared data ----
 const home = ref(null)
@@ -18,9 +18,45 @@ const username = ref('')
 const loginOpen = ref(false)
 const loginForm = ref({ u: '', p: '' })
 const loginErr = ref('')
+const status = ref('')
+const authReady = ref(false)
+const authMsg = ref('')
+const authTab = ref('login')
+const regForm = ref({ u: '', p: '', uid: '', exchange: '' })
+const regFile = ref(null)
+const regErr = ref('')
+const regDone = ref('')
 const roleRank = { public: 0, member: 1, vip: 2, admin: 3 }
+const authed = computed(() => role.value !== 'public' && status.value === 'active')
 function can(min) {
   return (roleRank[role.value] || 0) >= (roleRank[min] || 0)
+}
+function clearAuth(msg) {
+  token.value = ''
+  localStorage.removeItem('token')
+  role.value = 'public'
+  status.value = ''
+  username.value = ''
+  authMsg.value = msg || ''
+}
+// ---- toast prompt ----
+const toastMsg = ref('')
+const toastType = ref('ok')
+let toastTimer = null
+function showToast(msg, type = 'ok') {
+  toastMsg.value = msg
+  toastType.value = type
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = '' }, 3200)
+}
+// ---- account/password input rules (英數/特殊符號) ----
+function sanitizeAcct(v) { return v.replace(/[^A-Za-z0-9]/g, '').slice(0, 16) }        // 帳號:只留英數
+function sanitizePw(v) { return v.replace(/[^\x21-\x7e]/g, '').slice(0, 16) }          // 密碼:只留可見 ASCII(英數+特殊,無空白/中文)
+function validAcct(v) { return /^[A-Za-z0-9]{4,16}$/.test(v) }
+function validPw(v) {
+  return v.length >= 4 && v.length <= 16 &&
+    /[a-z]/.test(v) && /[A-Z]/.test(v) && /[0-9]/.test(v) &&
+    /[^A-Za-z0-9]/.test(v) && /^[\x21-\x7e]+$/.test(v)
 }
 function authFetch(url, opts = {}) {
   const headers = { ...(opts.headers || {}) }
@@ -29,22 +65,36 @@ function authFetch(url, opts = {}) {
 }
 async function loadMe() {
   if (!token.value) {
-    role.value = 'public'
+    clearAuth('')
+    authReady.value = true
     return
   }
   try {
     const res = await authFetch('/api/auth/me')
-    if (res.ok) {
-      const d = await res.json()
-      role.value = d.role || 'public'
+    const d = res.ok ? await res.json() : {}
+    if (!d.role || d.role === 'public') {
+      clearAuth('閒置超時,請重新登入') // token expired / invalid
+    } else if (d.status !== 'active') {
+      clearAuth(d.status === 'pending' ? '帳號審核中,請待管理員通過' : '帳號已停用,請聯繫管理員')
+      authTab.value = 'login'
+    } else {
+      role.value = d.role
+      status.value = 'active'
       username.value = d.username || ''
+      authMsg.value = ''
     }
   } catch (e) {
-    /* ignore */
+    /* network hiccup: keep current state */
   }
+  authReady.value = true
 }
 async function doLogin() {
   loginErr.value = ''
+  if (!loginForm.value.u || !loginForm.value.p) {
+    loginErr.value = '請輸入帳號與密碼'
+    showToast(loginErr.value, 'err')
+    return
+  }
   try {
     const res = await authFetch('/api/auth/login', {
       method: 'POST',
@@ -52,26 +102,67 @@ async function doLogin() {
       body: JSON.stringify({ username: loginForm.value.u, password: loginForm.value.p }),
     })
     if (!res.ok) {
-      loginErr.value = '帳號或密碼錯誤'
+      loginErr.value = (await res.text()).trim() || '帳號或密碼錯誤'
+      showToast(loginErr.value, 'err')
       return
     }
     const d = await res.json()
     token.value = d.token
     localStorage.setItem('token', d.token)
     role.value = d.role
+    status.value = 'active'
     username.value = d.username
+    authMsg.value = ''
     loginOpen.value = false
     loginForm.value = { u: '', p: '' }
+    showToast('登入成功,歡迎回來!', 'ok')
     loadAll()
   } catch (e) {
     loginErr.value = '登入失敗'
+    showToast('登入失敗,請稍後再試', 'err')
+  }
+}
+function onRegFile(e) {
+  regFile.value = (e.target.files && e.target.files[0]) || null
+}
+async function doRegister() {
+  regErr.value = ''
+  regDone.value = ''
+  if (!validAcct(regForm.value.u)) {
+    regErr.value = '帳號需 4–16 碼,僅限英文與數字'
+    showToast(regErr.value, 'err')
+    return
+  }
+  if (!validPw(regForm.value.p)) {
+    regErr.value = '密碼需 4–16 碼,且同時含大寫、小寫、數字與特殊符號'
+    showToast(regErr.value, 'err')
+    return
+  }
+  const fd = new FormData()
+  fd.append('username', regForm.value.u)
+  fd.append('password', regForm.value.p)
+  fd.append('uid', regForm.value.uid)
+  fd.append('exchange', regForm.value.exchange)
+  if (regFile.value) fd.append('proof', regFile.value)
+  try {
+    const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
+    if (!res.ok) {
+      regErr.value = (await res.text()).trim() || '註冊失敗'
+      showToast(regErr.value, 'err')
+      return
+    }
+    regDone.value = '註冊成功!帳號審核中,待管理員通過後即可登入。'
+    showToast('註冊成功!帳號審核中,待管理員通過', 'ok')
+    regForm.value = { u: '', p: '', uid: '', exchange: '' }
+    regFile.value = null
+    authTab.value = 'login'
+  } catch (e) {
+    regErr.value = '註冊失敗'
+    showToast('註冊失敗,請稍後再試', 'err')
   }
 }
 function logout() {
-  token.value = ''
-  localStorage.removeItem('token')
-  role.value = 'public'
-  username.value = ''
+  clearAuth('')
   mainTab.value = 'ranking'
 }
 const ranking = ref(null)
@@ -130,6 +221,119 @@ async function updateUser(u) {
   adminMsg.value = res.ok ? '✓ 已更新 ' + u.username : '✗ 更新失敗'
   loadUsers()
 }
+const proofView = ref('')
+const pendingUsers = computed(() => users.value.filter((u) => u.status === 'pending'))
+async function approveUser(u) { u.status = 'active'; await updateUser(u) }
+async function rejectUser(u) { u.status = 'banned'; await updateUser(u) }
+async function toggleEnabled(u) { u.status = u.status === 'active' ? 'banned' : 'active'; await updateUser(u) }
+async function toggleVip(u) {
+  if (u.role === 'admin') return
+  u.role = u.role === 'vip' ? 'member' : 'vip'
+  await updateUser(u)
+}
+async function deleteUser(u) {
+  if (u.username === username.value) return
+  if (!confirm('確定刪除帳號「' + u.username + '」?此動作無法復原。')) return
+  const res = await authFetch('/api/admin/users?username=' + encodeURIComponent(u.username), { method: 'DELETE' })
+  adminMsg.value = res.ok ? '✓ 已刪除 ' + u.username : '✗ 刪除失敗'
+  loadUsers()
+}
+
+// ---- articles (Feature 3) ----
+const articles = ref([])
+const articleView = ref(null) // open article detail
+const artEdit = ref(null) // admin editor draft (null = closed)
+async function loadArticles() {
+  try {
+    const res = await authFetch('/api/articles')
+    if (res.ok) articles.value = (await res.json()) || []
+  } catch (e) {
+    /* secondary */
+  }
+}
+async function uploadImage(file, sub) {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('sub', sub)
+  const res = await authFetch('/api/admin/upload', { method: 'POST', body: fd })
+  return res.ok ? (await res.json()).path : ''
+}
+function newArticle() { artEdit.value = { id: 0, title: '', cover: '', tags: [], blocks: [{ type: 'text', text: '' }] } }
+function editArticle(a) { artEdit.value = JSON.parse(JSON.stringify(a)); articleView.value = null }
+function addBlock(type) { artEdit.value.blocks.push(type === 'image' ? { type: 'image', image: '' } : { type: 'text', text: '' }) }
+function removeBlock(i) { artEdit.value.blocks.splice(i, 1) }
+function moveBlock(i, d) {
+  const b = artEdit.value.blocks, j = i + d
+  if (j < 0 || j >= b.length) return
+  ;[b[i], b[j]] = [b[j], b[i]]
+}
+async function onCoverPick(e) {
+  const f = e.target.files && e.target.files[0]
+  if (f) artEdit.value.cover = await uploadImage(f, 'articles')
+}
+async function onBlockImg(e, i) {
+  const f = e.target.files && e.target.files[0]
+  if (f) artEdit.value.blocks[i].image = await uploadImage(f, 'articles')
+}
+function setArtTags(v) { artEdit.value.tags = v.split(',').map((t) => t.trim()).filter(Boolean) }
+async function saveArticle() {
+  if (!artEdit.value.title.trim()) return
+  const res = await authFetch('/api/admin/articles', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(artEdit.value),
+  })
+  if (res.ok) { artEdit.value = null; loadArticles() }
+}
+async function removeArticle(a) {
+  if (!confirm('確定刪除「' + a.title + '」?')) return
+  await authFetch('/api/admin/articles?id=' + a.id, { method: 'DELETE' })
+  articleView.value = null
+  loadArticles()
+}
+
+// ---- site config: logo / social / QR (Feature 4) ----
+const config = ref({})
+const qrHidden = ref(false)
+const socialMeta = {
+  youtube: { icon: '▶', color: '#ff0000', name: 'YouTube' },
+  telegram: { icon: '✈', color: '#229ed9', name: 'Telegram' },
+  instagram: { icon: '◎', color: '#e1306c', name: 'Instagram' },
+  facebook: { icon: 'f', color: '#1877f2', name: 'Facebook' },
+  line: { icon: 'L', color: '#06c755', name: 'LINE' },
+  custom: { icon: '🔗', color: '#888', name: '連結' },
+}
+function socialInfo(p) { return socialMeta[p] || socialMeta.custom }
+const socialLinks = computed(() => { try { return JSON.parse(config.value.social || '[]') } catch (e) { return [] } })
+const logoUrl = computed(() => config.value.logo || '/logo.png')
+async function loadConfig() {
+  try {
+    const res = await authFetch('/api/config')
+    if (res.ok) config.value = (await res.json()) || {}
+  } catch (e) {
+    /* secondary */
+  }
+}
+const cfgSocial = ref([])
+function loadCfgEditor() { cfgSocial.value = socialLinks.value.map((s) => ({ ...s })) }
+function addSocial() { cfgSocial.value.push({ platform: 'youtube', url: '' }) }
+function removeSocial(i) { cfgSocial.value.splice(i, 1) }
+async function setConfig(key, value) {
+  const res = await authFetch('/api/admin/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value }),
+  })
+  if (res.ok) { await loadConfig(); adminMsg.value = '✓ 已儲存設定' }
+  return res.ok
+}
+async function saveSocial() { await setConfig('social', JSON.stringify(cfgSocial.value.filter((s) => s.url))) }
+async function onLogoPick(e) {
+  const f = e.target.files && e.target.files[0]
+  if (f) { const p = await uploadImage(f, 'logo'); if (p) await setConfig('logo', p) }
+}
+async function onQrPick(e) {
+  const f = e.target.files && e.target.files[0]
+  if (f) { const p = await uploadImage(f, 'qr'); if (p) await setConfig('qr', p) }
+}
 
 async function loadHome() {
   try {
@@ -159,7 +363,13 @@ async function loadRadar() {
   try {
     const res = await authFetch('/api/radar')
     if (!res.ok) return
-    radar.value = await res.json()
+    const d = await res.json()
+    // normalise: when Binance has no data (e.g. a ban) the arrays come back
+    // null → guard so the template's .length / v-for never crash the view.
+    d.pump = d.pump || []
+    d.dump = d.dump || []
+    d.stocks = d.stocks || []
+    radar.value = d
   } catch (e) {
     /* radar is secondary */
   }
@@ -167,20 +377,47 @@ async function loadRadar() {
 
 const paper = ref(null)
 const gamble = ref(null)
-const premium = ref(null)
+const emaGamble = ref(null)
+const emaOnly = ref(null)
 async function loadPaper() {
   try {
-    const [p, g, pr] = await Promise.all([authFetch('/api/paper'), authFetch('/api/gamble'), authFetch('/api/premium')])
+    const [p, g, eg, eo] = await Promise.all([
+      authFetch('/api/paper'), authFetch('/api/gamble'),
+      authFetch('/api/ema-gamble'), authFetch('/api/ema-only')
+    ])
     if (p.ok) paper.value = await p.json()
     if (g.ok) gamble.value = await g.json()
-    if (pr.ok) premium.value = await pr.json()
+    if (eg.ok) emaGamble.value = await eg.json()
+    if (eo.ok) emaOnly.value = await eo.json()
   } catch (e) {
     /* paper is secondary */
   }
 }
 const book = computed(() =>
-  mainTab.value === 'gamble' ? gamble.value : mainTab.value === 'premium' ? premium.value : paper.value
+  mainTab.value === 'gamble' ? gamble.value
+    : mainTab.value === 'emagamble' ? emaGamble.value
+    : mainTab.value === 'emaonly' ? emaOnly.value
+    : paper.value
 )
+
+// admin-only: download the current strategy book's full trade history as CSV
+async function exportCSV() {
+  const map = { paper: 'main', gamble: 'gamble', emagamble: 'emagamble', emaonly: 'emaonly' }
+  const bookName = map[mainTab.value]
+  if (!bookName) return
+  try {
+    const res = await authFetch('/api/admin/export?book=' + bookName)
+    if (!res.ok) { showToast('匯出失敗', 'err'); return }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = bookName + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '') + '.csv'
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    showToast('CSV 已匯出', 'ok')
+  } catch (e) { showToast('匯出失敗', 'err') }
+}
 
 // ---- time-window filter for the record pages (訊號紀錄 / 模擬倉 / 賭博單) ----
 const timeWin = ref(0) // ms; 0 = all
@@ -260,12 +497,10 @@ function evSoon(e) {
   return h < 6 // highlight events firing within ~6h (minutes-only ⇒ h=0)
 }
 
-const orderbook = ref(null)
 const liquidations = ref(null)
 async function loadFlow() {
   try {
-    const [ob, lq] = await Promise.all([authFetch('/api/orderbook'), authFetch('/api/liquidations')])
-    if (ob.ok) orderbook.value = await ob.json()
+    const lq = await authFetch('/api/liquidations')
     if (lq.ok) liquidations.value = await lq.json()
   } catch (e) {
     /* secondary */
@@ -474,11 +709,13 @@ function scoreClass(n) {
 
 // load everything the current role is allowed to see (gated endpoints 403 quietly)
 function loadAll() {
+  if (!authed.value) return // gated: nothing loads until an active member+ is in
   loadRanking()
   loadHome()
   loadRisk()
   loadEvents()
   loadFlow()
+  loadArticles()
   if (can('member')) {
     loadBoard()
     loadRadar()
@@ -487,15 +724,111 @@ function loadAll() {
   if (can('vip')) loadPaper()
   if (can('admin')) loadUsers()
 }
-onMounted(async () => {
+// per-tick: re-verify the session (idle timeout / ban take effect within 15s),
+// then refresh data. Also re-check whenever the user switches page (tab).
+async function tick() {
   await loadMe()
   loadAll()
-  timer = setInterval(loadAll, 15000)
+}
+
+// ---- PWA: install + web push (Feature 5) ----
+const deferredPrompt = ref(null)
+const canInstall = ref(false)
+const notifState = ref('') // '' | 'on' | 'denied' | 'unsupported'
+function urlB64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const b64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(b64)
+  const arr = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
+  return arr
+}
+async function enableNotifications() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) { notifState.value = 'unsupported'; return }
+  const perm = await Notification.requestPermission()
+  if (perm !== 'granted') { notifState.value = 'denied'; return }
+  try {
+    const reg = await navigator.serviceWorker.ready
+    const res = await authFetch('/api/push/key')
+    const { key } = await res.json()
+    if (!key) { notifState.value = 'unsupported'; return }
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(key) })
+    await authFetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) })
+    notifState.value = 'on'
+  } catch (e) { notifState.value = 'denied' }
+}
+async function installApp() {
+  if (!deferredPrompt.value) return
+  deferredPrompt.value.prompt()
+  await deferredPrompt.value.userChoice
+  deferredPrompt.value = null
+  canInstall.value = false
+}
+
+onMounted(async () => {
+  loadConfig()
+  await loadMe()
+  loadAll()
+  timer = setInterval(tick, 15000)
+  // register service worker for PWA + push
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+  if (window.Notification && Notification.permission === 'granted') notifState.value = 'on'
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    deferredPrompt.value = e
+    canInstall.value = true
+  })
 })
 onUnmounted(() => clearInterval(timer))
+watch(mainTab, loadMe)
 </script>
 
 <template>
+  <!-- toast prompt -->
+  <transition name="toastfade">
+    <div v-if="toastMsg" class="toast" :class="toastType">{{ toastMsg }}</div>
+  </transition>
+
+  <!-- auth gate: shown until an APPROVED (active) member+ is logged in -->
+  <div v-if="!authed" class="authgate">
+    <div class="authcard">
+      <img src="/logo.png" class="authlogo" alt="JMCH" />
+      <p class="authslogan">Just MONEY Come Here</p>
+
+      <div v-if="!authReady" class="authmsg">驗證中…</div>
+      <template v-else>
+        <div class="authtabs">
+          <button :class="{ on: authTab === 'login' }" @click="authTab = 'login'; regErr = ''; regDone = ''">登入</button>
+          <button :class="{ on: authTab === 'register' }" @click="authTab = 'register'; loginErr = ''">註冊</button>
+        </div>
+
+        <div v-if="authMsg" class="authnote">{{ authMsg }}</div>
+
+        <template v-if="authTab === 'login'">
+          <input :value="loginForm.u" @input="loginForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英數)" @keyup.enter="doLogin" />
+          <input :value="loginForm.p" @input="loginForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼" @keyup.enter="doLogin" />
+          <button class="authbtn" @click="doLogin">登入</button>
+          <div v-if="loginErr" class="autherr">{{ loginErr }}</div>
+        </template>
+
+        <template v-else>
+          <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
+          <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
+          <input v-model="regForm.uid" class="authin" placeholder="UID" />
+          <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註)" />
+          <label class="authfile">
+            <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片' }}</span>
+            <input type="file" accept="image/*" @change="onRegFile" hidden />
+          </label>
+          <button class="authbtn" @click="doRegister">註冊</button>
+          <div v-if="regErr" class="autherr">{{ regErr }}</div>
+          <div v-if="regDone" class="authok">{{ regDone }}</div>
+          <p class="authhint">註冊後為「審核中」狀態,需管理員審核通過才能登入。</p>
+        </template>
+      </template>
+    </div>
+  </div>
+
   <!-- top bar -->
   <header class="topbar">
     <div class="tickers" v-if="home">
@@ -517,6 +850,9 @@ onUnmounted(() => clearInterval(timer))
         OI收縮過濾 {{ qualityFilter ? '✓' : '✕' }}
       </button>
       <span v-if="role !== 'public'" class="userchip">{{ username }} <em>{{ role }}</em>
+        <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
+        <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
+        <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
         <button class="regbtn" @click="logout">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
@@ -652,7 +988,10 @@ onUnmounted(() => clearInterval(timer))
       <button :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
         財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
       </button>
-      <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">盤口 / 清算</button>
+      <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
+      <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
+        文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
+      </button>
       <template v-if="can('member')">
         <span class="navgroup sep">會員</span>
         <button :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
@@ -663,25 +1002,25 @@ onUnmounted(() => clearInterval(timer))
           訊號紀錄<em v-if="scoreLog.length" class="navbadge">{{ scoreLog.length }}</em>
         </button>
         <button :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
-        <button :class="{ active: mainTab === 'stocks' }" @click="mainTab = 'stocks'">
-          美股代幣<em v-if="radar && (radar.stocks || []).length" class="navbadge">{{ (radar.stocks || []).length }}</em>
-        </button>
       </template>
       <template v-if="can('vip')">
         <span class="navgroup sep">VIP</span>
         <button :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
-          訊號追蹤<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
+          星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
         </button>
         <button :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
-          動能狙擊單<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
+          超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
         </button>
-        <button :class="{ active: mainTab === 'premium' }" @click="mainTab = 'premium'">
-          精選狙擊單<em v-if="premium && premium.open.length" class="navbadge">{{ premium.open.length }}</em>
+        <button :class="{ active: mainTab === 'emagamble' }" @click="mainTab = 'emagamble'">
+          彗星<em v-if="emaGamble && emaGamble.open.length" class="navbadge">{{ emaGamble.open.length }}</em>
+        </button>
+        <button :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
+          銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
         </button>
       </template>
       <template v-if="can('admin')">
         <span class="navgroup sep">管理</span>
-        <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers()">
+        <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor()">
           後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
         </button>
       </template>
@@ -690,10 +1029,9 @@ onUnmounted(() => clearInterval(timer))
     <!-- 綜合排行 Top 10 (public, scores only) -->
     <section v-if="mainTab === 'ranking'">
       <div class="mk-head">
-        <h2>綜合評分排行榜</h2>
+        <h2>綜合評分排行榜<span class="help" tabindex="0">?<span class="help-pop">綜合評分(OI 變化率 + CVD 趨勢 + 結構 + 動能 + 費率…)。公開版只提供<b>數據與分數</b>,<b>不提供進場/止盈止損點位</b>。⚠️ 非投資建議。</span></span></h2>
         <span class="mk-count" v-if="ranking && ranking.updated_at">每小時更新 · {{ new Date(ranking.updated_at).toLocaleTimeString() }}</span>
       </div>
-      <p class="radar-note">綜合評分(OI 變化率 + CVD 趨勢 + 結構 + 動能 + 費率…)。公開版只提供<b>數據與分數</b>,<b>不提供進場/止盈止損點位</b>。⚠️ 非投資建議。</p>
       <div class="rank-grid" v-if="ranking">
         <section class="card">
           <h3 class="psub"><span class="led long"></span>多頭 Top 10</h3>
@@ -728,7 +1066,7 @@ onUnmounted(() => clearInterval(timer))
       </div>
       <p v-else class="loading">載入排行榜中…</p>
       <p v-if="role === 'public'" class="radar-note" style="margin-top:14px">
-        🔒 想看 <b>OI 儀表板、雷達、訊號追蹤、動能狙擊單(含進出場)</b>?請<b @click="loginOpen = true" style="cursor:pointer;text-decoration:underline">登入</b>會員/VIP。申請方式見公告(填 Google 表單 + 入金 300U + UID 證明)。
+        🔒 想看 <b>OI 儀表板、爆發雷達、VIP 量化訊號(含進出場)</b>?請<b @click="loginOpen = true" style="cursor:pointer;text-decoration:underline">登入</b>會員/VIP。申請方式見公告。
       </p>
     </section>
 
@@ -737,8 +1075,65 @@ onUnmounted(() => clearInterval(timer))
       <div class="mk-head"><h2>後台 · 使用者管理</h2><span class="mk-count">{{ users.length }} 位</span></div>
       <p v-if="adminMsg" class="admin-msg">{{ adminMsg }}</p>
 
+      <!-- 待審核 -->
+      <section v-if="pendingUsers.length" class="card adminbox">
+        <h3 class="psub">🟡 待審核 ({{ pendingUsers.length }})</h3>
+        <div class="reviewgrid">
+          <div v-for="u in pendingUsers" :key="u.username" class="reviewcard">
+            <div v-if="u.proof" class="reviewproof" @click="proofView = u.proof"><img :src="u.proof" alt="資產證明" /></div>
+            <div v-else class="reviewproof empty">無證明圖</div>
+            <div class="reviewinfo">
+              <div class="ri-name">{{ u.username }}</div>
+              <div class="ri-row">UID:<b>{{ u.uid || '—' }}</b></div>
+              <div class="ri-row">交易所:<b>{{ u.notes || '—' }}</b></div>
+              <div class="ri-row"><small>{{ u.created ? new Date(u.created).toLocaleString() : '' }}</small></div>
+              <div class="reviewact">
+                <button class="okbtn" @click="approveUser(u)">✓ 通過</button>
+                <button class="nobtn" @click="rejectUser(u)">✕ 駁回</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 所有使用者 -->
+      <section class="card">
+        <h3 class="psub">所有使用者</h3>
+        <table class="grid">
+          <thead><tr><th>證明</th><th>帳號</th><th>UID / 交易所</th><th>角色</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
+          <tbody>
+            <tr v-for="u in users" :key="u.username">
+              <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="proofView = u.proof" /><span v-else>—</span></td>
+              <td class="coin">{{ u.username }}
+                <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
+                <em v-else-if="u.status === 'banned'" class="qtag bad">停用</em>
+              </td>
+              <td class="rl-text"><div>{{ u.uid || '—' }}</div><small>{{ u.notes || '—' }}</small></td>
+              <td>{{ u.role }}</td>
+              <td class="r">
+                <button v-if="u.role !== 'admin'" class="regbtn" :class="{ on: u.role === 'vip' }" @click="toggleVip(u)">{{ u.role === 'vip' ? 'VIP ✓' : '設 VIP' }}</button>
+                <em v-else class="qtag">admin</em>
+              </td>
+              <td class="r">
+                <label v-if="u.username !== username && u.role !== 'admin'" class="switch">
+                  <input type="checkbox" :checked="u.status === 'active'" @change="toggleEnabled(u)" />
+                  <span class="sw-track"></span>
+                </label>
+                <em v-else class="qtag good">{{ u.username === username ? '本人' : '—' }}</em>
+              </td>
+              <td class="r">
+                <button v-if="u.username !== username" class="delbtn" @click="deleteUser(u)" title="刪除帳號">🗑</button>
+                <span v-else>—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="!users.length" class="empty">尚無使用者。</p>
+      </section>
+
+      <!-- 手動新增 -->
       <section class="card adminbox">
-        <h3 class="psub">新增使用者</h3>
+        <h3 class="psub">手動新增使用者</h3>
         <div class="newuser">
           <input v-model="newUser.u" placeholder="帳號" />
           <input v-model="newUser.p" type="text" placeholder="密碼" />
@@ -754,39 +1149,46 @@ onUnmounted(() => clearInterval(timer))
           </select>
           <button class="loginbtn" @click="createUser">新增</button>
         </div>
-        <p class="loginhint">手動核可流程:用戶填表申請 → 你在這裡建帳號並設 role(member/vip)。停權改 status=banned。</p>
       </section>
 
-      <section class="card">
-        <table class="grid">
-          <thead><tr><th>帳號</th><th>角色</th><th>狀態</th><th>UID</th><th>建立</th><th></th></tr></thead>
-          <tbody>
-            <tr v-for="u in users" :key="u.username">
-              <td class="coin">{{ u.username }}</td>
-              <td>
-                <select v-model="u.role" :disabled="u.username === username">
-                  <option value="member">member</option>
-                  <option value="vip">vip</option>
-                  <option value="admin">admin</option>
-                </select>
-              </td>
-              <td>
-                <select v-model="u.status" :disabled="u.username === username">
-                  <option value="active">active</option>
-                  <option value="pending">pending</option>
-                  <option value="banned">banned</option>
-                </select>
-              </td>
-              <td>{{ u.uid || '—' }}</td>
-              <td><small>{{ u.created ? new Date(u.created).toLocaleDateString() : '—' }}</small></td>
-              <td class="r">
-                <button v-if="u.username !== username" class="regbtn" @click="updateUser(u)">儲存</button>
-                <em v-else class="qtag good">本人</em>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!users.length" class="empty">尚無使用者(除了你)。</p>
+      <!-- 站台設定:logo / 社群 / QR -->
+      <section class="card adminbox">
+        <h3 class="psub">站台設定</h3>
+        <div class="cfg-row">
+          <span class="cfg-k">品牌 Logo</span>
+          <img v-if="config.logo" :src="config.logo" class="cfg-logo" />
+          <label class="authfile cfg-file"><span>上傳 Logo</span><input type="file" accept="image/*" hidden @change="onLogoPick" /></label>
+          <button v-if="config.logo" class="delbtn" @click="setConfig('logo', '')">清除</button>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">首頁 QR</span>
+          <img v-if="config.qr" :src="config.qr" class="cfg-qr" />
+          <label class="authfile cfg-file"><span>上傳 QR 圖</span><input type="file" accept="image/*" hidden @change="onQrPick" /></label>
+          <button v-if="config.qr" class="delbtn" @click="setConfig('qr', '')">清除</button>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">QR 點擊連結</span>
+          <input class="authin" :value="config.qr_link || ''" @change="setConfig('qr_link', $event.target.value)" placeholder="選填:點擊 QR 開啟的網址" />
+        </div>
+
+        <h4 class="cfg-sub">社群連結 <button class="minibtn" @click="loadCfgEditor">載入目前</button></h4>
+        <div v-for="(s, i) in cfgSocial" :key="i" class="cfg-social">
+          <select v-model="s.platform">
+            <option value="youtube">YouTube</option>
+            <option value="telegram">Telegram</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="line">LINE</option>
+            <option value="custom">其他連結</option>
+          </select>
+          <input class="authin" v-model="s.url" placeholder="https://…" />
+          <button class="minibtn del" @click="removeSocial(i)">✕</button>
+        </div>
+        <div class="ae-addrow">
+          <button class="regbtn" @click="addSocial">＋ 新增社群</button>
+          <button class="loginbtn" @click="saveSocial">儲存社群</button>
+        </div>
+        <p class="loginhint">社群會顯示在頁尾(logo 引導跳轉);QR 懸浮在首頁右下角。</p>
       </section>
     </section>
 
@@ -879,15 +1281,9 @@ onUnmounted(() => clearInterval(timer))
     <!-- 爆發雷達 (breakout radar, small coins included) -->
     <section v-else-if="mainTab === 'radar'">
       <div class="mk-head">
-        <h2>爆發雷達</h2>
+        <h2>爆發雷達<span class="help" tabindex="0">?<span class="help-pop"><b>點火分數(0–100)</b>：回測驗證的暴噴前兆——「<b>OI 堆積</b>(最強)＋<b>成交量突增</b>＋<b>鯨魚單量</b>＋剛開始微動」，並以 24h 漲幅做「早晚」加權——<b>已經噴一大段的會被降權</b>，讓雷達偏向「<b>剛要發動</b>」而非追高。欄位：<b>量×</b>=近 3h 均量 ÷ 近 48h 均量；<b>OI</b>=未平倉近 12h 變化(堆積)；<b>3H</b>=近 3 小時漲跌。<br>⚠️ 發掘用途、高風險、誤報多，非回測驗證的精準進場訊號。</span></span></h2>
         <span class="mk-count" v-if="radar">掃描 {{ radar.scanned }} 個合約（全市場・含小幣）· 早期優先</span>
       </div>
-      <p class="radar-note">
-        <b>點火分數(0–100)</b>：回測驗證的暴噴前兆——「<b>OI 堆積</b>(最強)＋<b>成交量突增</b>＋<b>鯨魚單量</b>＋剛開始微動」，
-        並以 24h 漲幅做「早晚」加權——<b>已經噴一大段的會被降權</b>，讓雷達偏向「<b>剛要發動</b>」而非追高。
-        欄位：<b>量×</b>=近 3h 均量 ÷ 近 48h 均量；<b>OI</b>=未平倉近 12h 變化(堆積)；<b>3H</b>=近 3 小時漲跌。
-        <br>⚠️ 發掘用途、高風險、誤報多,非回測驗證的精準進場訊號。
-      </p>
       <div v-if="radar" class="radar-cols">
         <div class="card">
           <div class="rec-head"><span class="led long"></span>潛在爆衝</div>
@@ -929,10 +1325,9 @@ onUnmounted(() => clearInterval(timer))
     <!-- 訊號紀錄 (when score crossed ±20) -->
     <section v-else-if="mainTab === 'scorelog'">
       <div class="mk-head">
-        <h2>訊號紀錄</h2>
+        <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。已存入 SQLite,重啟不流失。</span></span></h2>
         <span class="mk-count">每次評分跨過 ±20(進入做多/做空)的時間點 · 顯示 {{ scoreLogF.length }} / {{ scoreLog.length }} 筆</span>
       </div>
-      <p class="radar-note">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。已存入 SQLite,重啟不流失。</p>
       <div class="timefilter">
         <span class="tf-label">時間範圍</span>
         <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
@@ -952,24 +1347,21 @@ onUnmounted(() => clearInterval(timer))
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'premium'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emagamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '動能狙擊單（模擬）' : mainTab === 'premium' ? '精選狙擊單（對照組）' : '訊號追蹤（模擬）' }}</h2>
-        <span class="mk-count" v-if="book">每 60 秒監控 · 止盈 +0.618R / 止損 −0.5R</span>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emagamble' ? '彗星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}</h2>
+        <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
+        <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
       </div>
-      <p v-if="mainTab === 'premium'" class="radar-note">
-        <b>精選對照組</b>:跟動能狙擊同門檻(點火 <b>≥45</b>),但<b>同時要求兩個已驗證條件</b>——
-        <b>OI/CVD 同向</b>(多:OI+/CVD+,空:OI−/CVD−)<b>且 費率燃料</b>(做多時費率為負、做空時為正)。
-        訊號量會少很多(約 1 成),目的是<b>往前累積真實單</b>,驗證「精選層」勝率是否真的較高。⚠️ 純模擬、未計手續費、樣本需時間累積。
-      </p>
-      <p v-else-if="mainTab === 'gamble'" class="radar-note">
-        <b>動能狙擊版</b>:門檻放低(點火 <b>≥45</b>)、<b>不要求突破觸發</b>(連已經在半山腰、已噴的也照追)、冷卻只 1 小時。
-        拿來跟左邊「訊號追蹤」對照,親眼看<b>有紀律 vs 積極追動能</b>的實際績效差多少。⚠️ 純模擬、未計手續費。
-      </p>
-      <p v-else class="radar-note">
-        只在分數<b>從 &lt;55 向上突破 ≥55 的當下</b>才以現價進場(不追半山腰、重啟也不追已高分的);
-        <b>止盈 +0.618R、止損 −0.5R</b>(回測最佳)。轉強烈反向訊號→反向出場並反手;4h 冷卻只擋同方向。⚠️ 純模擬、未計手續費。
-      </p>
+
+      <div v-if="mainTab === 'emaonly' && book && book.market && book.market.length" class="mkt-bias">
+        <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">大盤(BTC / ETH)目前 <b>1 小時 EMA 趨勢</b>方向。小幣若<b>逆大盤</b>進場(例如大盤看跌卻做多小幣)風險較高、成功率較低,可作為進場前的參考。⚠️ 僅供參考,不影響本策略的自動進出場。</span></span></span>
+        <span v-for="m in book.market" :key="m.coin" class="mkt-chip" :class="m.ok ? m.bias : 'na'">
+          <b class="mkt-coin">{{ m.coin }}</b>
+          <span class="mkt-dir">{{ !m.ok ? '評估中…' : m.bias === 'long' ? '看漲 ▲' : m.bias === 'short' ? '看跌 ▼' : '中性 —' }}</span>
+        </span>
+      </div>
+
       <div class="timefilter">
         <span class="tf-label">時間範圍</span>
         <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
@@ -984,12 +1376,11 @@ onUnmounted(() => clearInterval(timer))
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th title="即時動能:分數仍≥門檻 + CVD 同向=動能在;掉一個=轉弱;都掉=熄火">動能</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
@@ -1024,43 +1415,12 @@ onUnmounted(() => clearInterval(timer))
       <p v-else-if="bookF" class="empty">此範圍內尚無已結束的模擬交易</p>
     </section>
 
-    <!-- 美股代幣 (tokenized US stocks/ETFs, same ignition radar) -->
-    <section v-else-if="mainTab === 'stocks'">
-      <div class="mk-head">
-        <h2>美股代幣</h2>
-        <span class="mk-count" v-if="radar">代幣化美股/ETF 永續 · 同一套爆發雷達</span>
-      </div>
-      <p class="radar-note">Binance 上**非加密**的代幣化永續(個股 / ETF / 商品,如 AAPL、TSLA、GLD…,依 underlyingType 自動分流)。用與爆發雷達相同的點火分數排序,但**不納入加密雷達與模擬交易**。⚠️ 高風險、誤報多。</p>
-      <div v-if="radar && (radar.stocks || []).length" class="card">
-        <div class="radar-row rhead">
-          <span>代幣</span>
-          <span class="r" title="點火分數 0–100：量增+OI堆積+鯨魚單量 的綜合強度">點火</span>
-          <span class="r">24H</span><span class="r" title="近 3h 均量 ÷ 近 48h 均量">量×</span>
-          <span class="r" title="未平倉量近 12h 變化(堆積)">OI</span><span class="r" title="近 3 小時漲跌">3H</span>
-        </div>
-        <div v-for="x in radar.stocks" :key="x.coin" class="radar-item clickable" @click="openDetail(x.coin)">
-          <div class="radar-row">
-            <span class="coin">{{ x.coin }}<small class="vtag">${{ fmtNum(x.vol_24h) }}</small></span>
-            <span class="r"><b class="ignite" :class="x.accel >= 0 ? 'long' : 'short'">{{ x.score }}</b></span>
-            <span class="r" :class="x.chg_24h >= 0 ? 'long' : 'short'">{{ fmtPct(x.chg_24h) }}</span>
-            <span class="r">{{ x.vol_spike }}×</span>
-            <span class="r" :class="x.oi_chg >= 0 ? 'long' : 'short'">{{ x.oi_chg >= 0 ? '+' : '' }}{{ x.oi_chg }}%</span>
-            <span class="r" :class="x.accel >= 0 ? 'long' : 'short'">{{ fmtPct(x.accel) }}</span>
-          </div>
-          <div class="radar-entry">現價 <b>{{ fmtPrice(x.price) }}</b> · 止盈 <b class="long">{{ fmtPrice(x.tp) }}</b> · 止損 <b class="short">{{ fmtPrice(x.sl) }}</b></div>
-        </div>
-      </div>
-      <p v-else-if="radar" class="empty">目前無顯著異動的美股代幣</p>
-      <p v-else class="loading">掃描中…</p>
-    </section>
-
     <!-- 財經事件 (high-impact US economic calendar) -->
     <section v-else-if="mainTab === 'events'">
       <div class="mk-head">
-        <h2>財經事件(高影響 · 美國)</h2>
+        <h2>財經事件(高影響 · 美國)<span class="help" tabindex="0">?<span class="help-pop">高影響美國經濟事件(來源 faireconomy/ForexFactory,免費)。這是唯一能「事前」的——<b>事件前可降風險、預期波動</b>。釋出後顯示「實際 vs 預期」(實際優於預期通常利多風險資產)。時間為你的本地時區。⚠️ 30 分鐘更新一次(來源會限流)。</span></span></h2>
         <span class="mk-count">CPI / FOMC / 非農… · 共 {{ eventList.length }} 筆</span>
       </div>
-      <p class="radar-note">高影響美國經濟事件(來源 faireconomy/ForexFactory,免費)。這是唯一能「事前」的——<b>事件前可降風險、預期波動</b>。釋出後顯示「實際 vs 預期」(實際優於預期通常利多風險資產)。時間為你的本地時區。⚠️ 30 分鐘更新一次(來源會限流)。</p>
       <table v-if="eventList.length" class="grid">
         <thead><tr><th>時間</th><th>事件</th><th class="r">狀態</th><th class="r">前值</th><th class="r">預期</th><th class="r">實際</th></tr></thead>
         <tbody>
@@ -1080,13 +1440,11 @@ onUnmounted(() => clearInterval(timer))
       <p v-else class="loading">載入經濟行事曆中…(若持續空白,可能本週無高影響美國事件,或來源限流中)</p>
     </section>
 
-    <!-- 盤口 / 清算 (order-book walls + liquidation feed) -->
+    <!-- 清算 (liquidation feed, OKX) -->
     <section v-else-if="mainTab === 'flow'">
       <div class="mk-head">
-        <h2>盤口 / 清算</h2>
-        <span class="mk-count" v-if="orderbook && orderbook.updated_at">更新:{{ new Date(orderbook.updated_at).toLocaleTimeString() }}</span>
+        <h2>清算<span class="help" tabindex="0">?<span class="help-pop">即時清算事件(OKX 永續)。<b>即時監控、非回測訊號</b>;已往 SQLite 累積,日後可驗證是否領先。多單被洗=下殺、空單被軋=上拉。</span></span></h2>
       </div>
-      <p class="radar-note">即時盤口大牆/失衡(Binance,±2% 內掛單)+ 清算事件(OKX 永續)。<b>即時監控、非回測訊號</b>;已往 SQLite 累積,日後可驗證是否領先。買牆=支撐、賣牆=壓力;失衡 &gt;55% 偏買盤(撐)、&lt;45% 偏賣盤(壓)。</p>
 
       <!-- liquidation summary + feed -->
       <div v-if="liquidations" class="liqsum">
@@ -1094,22 +1452,6 @@ onUnmounted(() => clearInterval(timer))
         <div class="liqbox long"><div class="stat-k">近 1h 空單爆倉</div><div class="stat-v long">${{ (liquidations.short_usd_1h / 1e6).toFixed(2) }}M</div></div>
         <div class="liqbox"><div class="stat-k">偏向</div><div class="stat-v" :class="liquidations.long_usd_1h > liquidations.short_usd_1h ? 'short' : 'long'">{{ liquidations.long_usd_1h > liquidations.short_usd_1h ? '多單被洗(下殺)' : '空單被軋(上拉)' }}</div></div>
       </div>
-
-      <h3 class="psub">訂單簿大牆 / 失衡</h3>
-      <table v-if="orderbook && orderbook.rows.length" class="grid">
-        <thead><tr><th>幣種</th><th class="r">失衡(買盤%)</th><th class="r">買牆(支撐)</th><th class="r">距現價</th><th class="r">賣牆(壓力)</th><th class="r">距現價</th></tr></thead>
-        <tbody>
-          <tr v-for="r in orderbook.rows" :key="r.coin" class="clickable" @click="openDetail(r.coin)">
-            <td class="coin">{{ r.coin }}</td>
-            <td class="r" :class="r.imbal >= 0.55 ? 'long' : r.imbal <= 0.45 ? 'short' : ''"><b>{{ (r.imbal * 100).toFixed(0) }}%</b></td>
-            <td class="r long">{{ fmtPrice(r.bid_wall) }} <small>${{ (r.bid_wall_usd / 1e6).toFixed(2) }}M</small></td>
-            <td class="r">−{{ r.bid_dist }}%</td>
-            <td class="r short">{{ fmtPrice(r.ask_wall) }} <small>${{ (r.ask_wall_usd / 1e6).toFixed(2) }}M</small></td>
-            <td class="r">+{{ r.ask_dist }}%</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="loading">載入盤口中…</p>
 
       <h3 class="psub" v-if="liquidations && liquidations.recent.length">近期清算事件 ({{ liquidations.recent.length }})</h3>
       <table v-if="liquidations && liquidations.recent.length" class="grid">
@@ -1126,7 +1468,109 @@ onUnmounted(() => clearInterval(timer))
       </table>
     </section>
 
-    <footer>所有數據來自交易所公開 API，僅供研究。評分權重為自訂，請以自己的回測為準。非投資建議。</footer>
+    <!-- 文章專欄 (Feature 3) -->
+    <section v-else-if="mainTab === 'articles'">
+      <!-- 內頁 -->
+      <template v-if="articleView">
+        <button class="backbtn" @click="articleView = null">← 返回列表</button>
+        <article class="artpost">
+          <img v-if="articleView.cover" :src="articleView.cover" class="artcover" />
+          <h1 class="arttitle">{{ articleView.title }}</h1>
+          <div class="arttags"><span v-for="t in articleView.tags" :key="t" class="arttag">{{ t }}</span></div>
+          <div v-for="(b, i) in articleView.blocks" :key="i" class="artblock">
+            <p v-if="b.type === 'text'" class="arttext">{{ b.text }}</p>
+            <img v-else-if="b.type === 'image' && b.image" :src="b.image" class="artimg" />
+          </div>
+          <div v-if="can('admin')" class="artadmin">
+            <button class="regbtn" @click="editArticle(articleView)">編輯</button>
+            <button class="nobtn" @click="removeArticle(articleView)">刪除</button>
+          </div>
+        </article>
+      </template>
+
+      <!-- 列表 -->
+      <template v-else>
+        <div class="mk-head">
+          <h2>文章專欄</h2>
+          <button v-if="can('admin')" class="loginbtn" @click="newArticle">＋ 新增文章</button>
+        </div>
+        <div v-if="articles.length" class="artgrid">
+          <div v-for="a in articles" :key="a.id" class="artcard" @click="articleView = a">
+            <div class="artcard-cover"><img v-if="a.cover" :src="a.cover" /><span v-else>JMCH</span></div>
+            <div class="artcard-body">
+              <div class="artcard-title">{{ a.title }}</div>
+              <div class="arttags"><span v-for="t in a.tags" :key="t" class="arttag">{{ t }}</span></div>
+              <div class="artcard-date">{{ a.created ? new Date(a.created).toLocaleDateString() : '' }}</div>
+            </div>
+          </div>
+        </div>
+        <p v-else class="empty">尚無文章。</p>
+      </template>
+    </section>
+
+    <footer>
+      <div v-if="socialLinks.length" class="socialbar">
+        <a v-for="(s, i) in socialLinks" :key="i" :href="s.url" target="_blank" rel="noopener"
+           class="social" :style="{ background: socialInfo(s.platform).color }" :title="socialInfo(s.platform).name">
+          {{ socialInfo(s.platform).icon }}
+        </a>
+      </div>
+      <p class="foot-note">所有數據來自交易所公開 API，僅供研究。評分權重為自訂,請以自己的回測為準。非投資建議。</p>
+    </footer>
+  </div>
+
+  <!-- 首頁右下懸浮 QR (Feature 4) -->
+  <div v-if="authed && config.qr && !qrHidden" class="qrfloat">
+    <button class="qrclose" @click="qrHidden = true">✕</button>
+    <a v-if="config.qr_link" :href="config.qr_link" target="_blank" rel="noopener"><img :src="config.qr" alt="QR" /></a>
+    <img v-else :src="config.qr" alt="QR" />
+    <span class="qrcap">掃碼</span>
+  </div>
+
+  <!-- asset-proof lightbox (admin) -->
+  <div v-if="proofView" class="overlay proofbox" @click="proofView = ''">
+    <img :src="proofView" class="prooffull" @click.stop alt="資產證明" />
+  </div>
+
+  <!-- article editor (admin) -->
+  <div v-if="artEdit" class="overlay" @click.self="artEdit = null">
+    <div class="arteditor" @click.stop>
+      <div class="ae-head">
+        <h3>{{ artEdit.id ? '編輯文章' : '新增文章' }}</h3>
+        <button class="close" @click="artEdit = null">✕</button>
+      </div>
+      <label class="ae-label">標題</label>
+      <input v-model="artEdit.title" class="authin" placeholder="標題" />
+      <label class="ae-label">標籤(逗號分隔)</label>
+      <input :value="artEdit.tags.join(', ')" @input="setArtTags($event.target.value)" class="authin" placeholder="標籤1, 標籤2" />
+      <label class="ae-label">主圖</label>
+      <div class="ae-cover">
+        <img v-if="artEdit.cover" :src="artEdit.cover" />
+        <label class="authfile"><span>{{ artEdit.cover ? '更換主圖' : '＋ 上傳主圖' }}</span><input type="file" accept="image/*" hidden @change="onCoverPick" /></label>
+      </div>
+      <label class="ae-label">內文區塊(圖文穿插)</label>
+      <div v-for="(b, i) in artEdit.blocks" :key="i" class="ae-block">
+        <div class="ae-block-tools">
+          <span class="ae-btype">{{ b.type === 'text' ? '段落' : '圖片' }}</span>
+          <button class="minibtn" @click="moveBlock(i, -1)">↑</button>
+          <button class="minibtn" @click="moveBlock(i, 1)">↓</button>
+          <button class="minibtn del" @click="removeBlock(i)">✕</button>
+        </div>
+        <textarea v-if="b.type === 'text'" v-model="b.text" class="ae-textarea" placeholder="輸入段落文字…"></textarea>
+        <div v-else class="ae-imgblock">
+          <img v-if="b.image" :src="b.image" />
+          <label class="authfile"><span>{{ b.image ? '更換圖片' : '＋ 上傳圖片' }}</span><input type="file" accept="image/*" hidden @change="onBlockImg($event, i)" /></label>
+        </div>
+      </div>
+      <div class="ae-addrow">
+        <button class="regbtn" @click="addBlock('text')">＋ 段落</button>
+        <button class="regbtn" @click="addBlock('image')">＋ 圖片</button>
+      </div>
+      <div class="ae-foot">
+        <button class="authbtn" @click="saveArticle">儲存</button>
+        <button v-if="artEdit.id" class="nobtn" @click="removeArticle(artEdit)">刪除</button>
+      </div>
+    </div>
   </div>
 
   <!-- detail drawer -->
@@ -1189,7 +1633,15 @@ onUnmounted(() => clearInterval(timer))
 
 <style>
 :root { color-scheme: dark; }
-body { margin: 0; background: #0a0b0e; color: #e8eaed; font-family: system-ui, -apple-system, "PingFang TC", sans-serif; }
+html { background: #0a0b0e; } /* base colour lives here so the body watermark can sit above it */
+body { margin: 0; background: transparent; color: #e8eaed; font-family: system-ui, -apple-system, "PingFang TC", sans-serif; }
+/* logo watermark: fixed, centred, low-opacity — shows through page gaps, never over card content */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: url('/logo.png') no-repeat center center;
+  background-size: min(58vw, 500px);
+  opacity: 0.4;
+}
 .long { color: #2ec26b; } .short { color: #ff5c5c; } .neutral { color: #b8bcc4; }
 .err { color: #ff6b6b; font-size: 12px; }
 .r { text-align: right; }
@@ -1454,4 +1906,203 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .rc-chg { font-size: 11px; margin: 3px 0; font-variant-numeric: tabular-nums; }
 .rc-score { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 1px 0; }
 .rc-score.long { background: #103a24; } .rc-score.short { background: #3a1010; } .rc-score.neutral { background: #1f2229; }
+</style>
+
+<style>
+/* ---- JMCH auth gate (login / register) ---- */
+.authgate {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(1200px 600px at 50% -10%, #1a1710, #0b0c0f 70%);
+  padding: 20px;
+}
+.authcard {
+  width: 100%; max-width: 380px;
+  background: #14161c; border: 1px solid #2a2620;
+  border-radius: 16px; padding: 28px 24px 24px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.authlogo { width: 190px; margin: 0 auto 2px; display: block; }
+.authslogan { text-align: center; margin: -6px 0 8px; font-size: 12px; letter-spacing: 1px;
+  color: #b9902f; font-weight: 600; }
+.authtabs { display: flex; gap: 8px; margin-bottom: 4px; }
+.authtabs button {
+  flex: 1; padding: 9px 0; border-radius: 9px; cursor: pointer;
+  background: #1b1e25; border: 1px solid #2a2e37; color: #8b909a; font-weight: 700;
+}
+.authtabs button.on { background: linear-gradient(180deg, #d8ad48, #b8862a); color: #201800; border-color: #d8ad48; }
+.authin {
+  width: 100%; box-sizing: border-box; padding: 11px 12px; border-radius: 9px;
+  background: #0f1116; border: 1px solid #2a2e37; color: #e8e9ec; font-size: 14px;
+}
+.authin:focus { outline: none; border-color: #d8ad48; }
+.authfile {
+  display: block; padding: 11px 12px; border-radius: 9px; cursor: pointer; text-align: center;
+  background: #0f1116; border: 1px dashed #4a412a; color: #b9902f; font-size: 13px;
+}
+.authbtn {
+  margin-top: 4px; padding: 11px 0; border: none; border-radius: 10px; cursor: pointer;
+  background: linear-gradient(180deg, #e6bd54, #c2902e); color: #201800; font-weight: 800; font-size: 15px;
+}
+.authbtn:hover { filter: brightness(1.05); }
+.authmsg { text-align: center; color: #8b909a; padding: 20px 0; }
+.authnote { text-align: center; color: #e8b84b; background: #2a2410; border: 1px solid #4a412a;
+  border-radius: 8px; padding: 8px; font-size: 13px; }
+.autherr { color: #ef6b6b; font-size: 13px; text-align: center; }
+.authok { color: #34d399; font-size: 13px; text-align: center; line-height: 1.5; }
+.authhint { color: #6b7078; font-size: 11px; text-align: center; margin: 2px 0 0; line-height: 1.5; }
+</style>
+
+<style>
+/* ---- admin review (Feature 2) ---- */
+.reviewgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.reviewcard { display: flex; gap: 10px; background: #0f1116; border: 1px solid #2a2e37; border-radius: 10px; padding: 10px; }
+.reviewproof { width: 92px; height: 92px; flex: none; border-radius: 8px; overflow: hidden; cursor: zoom-in; background: #05060a; border: 1px solid #23262d; }
+.reviewproof img { width: 100%; height: 100%; object-fit: cover; }
+.reviewproof.empty { display: flex; align-items: center; justify-content: center; font-size: 11px; color: #6b7078; cursor: default; }
+.reviewinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ri-name { font-weight: 800; color: #e8e9ec; }
+.ri-row { font-size: 12px; color: #9aa0ac; }
+.reviewact { margin-top: auto; display: flex; gap: 6px; padding-top: 6px; }
+.okbtn { flex: 1; padding: 6px 0; border: none; border-radius: 7px; cursor: pointer; background: #17643c; color: #d4f7e2; font-weight: 700; }
+.nobtn { flex: 1; padding: 6px 0; border: none; border-radius: 7px; cursor: pointer; background: #5a1f1f; color: #f7d4d4; font-weight: 700; }
+.proofthumb { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; cursor: zoom-in; border: 1px solid #23262d; }
+.proofbox { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.85); }
+.prooffull { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+.qtag.warn { background: #4a3a10; color: #e8b84b; }
+.qtag.bad { background: #4a1414; color: #ef8a8a; }
+.regbtn.on { background: linear-gradient(180deg, #d8ad48, #b8862a); color: #201800; border-color: #d8ad48; }
+/* toggle switch (啟用/停用) */
+.switch { position: relative; display: inline-block; width: 42px; height: 22px; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.sw-track { position: absolute; inset: 0; border-radius: 22px; background: #5a1f1f; transition: .2s; }
+.sw-track::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: .2s; }
+.switch input:checked + .sw-track { background: #17643c; }
+.switch input:checked + .sw-track::before { transform: translateX(20px); }
+</style>
+
+<style>
+/* ---- articles (Feature 3) ---- */
+.artgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.artcard { background: #14161c; border: 1px solid #23262d; border-radius: 12px; overflow: hidden; cursor: pointer; transition: .15s; }
+.artcard:hover { border-color: #d8ad48; transform: translateY(-2px); }
+.artcard-cover { height: 130px; background: #0b0c0f; display: flex; align-items: center; justify-content: center; }
+.artcard-cover img { width: 100%; height: 100%; object-fit: cover; }
+.artcard-cover span { color: #3a3222; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
+.artcard-body { padding: 10px 12px; }
+.artcard-title { font-weight: 800; color: #e8e9ec; line-height: 1.35; }
+.artcard-date { font-size: 11px; color: #6b7078; margin-top: 6px; }
+.arttags { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.arttag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #2a2410; color: #e8b84b; }
+.backbtn { background: none; border: none; color: #8b909a; cursor: pointer; font-size: 13px; margin-bottom: 10px; }
+.artpost { max-width: 760px; margin: 0 auto; }
+.artcover { width: 100%; border-radius: 12px; margin-bottom: 14px; }
+.arttitle { font-size: 26px; color: #f0f1f4; margin: 4px 0 8px; }
+.artblock { margin: 12px 0; }
+.arttext { color: #cdd0d6; line-height: 1.85; white-space: pre-wrap; }
+.artimg { width: 100%; border-radius: 10px; }
+.artadmin { display: flex; gap: 8px; margin-top: 20px; border-top: 1px solid #23262d; padding-top: 14px; }
+/* editor */
+.arteditor { width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; background: #14161c;
+  border: 1px solid #2a2e37; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.ae-head { display: flex; justify-content: space-between; align-items: center; }
+.ae-head h3 { margin: 0; }
+.ae-label { font-size: 12px; color: #8b909a; margin-top: 6px; }
+.ae-cover { display: flex; gap: 10px; align-items: center; }
+.ae-cover img { width: 120px; height: 70px; object-fit: cover; border-radius: 8px; }
+.ae-block { border: 1px solid #23262d; border-radius: 10px; padding: 8px; background: #0f1116; }
+.ae-block-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.ae-btype { font-size: 11px; color: #b9902f; font-weight: 700; margin-right: auto; }
+.minibtn { width: 26px; height: 24px; border: 1px solid #2a2e37; background: #1b1e25; color: #cdd0d6; border-radius: 6px; cursor: pointer; }
+.minibtn.del { color: #ef8a8a; }
+.ae-textarea { width: 100%; box-sizing: border-box; min-height: 80px; resize: vertical; background: #0b0c0f;
+  border: 1px solid #2a2e37; border-radius: 8px; color: #e8e9ec; padding: 8px; font: inherit; }
+.ae-imgblock { display: flex; gap: 10px; align-items: center; }
+.ae-imgblock img { width: 120px; height: 70px; object-fit: cover; border-radius: 8px; }
+.ae-addrow { display: flex; gap: 8px; margin-top: 4px; }
+.ae-foot { display: flex; gap: 8px; margin-top: 10px; }
+.ae-foot .authbtn { flex: 1; }
+</style>
+
+<style>
+/* ---- social bar + floating QR + admin config (Feature 4) ---- */
+footer { padding: 18px 0 30px; text-align: center; }
+.socialbar { display: flex; justify-content: center; gap: 12px; margin-bottom: 12px; }
+.social { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 900; font-size: 18px; text-decoration: none; transition: .15s; }
+.social:hover { transform: translateY(-3px) scale(1.08); }
+.foot-note { color: #6b7078; font-size: 12px; margin: 0; }
+.qrfloat { position: fixed; right: 18px; bottom: 18px; z-index: 500; background: #fff; border-radius: 12px;
+  padding: 8px 8px 4px; box-shadow: 0 8px 30px rgba(0,0,0,.4); text-align: center; }
+.qrfloat img { width: 96px; height: 96px; display: block; border-radius: 6px; }
+.qrcap { font-size: 11px; color: #333; font-weight: 700; }
+.qrclose { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; border: none;
+  background: #333; color: #fff; cursor: pointer; font-size: 12px; line-height: 1; }
+.cfg-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.cfg-k { width: 100px; color: #8b909a; font-size: 13px; }
+.cfg-logo { height: 34px; }
+.cfg-qr { height: 54px; border-radius: 6px; }
+.cfg-file { display: inline-block; width: auto; padding: 6px 12px; }
+.cfg-sub { color: #b9902f; margin: 14px 0 6px; font-size: 14px; }
+.cfg-social { display: flex; gap: 8px; margin: 6px 0; align-items: center; }
+.cfg-social select { background: #0f1116; border: 1px solid #2a2e37; color: #e8e9ec; border-radius: 8px; padding: 8px; }
+.cfg-social .authin { flex: 1; }
+</style>
+
+<style>
+.delbtn { background: #3a1414; border: 1px solid #5a1f1f; color: #ef8a8a; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+.delbtn:hover { background: #5a1f1f; }
+</style>
+
+<style>
+/* ---- toast prompt ---- */
+.toast { position: fixed; top: 22px; left: 50%; transform: translateX(-50%); z-index: 10000;
+  padding: 12px 22px; border-radius: 10px; font-weight: 700; font-size: 14px; color: #fff;
+  box-shadow: 0 8px 30px rgba(0,0,0,.45); max-width: 88vw; text-align: center; }
+.toast.ok { background: linear-gradient(180deg, #1c8a54, #146b40); }
+.toast.err { background: linear-gradient(180deg, #c23b3b, #9a2727); }
+.toastfade-enter-active, .toastfade-leave-active { transition: opacity .25s, transform .25s; }
+.toastfade-enter-from, .toastfade-leave-to { opacity: 0; transform: translate(-50%, -12px); }
+</style>
+
+<style>
+/* ---- help bubble (?) ---- */
+.help { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px;
+  border-radius: 50%; background: #2a2e37; color: #b9902f; font-size: 11px; font-weight: 800;
+  cursor: help; margin-left: 6px; position: relative; vertical-align: middle; outline: none; user-select: none; }
+.help:hover { background: #3a3f4a; }
+.help-pop { display: none; position: absolute; top: 24px; left: 0; z-index: 300; width: min(320px, 80vw);
+  background: #1b1e25; border: 1px solid #3a3f4a; border-radius: 8px; padding: 10px 12px;
+  font-size: 12px; font-weight: 400; line-height: 1.65; color: #cdd0d6; text-align: left; white-space: normal;
+  box-shadow: 0 10px 34px rgba(0,0,0,.55); }
+.help-pop b { color: #e8b84b; }
+.help:hover .help-pop, .help:focus .help-pop, .help:focus-within .help-pop { display: block; }
+.mk-head .help, h2 .help, h3 .help { font-weight: 800; }
+</style>
+
+<style>
+/* ---- 大盤方向 (BTC/ETH EMA bias, EMA-strategy page) ---- */
+.mkt-bias { display: flex; align-items: stretch; flex-wrap: wrap; gap: 10px; margin: 0 0 14px;
+  padding: 12px 14px; background: #14171d; border: 1px solid #262b34; border-radius: 10px; }
+.mkt-label { display: inline-flex; align-items: center; align-self: center; font-size: 13px; font-weight: 700;
+  color: #8b909a; margin-right: 4px; }
+.mkt-chip { display: inline-flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 8px;
+  background: #1b1e25; border: 1px solid #2f3540; min-width: 128px; }
+.mkt-chip.long { border-color: #1f7a4d; background: #10261c; }
+.mkt-chip.short { border-color: #8a3030; background: #2a1414; }
+.mkt-chip.na { opacity: .7; }
+.mkt-coin { font-size: 14px; font-weight: 800; color: #e8eaed; }
+.mkt-dir { font-size: 15px; font-weight: 800; }
+.mkt-chip.long .mkt-dir { color: #35d07f; }
+.mkt-chip.short .mkt-dir { color: #ff5c5c; }
+.mkt-chip.na .mkt-dir { color: #8b909a; }
+.mkt-sub { font-size: 11px; color: #8b909a; }
+</style>
+
+<style>
+/* ---- admin CSV export button (strategy tabs) ---- */
+.csvbtn { margin-left: auto; background: #17321f; border: 1px solid #2f7a4d; color: #7fe0a6;
+  padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.csvbtn:hover { background: #1f4a2c; }
 </style>

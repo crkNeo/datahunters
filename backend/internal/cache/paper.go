@@ -9,26 +9,26 @@ import (
 // PaperTrade is one simulated trade taken from a breakout-radar signal. Entry is
 // the market price when the signal fired; TP/SL are the radar's fib levels.
 type PaperTrade struct {
-	ID        string     `json:"-"` // book|coin|dir|opentime, for persistence
-	Coin      string     `json:"coin"`
-	Dir       string     `json:"dir"` // long | short
-	Score     int        `json:"score"`
-	Entry     float64    `json:"entry"` // fill price (market at signal)
-	TP        float64    `json:"tp"`
-	SL        float64    `json:"sl"`
-	Cur       float64    `json:"cur"`     // latest price
-	PnLPct    float64    `json:"pnl_pct"` // live (open) or final (closed)
-	Status    string     `json:"status"`  // open | closed
-	Outcome   string     `json:"outcome"` // "" | tp | sl | expired | reversed | trail
-	OpenTime  time.Time  `json:"open_time"`
-	CloseTime *time.Time `json:"close_time,omitempty"`
-	R         float64    `json:"r,omitempty"`    // swing range (for trailing books)
-	Peak      float64    `json:"peak,omitempty"` // best price since entry (trailing books)
-	OI        float64    `json:"oi"`             // OI % change at entry (radar)
-	CVD       float64    `json:"cvd"`            // taker-buy CVD % at entry (radar)
-	Funding    float64   `json:"funding"`            // funding rate at entry (persisted)
-	CurFunding float64   `json:"cur_funding"`        // live funding rate (transient, set at serve)
-	Momentum   string    `json:"momentum,omitempty"` // live momentum light: alive|weak|dead (transient)
+	ID         string     `json:"-"` // book|coin|dir|opentime, for persistence
+	Coin       string     `json:"coin"`
+	Dir        string     `json:"dir"` // long | short
+	Score      int        `json:"score"`
+	Entry      float64    `json:"entry"` // fill price (market at signal)
+	TP         float64    `json:"tp"`
+	SL         float64    `json:"sl"`
+	Cur        float64    `json:"cur"`     // latest price
+	PnLPct     float64    `json:"pnl_pct"` // live (open) or final (closed)
+	Status     string     `json:"status"`  // open | closed
+	Outcome    string     `json:"outcome"` // "" | tp | sl | expired | reversed | trail
+	OpenTime   time.Time  `json:"open_time"`
+	CloseTime  *time.Time `json:"close_time,omitempty"`
+	R          float64    `json:"r,omitempty"`        // swing range (for trailing books)
+	Peak       float64    `json:"peak,omitempty"`     // best price since entry (trailing books)
+	OI         float64    `json:"oi"`                 // OI % change at entry (radar)
+	CVD        float64    `json:"cvd"`                // taker-buy CVD % at entry (radar)
+	Funding    float64    `json:"funding"`            // funding rate at entry (persisted)
+	CurFunding float64    `json:"cur_funding"`        // live funding rate (transient, set at serve)
+	Momentum   string     `json:"momentum,omitempty"` // live momentum light: alive|weak|dead (transient)
 }
 
 // PaperStats summarises closed trades.
@@ -46,6 +46,24 @@ type PaperState struct {
 	Open   []*PaperTrade `json:"open"`
 	Closed []*PaperTrade `json:"closed"`
 	Stats  PaperStats    `json:"stats"`
+	Market []MarketBias  `json:"market,omitempty"` // 大盤指標 (BTC/ETH), display-only
+}
+
+// MarketBias is the current 1h-EMA read of a bellwether coin (BTC/ETH), shown on
+// the EMA-strategy page so a user can see whether the broad market is trending up
+// or down before reading a small-coin signal. Display-only — it does NOT gate any
+// entry. Bias mirrors the EMA-strategy trend definition:
+//
+//	long   (看漲): EMA5>EMA20 AND close>EMA50
+//	short  (看跌): EMA5<EMA20 AND close<EMA50
+//	neutral(中性): mixed (e.g. golden but below EMA50)
+type MarketBias struct {
+	Coin    string  `json:"coin"`
+	Bias    string  `json:"bias"`    // long | short | neutral
+	Golden  bool    `json:"golden"`  // EMA5 > EMA20
+	Above50 bool    `json:"above50"` // close > EMA50
+	Price   float64 `json:"price"`
+	OK      bool    `json:"ok"` // false = not yet evaluated (before first hourly eval)
 }
 
 const (
@@ -60,15 +78,17 @@ const (
 type paperBook struct {
 	name         string // "main" | "gamble", persistence key prefix
 	minScore     int
-	requireCross bool          // true: only enter on a fresh cross up; false: chase anything
+	requireCross bool // true: only enter on a fresh cross up; false: chase anything
 	cooldown     time.Duration
-	trail        float64       // >0: trailing-stop exit (trail×R behind peak); 0: fixed TP/SL
-	skipNY       bool          // skip new entries during the NY session (12-18 UTC)
-	requireAlign bool          // only enter when OI and CVD both agree with direction
-	requireFuel  bool          // only enter when funding is "fuel" (contrarian) for the direction
+	trail        float64 // >0: trailing-stop exit (trail×R behind peak); 0: fixed TP/SL
+	skipNY       bool    // skip new entries during the NY session (12-18 UTC)
+	requireAlign bool    // only enter when OI and CVD both agree with direction
+	requireFuel  bool    // only enter when funding is "fuel" (contrarian) for the direction
+	requireEMA   bool    // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
 	trades       []*PaperTrade
 	armed        map[string]bool
 	lastOpen     map[string]time.Time // coin|dir → last entry time (dedupe guard)
+	lastOpenHour map[string]int64     // coin|dir → EMA signal hour we last entered on (emaonly)
 }
 
 // isNYSession reports whether t falls in the weak NY block (12-18 UTC), where
@@ -89,20 +109,17 @@ func aligned(dir string, oi, cvd float64) bool {
 }
 
 func newBook(name string, minScore int, requireCross bool, cooldown time.Duration, trail float64) *paperBook {
-	return &paperBook{name: name, minScore: minScore, requireCross: requireCross, cooldown: cooldown, trail: trail, armed: map[string]bool{}, lastOpen: map[string]time.Time{}}
+	return &paperBook{name: name, minScore: minScore, requireCross: requireCross, cooldown: cooldown, trail: trail, armed: map[string]bool{}, lastOpen: map[string]time.Time{}, lastOpenHour: map[string]int64{}}
 }
 
 // PaperTick advances both books from the latest radar + prices. Call on a ticker.
 func (s *Store) PaperTick() {
-	s.refreshFunding() // keep the all-coins funding map fresh for entries + tables
+	s.refreshFunding()       // keep the all-coins funding map fresh for entries + tables
+	s.refreshEMA(time.Now()) // multi-TF EMA cache (throttled); network before the lock
 	radar := s.Radar()
-	tickers, err := s.ex.BinanceAllTickers()
-	if err != nil {
+	px := s.livePrices()
+	if len(px) == 0 {
 		return
-	}
-	px := make(map[string]float64, len(tickers))
-	for _, t := range tickers {
-		px[coinOf(t.Symbol)] = t.Price
 	}
 	pumpSc := map[string]int{}
 	for _, it := range radar.Pump {
@@ -118,7 +135,8 @@ func (s *Store) PaperTick() {
 	defer s.paperMu.Unlock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
-	s.tickBook(s.paperPremium, radar, px, pumpSc, dumpSc, now)
+	s.tickBook(s.paperEMAGamble, radar, px, pumpSc, dumpSc, now)
+	s.tickEMAOnly(px, now)
 	if s.db != nil {
 		for _, t := range s.paperMain.trades {
 			s.db.upsertTrade("main", t)
@@ -126,8 +144,11 @@ func (s *Store) PaperTick() {
 		for _, t := range s.paperGamble.trades {
 			s.db.upsertTrade("gamble", t)
 		}
-		for _, t := range s.paperPremium.trades {
-			s.db.upsertTrade("premium", t)
+		for _, t := range s.paperEMAGamble.trades {
+			s.db.upsertTrade("emagamble", t)
+		}
+		for _, t := range s.paperEMA.trades {
+			s.db.upsertTrade("emaonly", t)
 		}
 	}
 }
@@ -250,6 +271,9 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 					continue // funding must be contrarian "fuel" for the direction
 				}
 			}
+			if b.requireEMA && !s.emaConfirm(it.Coin, dir) {
+				continue // multi-TF EMA trend must confirm the direction
+			}
 			key := it.Coin + "|" + dir
 			if b.requireCross && !b.armed[key] {
 				continue // disciplined: need a fresh cross up
@@ -304,13 +328,15 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 func bookLabel(name string) string {
 	switch name {
 	case "gamble":
-		return "動能狙擊倉"
-	case "premium":
-		return "精選狙擊倉"
+		return "超新星"
+	case "emagamble":
+		return "彗星"
+	case "emaonly":
+		return "銀河"
 	case "trail":
 		return "移動止損"
 	}
-	return "紀律倉"
+	return "星軌"
 }
 
 func dirCN(dir string) string {
@@ -344,9 +370,23 @@ func abs2(f float64) float64 {
 }
 
 // notifyTradeOpen / notifyTradeClose push paper-trade alerts with a 備註
-// (score + levels on open; outcome + P&L + holding time on close).
+// (score + levels on open; outcome + P&L + holding time on close). The EMA
+// book has no radar fields (score/OI/CVD), so it gets its own signal-style
+// format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
+	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
+		fmt.Sprintf("%s %s · 進場 $%.4g", tr.Coin, dirCN(tr.Dir), tr.Entry), "/")
 	if !s.notifier.Enabled() {
+		return
+	}
+	if b.name == "emaonly" {
+		sig := "金叉 + 站上EMA50"
+		if tr.Dir == "short" {
+			sig = "死叉 + 跌破EMA50"
+		}
+		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n訊號 %s(1h 收K)\n進場 $%.4g · TP $%.4g (%+.2f%%) · SL $%.4g (%+.2f%%) · 盈虧比 1:1(SL=前20根極值)",
+			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), sig, tr.Entry,
+			tr.TP, pnl(tr.Dir, tr.Entry, tr.TP), tr.SL, pnl(tr.Dir, tr.Entry, tr.SL)))
 		return
 	}
 	go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n點火 %d · 進場 $%.4g · TP $%.4g (%+.2f%%) · SL $%.4g (%+.2f%%)\n進場 OI %+.2f%% · CVD %+.2f%% · 費率 %+.4f%%",
@@ -359,6 +399,11 @@ func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 		return
 	}
 	hold := fmtDur(now.Sub(tr.OpenTime))
+	if b.name == "emaonly" {
+		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%.4g → 出 $%.4g",
+			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, tr.Entry, tr.Cur))
+		return
+	}
 	go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%.4g → 出 $%.4g · 進場 OI %+.2f%% / CVD %+.2f%% / 費率 %+.4f%%",
 		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, tr.Entry, tr.Cur, tr.OI, tr.CVD, tr.Funding*100))
 }
@@ -426,9 +471,79 @@ func (b *paperBook) state() PaperState {
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
-func (s *Store) Paper() PaperState   { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState  { return s.serve(s.paperGamble, 45) }
-func (s *Store) Premium() PaperState { return s.serve(s.paperPremium, 45) }
+func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
+func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 45) }
+
+// ExportTrades returns a book's full trade history for CSV export, oldest-first.
+// Prefers SQLite (complete history) and falls back to the in-memory book (whose
+// closed list is capped) if persistence is off or empty. book is one of
+// main|gamble|emagamble|emaonly.
+func (s *Store) ExportTrades(book string) []*PaperTrade {
+	if s.db != nil {
+		if t := s.db.loadTrades(book); len(t) > 0 {
+			return t
+		}
+	}
+	s.paperMu.Lock()
+	defer s.paperMu.Unlock()
+	var b *paperBook
+	switch book {
+	case "gamble":
+		b = s.paperGamble
+	case "emagamble":
+		b = s.paperEMAGamble
+	case "emaonly":
+		b = s.paperEMA
+	default:
+		b = s.paperMain
+	}
+	if b == nil {
+		return nil
+	}
+	out := make([]*PaperTrade, len(b.trades))
+	copy(out, b.trades)
+	return out
+}
+
+// EMAGamble = gamble ignition + EMA trend filter (radar-driven, momentum light
+// applies). EMAOnly = standalone EMA cross book (signals only; no scan watchlist).
+func (s *Store) EMAGamble() PaperState { return s.serve(s.paperEMAGamble, 45) }
+func (s *Store) EMAOnly() PaperState   { return s.serveEMA(s.paperEMA) }
+
+// serveEMA snapshots the standalone EMA book, stamping only live funding, and
+// attaches the 大盤 (BTC/ETH) EMA bias for display.
+func (s *Store) serveEMA(b *paperBook) PaperState {
+	px := s.livePrices() // read before the lock (own locking)
+	market := []MarketBias{s.marketBias("BTC", px), s.marketBias("ETH", px)}
+	s.paperMu.Lock()
+	defer s.paperMu.Unlock()
+	st := b.state()
+	for _, tr := range st.Open {
+		tr.CurFunding = s.Funding(tr.Coin)
+	}
+	st.Market = market
+	return st
+}
+
+// marketBias reads a bellwether coin's cached 1h-EMA state into a display-only
+// bias (看漲/看跌/中性). ok=false until the first hourly eval has run.
+func (s *Store) marketBias(coin string, px map[string]float64) MarketBias {
+	mb := MarketBias{Coin: coin, Bias: "neutral", Price: px[coin]}
+	st, ok := s.emaLookup(coin)
+	if !ok {
+		return mb
+	}
+	mb.OK = true
+	mb.Golden = st.golden
+	mb.Above50 = st.above50
+	switch {
+	case st.longReady:
+		mb.Bias = "long"
+	case st.shortReady:
+		mb.Bias = "short"
+	}
+	return mb
+}
 
 // serve snapshots a book and stamps live funding + momentum onto open trades.
 // The radar is read before taking paperMu to avoid holding it during a recompute.
@@ -482,4 +597,3 @@ func momentumLight(tr *PaperTrade, pump, dump map[string]RadarItem, gate int) st
 		return "dead"
 	}
 }
-

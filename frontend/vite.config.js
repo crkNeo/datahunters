@@ -6,8 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // proxy API calls to the Go backend during dev
+      // proxy API + uploaded images to the Go backend during dev
       '/api': 'http://localhost:8080',
+      '/uploads': 'http://localhost:8080',
     },
   },
 })
