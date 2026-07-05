@@ -5,6 +5,7 @@ package push
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"sync"
 
@@ -68,7 +69,9 @@ func (m *Manager) Send(title, body, url string) {
 		url = "/"
 	}
 	payload, _ := json.Marshal(map[string]string{"title": title, "body": body, "url": url})
-	for _, raw := range m.store.AllSubs() {
+	subs := m.store.AllSubs()
+	log.Printf("web-push: sending %q to %d subscriber(s)", title, len(subs))
+	for _, raw := range subs {
 		var sub webpush.Subscription
 		if json.Unmarshal([]byte(raw), &sub) != nil || sub.Endpoint == "" {
 			continue
@@ -85,9 +88,14 @@ func (m *Manager) sendOne(payload []byte, sub webpush.Subscription) {
 		TTL:             60,
 	})
 	if err != nil {
+		log.Printf("web-push: send error: %v", err)
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		log.Printf("web-push: push service returned %d: %s", resp.StatusCode, string(body))
+	}
 	if resp.StatusCode == 404 || resp.StatusCode == 410 {
 		m.store.DelSub(sub.Endpoint) // subscription expired/gone → prune
 	}
