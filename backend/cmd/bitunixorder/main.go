@@ -198,7 +198,7 @@ func (c *Client) account(marginCoin string) (acctData, error) {
 	}
 	var r struct {
 		codeMsg
-		Data []acctData `json:"data"`
+		Data acctData `json:"data"` // Bitunix returns a single object here, not an array
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return acctData{}, fmt.Errorf("decode account: %v (%s)", err, string(raw))
@@ -206,10 +206,7 @@ func (c *Client) account(marginCoin string) (acctData, error) {
 	if !r.ok() {
 		return acctData{}, fmt.Errorf("account error code=%s msg=%s", r.Code, r.Msg)
 	}
-	if len(r.Data) == 0 {
-		return acctData{}, fmt.Errorf("account: empty data (%s)", string(raw))
-	}
-	return r.Data[0], nil
+	return r.Data, nil
 }
 
 func (c *Client) changeLeverage(symbol, marginCoin string, lev int) error {
