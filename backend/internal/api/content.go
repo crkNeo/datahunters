@@ -31,6 +31,15 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// handlePushTest (admin): fires an immediate Web Push to all subscribers so the
+// pipeline can be verified without waiting for a trade-open event. Returns the
+// current subscriber count so an empty subscription list is obvious.
+func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
+	subs := len(s.store.AllSubs())
+	s.store.PushSend("JMCH 測試推播", "看到這則代表推播管線正常 ✅", "/")
+	writeJSON(w, map[string]any{"ok": true, "subs": subs})
+}
+
 // handleConfig (public): returns site settings (logo, social links JSON, QR).
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SiteConfig())

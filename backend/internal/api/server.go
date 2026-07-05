@@ -89,7 +89,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/config", s.gate(A, s.handleAdminConfig))
 	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
-	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport)) // strategy trades → CSV
+	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
+	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))

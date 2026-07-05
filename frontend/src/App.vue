@@ -743,19 +743,48 @@ function urlB64ToUint8Array(base64String) {
   for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
   return arr
 }
-async function enableNotifications() {
+function sameKey(a, b) {
+  if (!a || !b) return false
+  const x = new Uint8Array(a)
+  if (x.length !== b.length) return false
+  for (let i = 0; i < x.length; i++) if (x[i] !== b[i]) return false
+  return true
+}
+// ensurePush (re)creates the push subscription and re-registers it on the server.
+// interactive=false: silent self-heal on load (only if permission already granted).
+// interactive=true: user clicked 🔔 通知 — may prompt for permission.
+async function ensurePush(interactive) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) { notifState.value = 'unsupported'; return }
-  const perm = await Notification.requestPermission()
+  let perm = Notification.permission
+  if (perm === 'default') {
+    if (!interactive) return // don't prompt during silent auto-sync
+    perm = await Notification.requestPermission()
+  }
   if (perm !== 'granted') { notifState.value = 'denied'; return }
   try {
     const reg = await navigator.serviceWorker.ready
     const res = await authFetch('/api/push/key')
     const { key } = await res.json()
     if (!key) { notifState.value = 'unsupported'; return }
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(key) })
+    const appKey = urlB64ToUint8Array(key)
+    let sub = await reg.pushManager.getSubscription()
+    // resubscribe if none, or if the stored one used a different VAPID key
+    if (!sub || !sameKey(sub.options.applicationServerKey, appKey)) {
+      if (sub) { try { await sub.unsubscribe() } catch (e) {} }
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey })
+    }
+    // always re-register with the server (idempotent upsert by endpoint)
     await authFetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) })
     notifState.value = 'on'
-  } catch (e) { notifState.value = 'denied' }
+  } catch (e) { if (interactive) notifState.value = 'denied' }
+}
+async function enableNotifications() { await ensurePush(true) }
+async function testPush() {
+  try {
+    const res = await authFetch('/api/admin/push-test', { method: 'POST' })
+    const d = await res.json()
+    showToast('已送出測試推播 · 伺服器訂閱數 ' + (d.subs ?? '?'), d.subs > 0 ? 'ok' : 'err')
+  } catch (e) { showToast('測試推播失敗', 'err') }
 }
 async function installApp() {
   if (!deferredPrompt.value) return
@@ -772,7 +801,9 @@ onMounted(async () => {
   timer = setInterval(tick, 15000)
   // register service worker for PWA + push
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
-  if (window.Notification && Notification.permission === 'granted') notifState.value = 'on'
+  // silent self-heal: if notifications were already granted, make sure this
+  // device actually has a live subscription registered on the server.
+  if (can('member')) ensurePush(false)
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
     deferredPrompt.value = e
@@ -853,6 +884,7 @@ watch(mainTab, loadMe)
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
+        <button v-if="can('admin')" class="regbtn" @click="testPush" title="發送一則測試推播以驗證管線">🔔 測試</button>
         <button class="regbtn" @click="logout">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
