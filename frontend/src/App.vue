@@ -223,6 +223,26 @@ async function updateUser(u) {
 }
 const proofView = ref('')
 const pendingUsers = computed(() => users.value.filter((u) => u.status === 'pending'))
+// ---- admin user-management filters ----
+const userRoleFilter = ref('all') // all | member | vip | admin
+const userTimeFilter = ref(0)     // days; 0 = all
+const userSort = ref('new')       // new | old (by registration time)
+const filteredUsers = computed(() => {
+  let list = users.value.slice()
+  if (userRoleFilter.value !== 'all') list = list.filter((u) => u.role === userRoleFilter.value)
+  if (userTimeFilter.value > 0) {
+    const cutoff = Date.now() - userTimeFilter.value * 86400000
+    list = list.filter((u) => (u.created || 0) >= cutoff)
+  }
+  list.sort((a, b) => (userSort.value === 'new' ? (b.created || 0) - (a.created || 0) : (a.created || 0) - (b.created || 0)))
+  return list
+})
+function fmtReg(ms) {
+  if (!ms) return '—'
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 async function approveUser(u) { u.status = 'active'; await updateUser(u) }
 async function rejectUser(u) { u.status = 'banned'; await updateUser(u) }
 async function toggleEnabled(u) { u.status = u.status === 'active' ? 'banned' : 'active'; await updateUser(u) }
@@ -779,21 +799,6 @@ async function ensurePush(interactive) {
   } catch (e) { if (interactive) notifState.value = 'denied' }
 }
 async function enableNotifications() { await ensurePush(true) }
-async function testPush() {
-  try {
-    const res = await authFetch('/api/admin/push-test', { method: 'POST' })
-    const d = await res.json()
-    showToast('已送出測試推播 · 伺服器訂閱數 ' + (d.subs ?? '?'), d.subs > 0 ? 'ok' : 'err')
-  } catch (e) { showToast('測試推播失敗', 'err') }
-}
-async function resetPush() {
-  try {
-    await authFetch('/api/admin/push-reset', { method: 'POST' })
-    notifState.value = '' // force ensurePush to resubscribe with the new key
-    await ensurePush(true)
-    showToast('已重置金鑰並重新訂閱,請再按「測試」', 'ok')
-  } catch (e) { showToast('重置金鑰失敗', 'err') }
-}
 async function installApp() {
   if (!deferredPrompt.value) return
   deferredPrompt.value.prompt()
@@ -892,8 +897,6 @@ watch(mainTab, loadMe)
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
-        <button v-if="can('admin')" class="regbtn" @click="testPush" title="發送一則測試推播以驗證管線">🔔 測試</button>
-        <button v-if="can('admin')" class="regbtn" @click="resetPush" title="重新產生 VAPID 金鑰並重新訂閱(BadJwtToken 時用)">🔁 金鑰</button>
         <button class="regbtn" @click="logout">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
@@ -1139,11 +1142,22 @@ watch(mainTab, loadMe)
 
       <!-- 所有使用者 -->
       <section class="card">
-        <h3 class="psub">所有使用者</h3>
+        <h3 class="psub">所有使用者 <span class="mk-count">{{ filteredUsers.length }} / {{ users.length }}</span></h3>
+        <div class="userfilter">
+          <span class="tf-label">階級</span>
+          <button v-for="r in [['all','全部'],['member','會員'],['vip','VIP'],['admin','管理']]" :key="r[0]"
+            :class="{ on: userRoleFilter === r[0] }" @click="userRoleFilter = r[0]">{{ r[1] }}</button>
+          <span class="tf-label">註冊</span>
+          <button v-for="t in [[0,'全部'],[7,'近7天'],[30,'近30天'],[90,'近90天']]" :key="t[0]"
+            :class="{ on: userTimeFilter === t[0] }" @click="userTimeFilter = t[0]">{{ t[1] }}</button>
+          <span class="tf-label">排序</span>
+          <button :class="{ on: userSort === 'new' }" @click="userSort = 'new'">新→舊</button>
+          <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
+        </div>
         <table class="grid">
-          <thead><tr><th>證明</th><th>帳號</th><th>UID / 交易所</th><th>角色</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
+          <thead><tr><th>證明</th><th>帳號</th><th>UID / 交易所</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
           <tbody>
-            <tr v-for="u in users" :key="u.username">
+            <tr v-for="u in filteredUsers" :key="u.username">
               <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="proofView = u.proof" /><span v-else>—</span></td>
               <td class="coin">{{ u.username }}
                 <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
@@ -1151,6 +1165,7 @@ watch(mainTab, loadMe)
               </td>
               <td class="rl-text"><div>{{ u.uid || '—' }}</div><small>{{ u.notes || '—' }}</small></td>
               <td>{{ u.role }}</td>
+              <td class="r tsmall">{{ fmtReg(u.created) }}</td>
               <td class="r">
                 <button v-if="u.role !== 'admin'" class="regbtn" :class="{ on: u.role === 'vip' }" @click="toggleVip(u)">{{ u.role === 'vip' ? 'VIP ✓' : '設 VIP' }}</button>
                 <em v-else class="qtag">admin</em>
@@ -1170,6 +1185,7 @@ watch(mainTab, loadMe)
           </tbody>
         </table>
         <p v-if="!users.length" class="empty">尚無使用者。</p>
+        <p v-else-if="!filteredUsers.length" class="empty">此條件下無符合的使用者。</p>
       </section>
 
       <!-- 手動新增 -->
@@ -1366,7 +1382,7 @@ watch(mainTab, loadMe)
     <!-- 訊號紀錄 (when score crossed ±20) -->
     <section v-else-if="mainTab === 'scorelog'">
       <div class="mk-head">
-        <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。已存入 SQLite,重啟不流失。</span></span></h2>
+        <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。資料持久保存,重啟不流失。</span></span></h2>
         <span class="mk-count">每次評分跨過 ±20(進入做多/做空)的時間點 · 顯示 {{ scoreLogF.length }} / {{ scoreLog.length }} 筆</span>
       </div>
       <div class="timefilter">
@@ -1406,7 +1422,7 @@ watch(mainTab, loadMe)
       <div class="timefilter">
         <span class="tf-label">時間範圍</span>
         <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
-        <span class="tf-note">已存入 SQLite,統計依所選範圍重算</span>
+        <span class="tf-note">統計依所選範圍重算</span>
       </div>
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ bookF.stats.closed }}</div></div>
@@ -1484,7 +1500,7 @@ watch(mainTab, loadMe)
     <!-- 清算 (liquidation feed, OKX) -->
     <section v-else-if="mainTab === 'flow'">
       <div class="mk-head">
-        <h2>清算<span class="help" tabindex="0">?<span class="help-pop">即時清算事件(OKX 永續)。<b>即時監控、非回測訊號</b>;已往 SQLite 累積,日後可驗證是否領先。多單被洗=下殺、空單被軋=上拉。</span></span></h2>
+        <h2>清算<span class="help" tabindex="0">?<span class="help-pop">即時清算事件(OKX 永續)。<b>即時監控、非回測訊號</b>;持續累積,日後可驗證是否領先。多單被洗=下殺、空單被軋=上拉。</span></span></h2>
       </div>
 
       <!-- liquidation summary + feed -->
@@ -2214,4 +2230,14 @@ footer { padding: 18px 0 30px; text-align: center; }
   .authcard { padding: 22px 16px 18px; }
   .tickers .tk { font-size: 11px; }
 }
+</style>
+
+<style>
+/* ---- admin user filters ---- */
+.userfilter { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; }
+.userfilter .tf-label { font-size: 12px; color: #8b909a; margin: 0 2px 0 6px; }
+.userfilter .tf-label:first-child { margin-left: 0; }
+.userfilter button { background: #16181d; border: 1px solid #23262d; color: #c8cdd6;
+  padding: 4px 11px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.userfilter button.on { background: #2a2410; border-color: #e0b341; color: #f4d774; }
 </style>
