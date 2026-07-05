@@ -225,14 +225,29 @@ const proofView = ref('')
 const pendingUsers = computed(() => users.value.filter((u) => u.status === 'pending'))
 // ---- admin user-management filters ----
 const userRoleFilter = ref('all') // all | member | vip | admin
-const userTimeFilter = ref(0)     // days; 0 = all
+const userFrom = ref('')          // YYYY-MM-DD (registration >= this day, inclusive)
+const userTo = ref('')            // YYYY-MM-DD (registration <= this day, inclusive)
 const userSort = ref('new')       // new | old (by registration time)
+function ymd(d) {
+  const p = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// quick shortcut: fill the date range to the last n days (0 = clear both)
+function setUserDays(n) {
+  if (!n) { userFrom.value = ''; userTo.value = ''; return }
+  userFrom.value = ymd(new Date(Date.now() - n * 86400000))
+  userTo.value = ymd(new Date())
+}
 const filteredUsers = computed(() => {
   let list = users.value.slice()
   if (userRoleFilter.value !== 'all') list = list.filter((u) => u.role === userRoleFilter.value)
-  if (userTimeFilter.value > 0) {
-    const cutoff = Date.now() - userTimeFilter.value * 86400000
-    list = list.filter((u) => (u.created || 0) >= cutoff)
+  if (userFrom.value) {
+    const from = new Date(userFrom.value + 'T00:00:00').getTime()
+    list = list.filter((u) => (u.created || 0) >= from)
+  }
+  if (userTo.value) {
+    const to = new Date(userTo.value + 'T23:59:59').getTime()
+    list = list.filter((u) => (u.created || 0) <= to)
   }
   list.sort((a, b) => (userSort.value === 'new' ? (b.created || 0) - (a.created || 0) : (a.created || 0) - (b.created || 0)))
   return list
@@ -1148,8 +1163,11 @@ watch(mainTab, loadMe)
           <button v-for="r in [['all','全部'],['member','會員'],['vip','VIP'],['admin','管理']]" :key="r[0]"
             :class="{ on: userRoleFilter === r[0] }" @click="userRoleFilter = r[0]">{{ r[1] }}</button>
           <span class="tf-label">註冊</span>
-          <button v-for="t in [[0,'全部'],[7,'近7天'],[30,'近30天'],[90,'近90天']]" :key="t[0]"
-            :class="{ on: userTimeFilter === t[0] }" @click="userTimeFilter = t[0]">{{ t[1] }}</button>
+          <input type="date" class="datein" v-model="userFrom" :max="userTo || undefined" title="起始日期" />
+          <span class="tf-sep">~</span>
+          <input type="date" class="datein" v-model="userTo" :min="userFrom || undefined" title="結束日期" />
+          <button v-for="t in [[7,'近7天'],[30,'近30天'],[90,'近90天']]" :key="t[0]" @click="setUserDays(t[0])">{{ t[1] }}</button>
+          <button v-if="userFrom || userTo" @click="setUserDays(0)">清除</button>
           <span class="tf-label">排序</span>
           <button :class="{ on: userSort === 'new' }" @click="userSort = 'new'">新→舊</button>
           <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
@@ -2240,4 +2258,11 @@ footer { padding: 18px 0 30px; text-align: center; }
 .userfilter button { background: #16181d; border: 1px solid #23262d; color: #c8cdd6;
   padding: 4px 11px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .userfilter button.on { background: #2a2410; border-color: #e0b341; color: #f4d774; }
+</style>
+
+<style>
+/* ---- admin user date-range inputs ---- */
+.userfilter .datein { background: #0d0f13; border: 1px solid #2a2d35; color: #e8eaed;
+  border-radius: 7px; padding: 3px 8px; font-size: 12px; color-scheme: dark; }
+.userfilter .tf-sep { color: #8b909a; font-size: 12px; }
 </style>
