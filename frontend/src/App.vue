@@ -73,7 +73,10 @@ async function loadMe() {
     const res = await authFetch('/api/auth/me')
     const d = res.ok ? await res.json() : {}
     if (!d.role || d.role === 'public') {
-      clearAuth('閒置超時,請重新登入') // token expired / invalid
+      // no idle timeout now — public means the account was removed or the
+      // signing secret was rotated, so the stored token is no longer valid.
+      clearAuth('登入已失效,請重新登入')
+      authTab.value = 'login'
     } else if (d.status !== 'active') {
       clearAuth(d.status === 'pending' ? '帳號審核中,請待管理員通過' : '帳號已停用,請聯繫管理員')
       authTab.value = 'login'

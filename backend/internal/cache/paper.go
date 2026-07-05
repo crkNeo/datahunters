@@ -445,6 +445,11 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 }
 
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
+	// Web Push (independent of Telegram): fires for EVERY close outcome
+	// (tp / sl / trail / reversed / expired).
+	s.PushSend(bookLabel(b.name)+" 平倉",
+		fmt.Sprintf("%s %s · %s · 損益 %+.2f%% · 出場 $%s",
+			tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, fmtPx(tr.Cur)), "/")
 	if !s.notifier.Enabled() {
 		return
 	}

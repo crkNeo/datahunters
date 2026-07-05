@@ -155,7 +155,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "帳號已停用,請聯繫管理員", http.StatusForbidden)
 		return
 	}
-	token := auth.IssueToken(in.Username, role, s.secret, 24*time.Hour) // 1-day session
+	// No idle logout: the session token is effectively permanent (10y). Bans /
+	// deletions are still enforced immediately — every request is live-gated
+	// against the DB (roleOf) and the SPA re-checks /api/auth/me every 15s.
+	// Rotating JWT_SECRET is the "force-logout everyone" switch.
+	token := auth.IssueToken(in.Username, role, s.secret, 3650*24*time.Hour)
 	writeJSON(w, map[string]any{"token": token, "username": in.Username, "role": role})
 }
 
