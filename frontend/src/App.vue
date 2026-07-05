@@ -1349,7 +1349,7 @@ watch(mainTab, loadMe)
 
     <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emagamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emagamble' ? '彗星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}</h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emagamble' ? '彗星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emagamble'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
       </div>
@@ -2105,4 +2105,70 @@ footer { padding: 18px 0 30px; text-align: center; }
 .csvbtn { margin-left: auto; background: #17321f; border: 1px solid #2f7a4d; color: #7fe0a6;
   padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .csvbtn:hover { background: #1f4a2c; }
+</style>
+
+<style>
+/* ================= responsive / mobile ================= */
+
+/* tablet: stack the home hero + wide option grids */
+@media (max-width: 820px) {
+  .cards { grid-template-columns: 1fr; }
+  .opt-metrics { grid-template-columns: repeat(2, 1fr); }
+  .opt-walls { grid-template-columns: 1fr; }
+}
+
+/* phones */
+@media (max-width: 640px) {
+  html, body { overflow-x: hidden; }
+
+  /* top bar: wrap, drop the decorative search box, let controls flow to row 2 */
+  .topbar { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+  .topbar .search { display: none; }
+  .tickers { gap: 12px; font-size: 12px; }
+  .topmeta { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 6px; }
+  .topmeta .brand { display: none; }
+  .regbtn { padding: 4px 8px; font-size: 11px; }
+
+  /* page gutter */
+  .wrap { padding: 12px 12px 56px; }
+
+  /* nav chips a touch tighter */
+  .mainnav { gap: 6px; margin: 6px 0 12px; }
+  .mainnav button { padding: 6px 11px; font-size: 12px; }
+
+  /* section headers wrap instead of squashing */
+  .mk-head { flex-wrap: wrap; gap: 4px 8px; }
+  .csvbtn { margin-left: 0; }
+
+  /* wide tables scroll horizontally inside their own section/card */
+  .grid { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+  .grid th, .grid td { padding: 7px 8px; }
+
+  /* stat tiles: 2-up */
+  .pstats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+  /* 大盤方向: label on its own line, chips share the row */
+  .mkt-label { width: 100%; margin: 0 0 2px; }
+  .mkt-chip { flex: 1 1 130px; min-width: 0; }
+
+  /* risk / warning strips: tighter padding */
+  .riskbar, .ddbanner { padding: 7px 12px; }
+
+  /* floating QR smaller so it doesn't cover content */
+  .qrfloat { right: 10px; bottom: 10px; padding: 6px 6px 3px; }
+  .qrfloat img { width: 72px; height: 72px; }
+
+  /* keep the ? popover inside the viewport */
+  .help-pop { width: min(280px, 78vw); }
+
+  /* article hero title down a notch */
+  .arttitle { font-size: 21px; }
+}
+
+/* very narrow */
+@media (max-width: 380px) {
+  .mainnav button { padding: 5px 9px; font-size: 11.5px; }
+  .authcard { padding: 22px 16px 18px; }
+  .tickers .tk { font-size: 11px; }
+}
 </style>
