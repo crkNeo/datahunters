@@ -105,6 +105,8 @@ type Store struct {
 	upbitListingsOnly bool           // only push listing/거래지원 notices (UPBIT_LISTINGS_ONLY=1)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
+
+	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
 }
 
 func NewStore(coins []string) *Store {
@@ -135,6 +137,7 @@ func NewStore(coins []string) *Store {
 	// + fallback; OI/long-short have no WS stream and use oiCache (low-freq REST).
 	s.feed = exchange.NewWSFeed(s.ex, coins, 260)
 	s.feed.Start()
+	s.trader = newBitunixTrader() // nil unless BITUNIX_AUTOTRADE=1 + keys set
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
 	s.paperEMAGamble.requireEMA = true // gamble ignition + multi-TF EMA trend confirm

@@ -436,6 +436,9 @@ func abs2(f float64) float64 {
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
 		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
+	if s.trader != nil { // mirror the open onto a real Bitunix account (admin, Phase 1)
+		s.trader.mirrorOpen(b.name, tr.Coin, tr.Dir, tr.TP, tr.SL)
+	}
 	if !s.notifier.Enabled() {
 		return
 	}
