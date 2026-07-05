@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS articles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS push_subs (
-  endpoint VARCHAR(191) PRIMARY KEY,
+  id       VARCHAR(64) PRIMARY KEY,   -- sha256(endpoint) hex; endpoints exceed the 191 index limit
+  endpoint TEXT NOT NULL,
   username VARCHAR(191),
   sub      LONGTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -92,6 +93,15 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 	if err := d.Ping(); err != nil {
 		d.Close()
 		return nil, err
+	}
+	// legacy push_subs used the (often >191-char) endpoint as PRIMARY KEY, which
+	// made every subscription INSERT fail on MySQL. Rebuild it with a hashed id
+	// PK. Safe to drop: subscriptions are transient and clients auto re-register.
+	var tbl, hasID int
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='push_subs'`).Scan(&tbl)
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='push_subs' AND COLUMN_NAME='id'`).Scan(&hasID)
+	if tbl > 0 && hasID == 0 {
+		d.Exec("DROP TABLE push_subs")
 	}
 	for _, stmt := range strings.Split(Schema, ";") {
 		if strings.TrimSpace(stmt) == "" {

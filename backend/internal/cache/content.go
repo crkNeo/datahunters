@@ -1,10 +1,19 @@
 package cache
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
 )
+
+// subID hashes a push endpoint into a fixed 64-char key (endpoints are too long
+// to index directly on MySQL).
+func subID(endpoint string) string {
+	h := sha256.Sum256([]byte(endpoint))
+	return hex.EncodeToString(h[:])
+}
 
 // ---- site config: logo, social links, QR (admin-editable key/value) ----
 
@@ -62,9 +71,9 @@ func (s *Store) GetConfig(k string) string {
 // ---- web-push subscriptions (push.Backend) ----
 
 func (db *DB) addSub(endpoint, username, sub string) {
-	db.sql.Exec(`INSERT INTO push_subs(endpoint,username,sub) VALUES(?,?,?)
-	  ON DUPLICATE KEY UPDATE username=VALUES(username), sub=VALUES(sub)`,
-		endpoint, username, sub)
+	db.sql.Exec(`INSERT INTO push_subs(id,endpoint,username,sub) VALUES(?,?,?,?)
+	  ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint), username=VALUES(username), sub=VALUES(sub)`,
+		subID(endpoint), endpoint, username, sub)
 }
 
 func (db *DB) allSubs() []string {
@@ -84,7 +93,7 @@ func (db *DB) allSubs() []string {
 }
 
 func (db *DB) delSub(endpoint string) {
-	db.sql.Exec(`DELETE FROM push_subs WHERE endpoint=?`, endpoint)
+	db.sql.Exec(`DELETE FROM push_subs WHERE id=?`, subID(endpoint))
 }
 
 // AllSubs / DelSub / AddSub satisfy push.Backend + the subscribe handler.
