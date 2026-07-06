@@ -103,6 +103,9 @@ type Store struct {
 
 	upbitW            *upbit.Watcher // Upbit announcement watcher → Telegram
 	upbitListingsOnly bool           // only push listing/거래지원 notices (UPBIT_LISTINGS_ONLY=1)
+	upbitMu           sync.RWMutex   // guards the on-page announcement board + translation cache
+	upbitBoard        []UpbitNotice  // recent notices (newest first), titles translated to zh-TW
+	upbitTrans        map[int]string // notice id → translated title (so we translate each title once)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -126,6 +129,7 @@ func NewStore(coins []string) *Store {
 		alertSignals:      os.Getenv("ALERT_SIGNAL_CROSS") == "1", // default off
 		upbitW:            upbit.NewWatcher(),
 		upbitListingsOnly: os.Getenv("UPBIT_LISTINGS_ONLY") == "1",
+		upbitTrans:        map[int]string{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
@@ -366,16 +370,30 @@ func (s *Store) longShortCached(coin string) exchange.LongShort {
 	return ls
 }
 
-// UpbitTick polls Upbit announcements and pushes any new ones to Telegram. It
-// no-ops (and skips the Upbit fetch) when Telegram isn't configured.
+// UpbitNotice is one Upbit announcement for the on-page board, with its Korean
+// title translated to Traditional Chinese (TitleZH).
+type UpbitNotice struct {
+	ID       int    `json:"id"`
+	Title    string `json:"title"`    // original Korean title
+	TitleZH  string `json:"title_zh"` // Traditional Chinese translation
+	Category string `json:"category"`
+	ListedAt string `json:"listed_at"`
+	URL      string `json:"url"`
+	Listing  bool   `json:"listing"` // trading-support / new-listing notice
+}
+
+// UpbitTick polls Upbit announcements: it pushes any newly posted ones to
+// Telegram/Web Push, and rebuilds the on-page board (titles translated to
+// Traditional Chinese). The push side no-ops when no channel is configured.
 func (s *Store) UpbitTick() {
 	if s.upbitW == nil {
-		return // sends below no-op if their channel (Telegram / push) isn't set up
+		return
 	}
-	fresh, err := s.upbitW.Fresh()
+	fresh, all, err := s.upbitW.Poll()
 	if err != nil {
 		return
 	}
+	// push newly posted notices (Telegram + Web Push); seeding tick has none.
 	for _, n := range fresh {
 		if s.upbitListingsOnly && !n.IsListing() {
 			continue
@@ -384,9 +402,51 @@ func (s *Store) UpbitTick() {
 		if n.IsListing() {
 			tag = "🚀 Upbit 上架"
 		}
-		s.PushSend(tag, n.Title, "https://upbit.com/service_center/notice?id="+strconv.Itoa(n.ID))
+		s.PushSend(tag, n.Title, n.URL())
 		go s.notifier.Send(n.TelegramText())
 	}
+	s.updateUpbitBoard(all)
+}
+
+// updateUpbitBoard translates each notice title (ko→zh-TW, cached by id so every
+// title is translated only once) and publishes the board newest-first.
+func (s *Store) updateUpbitBoard(notices []upbit.Notice) {
+	board := make([]UpbitNotice, 0, len(notices))
+	for _, n := range notices {
+		s.upbitMu.RLock()
+		zh, ok := s.upbitTrans[n.ID]
+		s.upbitMu.RUnlock()
+		if !ok {
+			zh = s.upbitW.TranslateKo(n.Title)
+			s.upbitMu.Lock()
+			s.upbitTrans[n.ID] = zh
+			s.upbitMu.Unlock()
+		}
+		board = append(board, UpbitNotice{
+			ID: n.ID, Title: n.Title, TitleZH: zh, Category: n.Category,
+			ListedAt: n.ListedAt, URL: n.URL(), Listing: n.IsListing(),
+		})
+	}
+	s.upbitMu.Lock()
+	s.upbitBoard = board
+	if len(s.upbitTrans) > 200 { // prune stale translations so the cache can't grow unbounded
+		keep := make(map[int]string, len(board))
+		for _, n := range board {
+			keep[n.ID] = s.upbitTrans[n.ID]
+		}
+		s.upbitTrans = keep
+	}
+	s.upbitMu.Unlock()
+}
+
+// UpbitBoard returns the recent Upbit announcements (newest first) with titles
+// translated to Traditional Chinese, for the public board.
+func (s *Store) UpbitBoard() []UpbitNotice {
+	s.upbitMu.RLock()
+	defer s.upbitMu.RUnlock()
+	out := make([]UpbitNotice, len(s.upbitBoard))
+	copy(out, s.upbitBoard)
+	return out
 }
 
 // Funding returns the latest funding rate for a coin (0 if unknown).

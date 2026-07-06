@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,11 @@ func (n Notice) IsListing() bool {
 		}
 	}
 	return false
+}
+
+// URL is the public notice page for this announcement.
+func (n Notice) URL() string {
+	return fmt.Sprintf("https://upbit.com/service_center/notice?id=%d", n.ID)
 }
 
 // TelegramText renders the notice as an HTML Telegram message (title escaped).
@@ -92,13 +98,20 @@ func (w *Watcher) fetch() ([]Notice, error) {
 	return out.Data.Notices, nil
 }
 
-// Fresh returns notices newer than the last seen id (oldest→newest), advancing
-// the watermark. The first call seeds the baseline and returns nil.
-func (w *Watcher) Fresh() ([]Notice, error) {
+// Poll fetches the announcement page once and returns (fresh, all):
+//   - fresh: notices newer than the last seen id (oldest→newest), advancing the
+//     watermark. The first Poll seeds the baseline and returns no fresh notices,
+//     so history is never replayed to Telegram/push on startup.
+//   - all: the full current page, newest first, for the on-page board.
+func (w *Watcher) Poll() (fresh, all []Notice, err error) {
 	notices, err := w.fetch()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	all = make([]Notice, len(notices))
+	copy(all, notices)
+	sort.Slice(all, func(i, j int) bool { return all[i].ID > all[j].ID })
+
 	if !w.seeded {
 		for _, n := range notices {
 			if n.ID > w.lastID {
@@ -106,9 +119,8 @@ func (w *Watcher) Fresh() ([]Notice, error) {
 			}
 		}
 		w.seeded = true
-		return nil, nil
+		return nil, all, nil
 	}
-	var fresh []Notice
 	for _, n := range notices {
 		if n.ID > w.lastID {
 			fresh = append(fresh, n)
@@ -120,5 +132,57 @@ func (w *Watcher) Fresh() ([]Notice, error) {
 			w.lastID = n.ID
 		}
 	}
-	return fresh, nil
+	return fresh, all, nil
+}
+
+// TranslateKo turns Korean announcement text into Traditional Chinese via
+// Google's keyless translate endpoint (no API key, no third-party dep). It's
+// best-effort: on any error it returns the original text so the board still
+// shows something readable rather than a blank.
+func (w *Watcher) TranslateKo(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return text
+	}
+	u := "https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=zh-TW&dt=t&q=" + url.QueryEscape(text)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return text
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := w.http.Do(req)
+	if err != nil {
+		return text
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return text
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return text
+	}
+	// Response shape: [[["译文","원문",…],["译文2","원문2",…]], …]. We concatenate
+	// the first element of each sentence segment to rebuild the full translation.
+	var out []any
+	if err := json.Unmarshal(body, &out); err != nil || len(out) == 0 {
+		return text
+	}
+	segs, ok := out[0].([]any)
+	if !ok {
+		return text
+	}
+	var b strings.Builder
+	for _, s := range segs {
+		pair, ok := s.([]any)
+		if !ok || len(pair) == 0 {
+			continue
+		}
+		if t, ok := pair[0].(string); ok {
+			b.WriteString(t)
+		}
+	}
+	if b.Len() == 0 {
+		return text
+	}
+	return b.String()
 }

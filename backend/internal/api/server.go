@@ -91,6 +91,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/events", s.gate(P, s.handleEvents))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
 	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
+	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit)) // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
@@ -412,6 +413,12 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 // handleLiquidations serves the recent liquidation feed.
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
+}
+
+// handleUpbit serves the recent Upbit announcements (Korean titles translated to
+// Traditional Chinese), newest first.
+func (s *Server) handleUpbit(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.UpbitBoard())
 }
 
 // handleEvents serves the full high-impact US economic calendar.

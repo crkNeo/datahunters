@@ -594,6 +594,22 @@ function liqClock(ms) {
   return new Date(ms).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+const upbitNotices = ref([])
+async function loadUpbit() {
+  try {
+    const res = await authFetch('/api/upbit')
+    if (res.ok) upbitNotices.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+function upbitTime(s) {
+  if (!s) return ''
+  const d = new Date(s)
+  if (isNaN(d)) return s
+  return d.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 const boardRows = computed(() =>
   Object.entries(board.value)
     .map(([coin, v]) => ({ coin, ...v }))
@@ -799,6 +815,7 @@ function loadAll() {
   loadRisk()
   loadEvents()
   loadFlow()
+  loadUpbit()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1151,6 +1168,9 @@ watch(mainTab, loadMe)
         財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
       </button>
       <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
+      <button :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
+        Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
+      </button>
       <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
         文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
       </button>
@@ -1648,6 +1668,31 @@ watch(mainTab, loadMe)
       </table>
     </section>
 
+    <!-- Upbit 公告 (韓文原文自動翻譯為繁體中文) -->
+    <section v-else-if="mainTab === 'upbit'">
+      <div class="mk-head">
+        <h2>Upbit 公告<span class="help" tabindex="0">?<span class="help-pop">韓國 Upbit 交易所官方公告(來源 Upbit 公開 API)。原文為韓文,已自動翻譯為繁體中文;點擊可開啟原公告。<b>「上架」標記代表新幣上架/交易支援類公告</b>,通常對該幣種有較大影響。</span></span></h2>
+        <span class="mk-count">共 {{ upbitNotices.length }} 筆</span>
+      </div>
+      <table v-if="upbitNotices.length" class="grid">
+        <thead><tr><th>時間</th><th>標題(繁中)</th><th class="r">類型</th></tr></thead>
+        <tbody>
+          <tr v-for="n in upbitNotices" :key="n.id" :class="{ 'ev-soon': n.listing }">
+            <td class="tsmall">{{ upbitTime(n.listed_at) }}</td>
+            <td>
+              <a :href="n.url" target="_blank" rel="noopener" class="upbit-link">{{ n.title_zh }}</a>
+              <div class="upbit-orig">{{ n.title }}</div>
+            </td>
+            <td class="r">
+              <span v-if="n.listing" class="otag tp">🚀 上架</span>
+              <span v-else class="otag expired">公告</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="loading">載入 Upbit 公告中…(首次載入需翻譯,請稍候)</p>
+    </section>
+
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
       <!-- 內頁 -->
@@ -2020,6 +2065,9 @@ body::before {
 .otag { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 .otag.tp { background: #103a24; color: #2ec26b; } .otag.sl { background: #3a1010; color: #ff5c5c; } .otag.expired { background: #1f2229; color: #b8bcc4; } .otag.reversed { background: #2a2410; color: #f4d774; } .otag.trail { background: #11261a; color: #4ec77f; }
 .tsmall { font-size: 11px; color: #8b909a; }
+.upbit-link { color: #e8eaed; text-decoration: none; font-weight: 600; }
+.upbit-link:hover { color: #4aa3ff; text-decoration: underline; }
+.upbit-orig { font-size: 11px; color: #6b7078; margin-top: 2px; }
 .navbadge { font-style: normal; font-size: 10px; font-weight: 700; background: #e0b341; color: #1a1407; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
 .dir { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .dir.long { background: #103a24; color: #2ec26b; } .dir.short { background: #3a1010; color: #ff5c5c; }
