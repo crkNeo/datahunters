@@ -103,6 +103,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
+	mux.HandleFunc("/api/admin/support", s.gate(A, s.handleSupport))      // 支撐跌破策略 (admin-only)
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -115,7 +116,6 @@ func (s *Server) Routes() http.Handler {
 	// VIP (live entries with TP/SL)
 	mux.HandleFunc("/api/paper", s.gate(V, s.handlePaper))
 	mux.HandleFunc("/api/gamble", s.gate(V, s.handleGamble))
-	mux.HandleFunc("/api/ema-gamble", s.gate(V, s.handleEMAGamble))
 	mux.HandleFunc("/api/ema-only", s.gate(V, s.handleEMAOnly))
 
 	// web push (PWA notifications)
@@ -357,12 +357,12 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleExport streams a strategy book's full trade history as CSV (admin only).
-// ?book=main|gamble|emagamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
+// ?book=main|gamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
 // Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch book {
-	case "main", "gamble", "emagamble", "emaonly":
+	case "main", "gamble", "emaonly":
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -390,11 +390,6 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
-// handleEMAGamble serves the "狙擊+EMA" tracker (gamble ignition + EMA trend).
-func (s *Server) handleEMAGamble(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.EMAGamble())
-}
-
 // handleEMAOnly serves the standalone "EMA策略" tracker (1h cross + 15m EMA200).
 func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMAOnly())
@@ -413,6 +408,12 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 // handleLiquidations serves the recent liquidation feed.
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
+}
+
+// handleSupport serves the admin-only 支撐跌破 strategy: the four coins' current
+// support levels plus its simulated open/closed trades.
+func (s *Server) handleSupport(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SupportState())
 }
 
 // handleUpbit serves the recent Upbit announcements (Korean titles translated to

@@ -173,7 +173,6 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
-	s.tickBook(s.paperEMAGamble, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -194,7 +193,6 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
-		collect("emagamble", s.paperEMAGamble)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -379,8 +377,6 @@ func bookLabel(name string) string {
 	switch name {
 	case "gamble":
 		return "超新星"
-	case "emagamble":
-		return "彗星"
 	case "emaonly":
 		return "銀河"
 	case "trail":
@@ -393,7 +389,7 @@ func bookLabel(name string) string {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emagamble", "emaonly":
+	case "gamble", "emaonly":
 		return name
 	}
 	return "paper" // main
@@ -545,7 +541,7 @@ func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 45) }
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
 // closed list is capped) if persistence is off or empty. book is one of
-// main|gamble|emagamble|emaonly.
+// main|gamble|emaonly.
 func (s *Store) ExportTrades(book string) []*PaperTrade {
 	if s.db != nil {
 		if t := s.db.loadTrades(book); len(t) > 0 {
@@ -558,8 +554,6 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
-	case "emagamble":
-		b = s.paperEMAGamble
 	case "emaonly":
 		b = s.paperEMA
 	default:
@@ -573,10 +567,8 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	return out
 }
 
-// EMAGamble = gamble ignition + EMA trend filter (radar-driven, momentum light
-// applies). EMAOnly = standalone EMA cross book (signals only; no scan watchlist).
-func (s *Store) EMAGamble() PaperState { return s.serve(s.paperEMAGamble, 45) }
-func (s *Store) EMAOnly() PaperState   { return s.serveEMA(s.paperEMA) }
+// EMAOnly = standalone EMA cross book (signals only; no scan watchlist).
+func (s *Store) EMAOnly() PaperState { return s.serveEMA(s.paperEMA) }
 
 // serveEMA snapshots the standalone EMA book, stamping only live funding, and
 // attaches the 大盤 (BTC/ETH) EMA bias for display.

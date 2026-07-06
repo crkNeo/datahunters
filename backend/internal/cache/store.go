@@ -55,10 +55,9 @@ type Store struct {
 	symTime  time.Time
 
 	paperMu        sync.Mutex // guards the paper-trading books
-	paperMain      *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble    *paperBook // loose: low bar, chases already-elevated coins
-	paperEMAGamble *paperBook // gamble ignition + 15m>EMA200 & 1h EMA5/20 trend filter
-	paperEMA       *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+	paperMain   *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble *paperBook // loose: low bar, chases already-elevated coins
+	paperEMA    *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
 	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
@@ -107,6 +106,11 @@ type Store struct {
 	upbitBoard        []UpbitNotice  // recent notices (newest first), titles translated to zh-TW
 	upbitTrans        map[int]string // notice id → translated title (so we translate each title once)
 
+	supMu     sync.Mutex             // guards the support-breakdown strategy (admin-only)
+	supTrades []*SupportTrade        // simulated support-breakdown shorts (in-memory)
+	supInfo   map[string]SupportInfo // coin → current support read (for the admin page)
+	supBar    int64                  // last processed closed-bar Ts (per-bar throttle)
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -118,10 +122,9 @@ func NewStore(coins []string) *Store {
 		details:           map[string]CoinDetail{},
 		ex:                exchange.NewClient(),
 		coins:             coins,
-		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),       // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 45, false, 1*time.Hour, 0),    // gamble, fixed TP/SL
-		paperEMAGamble:    newBook("emagamble", 45, false, 1*time.Hour, 0), // gamble + EMA trend filter
-		paperEMA:          newBook("emaonly", 0, false, 0, 0),              // standalone EMA cross (no time cooldown; signal-hour dedup)
+		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
+		paperGamble:       newBook("gamble", 45, false, 1*time.Hour, 0), // gamble, fixed TP/SL
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
@@ -130,6 +133,7 @@ func NewStore(coins []string) *Store {
 		upbitW:            upbit.NewWatcher(),
 		upbitListingsOnly: os.Getenv("UPBIT_LISTINGS_ONLY") == "1",
 		upbitTrans:        map[int]string{},
+		supInfo:           map[string]SupportInfo{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
@@ -144,7 +148,6 @@ func NewStore(coins []string) *Store {
 	s.trader = newBitunixTrader() // nil unless BITUNIX_AUTOTRADE=1 + keys set
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
-	s.paperEMAGamble.requireEMA = true // gamble ignition + multi-TF EMA trend confirm
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -157,11 +160,10 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
-		s.paperEMAGamble.trades = db.loadTrades("emagamble")
 		s.paperEMA.trades = db.loadTrades("emaonly")
-		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emagamble=%d emaonly=%d trades",
+		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
-			len(s.paperEMAGamble.trades), len(s.paperEMA.trades))
+			len(s.paperEMA.trades))
 	}
 	return s
 }

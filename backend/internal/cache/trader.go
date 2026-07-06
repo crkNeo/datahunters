@@ -27,7 +27,7 @@ type bitunixTrader struct {
 //	BITUNIX_API_KEY / BITUNIX_API_SECRET
 //	BITUNIX_RISK_PCT=1            (margin as % of available; default 1)
 //	BITUNIX_LEVERAGE=25          (default 25)
-//	BITUNIX_BOOKS=emaonly        (all | comma list of main,gamble,emagamble,emaonly)
+//	BITUNIX_BOOKS=emaonly        (all | comma list of main,gamble,emaonly)
 func newBitunixTrader() *bitunixTrader {
 	if os.Getenv("BITUNIX_AUTOTRADE") != "1" {
 		return nil

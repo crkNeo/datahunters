@@ -461,17 +461,14 @@ async function loadRadar() {
 
 const paper = ref(null)
 const gamble = ref(null)
-const emaGamble = ref(null)
 const emaOnly = ref(null)
 async function loadPaper() {
   try {
-    const [p, g, eg, eo] = await Promise.all([
-      authFetch('/api/paper'), authFetch('/api/gamble'),
-      authFetch('/api/ema-gamble'), authFetch('/api/ema-only')
+    const [p, g, eo] = await Promise.all([
+      authFetch('/api/paper'), authFetch('/api/gamble'), authFetch('/api/ema-only')
     ])
     if (p.ok) paper.value = await p.json()
     if (g.ok) gamble.value = await g.json()
-    if (eg.ok) emaGamble.value = await eg.json()
     if (eo.ok) emaOnly.value = await eo.json()
   } catch (e) {
     /* paper is secondary */
@@ -479,14 +476,13 @@ async function loadPaper() {
 }
 const book = computed(() =>
   mainTab.value === 'gamble' ? gamble.value
-    : mainTab.value === 'emagamble' ? emaGamble.value
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
-  const map = { paper: 'main', gamble: 'gamble', emagamble: 'emagamble', emaonly: 'emaonly' }
+  const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
   const bookName = map[mainTab.value]
   if (!bookName) return
   try {
@@ -608,6 +604,16 @@ function upbitTime(s) {
   const d = new Date(s)
   if (isNaN(d)) return s
   return d.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+const support = ref(null)
+async function loadSupport() {
+  try {
+    const res = await authFetch('/api/admin/support')
+    if (res.ok) support.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
 }
 
 const boardRows = computed(() =>
@@ -823,7 +829,10 @@ function loadAll() {
     loadScoreLog()
   }
   if (can('vip')) loadPaper()
-  if (can('admin')) loadUsers()
+  if (can('admin')) {
+    loadUsers()
+    loadSupport()
+  }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
 // then refresh data. Also re-check whenever the user switches page (tab).
@@ -890,7 +899,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emagamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 onMounted(async () => {
   loadConfig()
@@ -1161,51 +1170,61 @@ watch(mainTab, loadMe)
 
     <!-- nav -->
     <nav class="mainnav">
-      <span class="navgroup">公開</span>
-      <button :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
-      <button :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
-      <button :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
-        財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
-      </button>
-      <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
-      <button :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
-        Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
-      </button>
-      <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
-        文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
-      </button>
-      <template v-if="can('member')">
-        <span class="navgroup sep">會員</span>
-        <button :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
-        <button :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'">
-          數據訊號<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
-        </button>
-        <button :class="{ active: mainTab === 'scorelog' }" @click="mainTab = 'scorelog'">
-          訊號紀錄<em v-if="scoreLog.length" class="navbadge">{{ scoreLog.length }}</em>
-        </button>
-        <button :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
-      </template>
-      <template v-if="can('vip')">
-        <span class="navgroup sep">VIP</span>
-        <button :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
-          星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
-        </button>
-        <button :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
-          超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
-        </button>
-        <button :class="{ active: mainTab === 'emagamble' }" @click="mainTab = 'emagamble'">
-          彗星<em v-if="emaGamble && emaGamble.open.length" class="navbadge">{{ emaGamble.open.length }}</em>
-        </button>
-        <button :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
-          銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
-        </button>
-      </template>
-      <template v-if="can('admin')">
-        <span class="navgroup sep">管理</span>
-        <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor()">
-          後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
-        </button>
-      </template>
+      <div class="navrow">
+        <span class="navgroup">公開</span>
+        <div class="navbtns">
+          <button :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
+          <button :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
+          <button :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
+            財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
+          <button :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
+            Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
+            文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
+          </button>
+        </div>
+      </div>
+      <div class="navrow" v-if="can('member')">
+        <span class="navgroup">會員</span>
+        <div class="navbtns">
+          <button :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
+          <button :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'">
+            數據訊號<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'scorelog' }" @click="mainTab = 'scorelog'">
+            訊號紀錄<em v-if="scoreLog.length" class="navbadge">{{ scoreLog.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
+        </div>
+      </div>
+      <div class="navrow" v-if="can('vip')">
+        <span class="navgroup">VIP</span>
+        <div class="navbtns">
+          <button :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
+            星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
+            超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
+            銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
+          </button>
+        </div>
+      </div>
+      <div class="navrow" v-if="can('admin')">
+        <span class="navgroup">管理</span>
+        <div class="navbtns">
+          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor()">
+            後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'support' }" @click="mainTab = 'support'; loadSupport()">
+            支撐跌破<em v-if="support && support.open.length" class="navbadge">{{ support.open.length }}</em>
+          </button>
+        </div>
+      </div>
     </nav>
 
     <!-- 綜合排行 Top 10 (public, scores only) -->
@@ -1250,6 +1269,68 @@ watch(mainTab, loadMe)
       <p v-if="role === 'public'" class="radar-note" style="margin-top:14px">
         🔒 想看 <b>OI 儀表板、爆發雷達、VIP 量化訊號(含進出場)</b>?請<b @click="loginOpen = true" style="cursor:pointer;text-decoration:underline">登入</b>會員/VIP。申請方式見公告。
       </p>
+    </section>
+
+    <!-- 支撐跌破 3R (admin only) -->
+    <section v-else-if="mainTab === 'support' && can('admin')">
+      <div class="mk-head">
+        <h2>支撐跌破 3R<span class="help" tabindex="0">?<span class="help-pop">1h 週期,只掃 BTC/ETH/SOL/BNB。用左右各 3 根的分形法找 swing low,價差 0.4% 內併為一群,取被測 ≥3 次的最強支撐。<b>最新收盤跌破支撐才開空</b>(盤中插針不算):進場=跌破那根收盤、SL=支撐×1.006、TP=進場−3R(1R=10U)。同根同碰 SL/TP 算停損,超 200 根市價結算。⚠️ 模擬單,僅管理員可見,重啟後歸零。</span></span></h2>
+        <span class="mk-count" v-if="support">開倉 {{ support.open.length }} · 已平 {{ support.stats.closed }}</span>
+      </div>
+
+      <!-- 四顆當前支撐 -->
+      <div class="sup-cards" v-if="support">
+        <div v-for="c in support.supports" :key="c.coin" class="sup-card" :class="{ broken: c.has_open }">
+          <div class="sup-coin">{{ c.coin }}</div>
+          <div class="sup-price">現價 {{ c.price ? fmtPrice(c.price) : '—' }}</div>
+          <template v-if="c.ok">
+            <div class="sup-level">支撐 <b>{{ fmtPrice(c.support) }}</b></div>
+            <div class="sup-meta">
+              <span class="sup-touch">測試 {{ c.touches }} 次</span>
+              <span :class="c.dist_pct >= 0 ? 'long' : 'short'">距 {{ c.dist_pct >= 0 ? '+' : '' }}{{ c.dist_pct?.toFixed(2) }}%</span>
+            </div>
+            <div v-if="c.has_open" class="sup-tag short">已跌破 · 持空單</div>
+          </template>
+          <div v-else class="sup-none">尚無合格支撐<br /><span class="tsmall">(需 ≥3 次測試)</span></div>
+        </div>
+      </div>
+      <p v-else class="loading">載入策略中…(首個收盤週期後才會建立支撐)</p>
+
+      <!-- 持倉中 -->
+      <h3 class="psub" v-if="support && support.open.length">持倉中 ({{ support.open.length }})</h3>
+      <table v-if="support && support.open.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">支撐</th><th class="r">SL</th><th class="r">TP</th><th class="r">現價</th><th class="r">浮動</th></tr></thead>
+        <tbody>
+          <tr v-for="t in support.open" :key="t.coin + t.open_time">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir short">做空</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r tsmall">{{ fmtPrice(t.support) }}</td>
+            <td class="r">{{ fmtPrice(t.sl) }}</td>
+            <td class="r">{{ fmtPrice(t.tp) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td class="r" :class="t.pnl_u >= 0 ? 'long' : 'short'"><b>{{ t.pnl_u >= 0 ? '+' : '' }}{{ t.pnl_u?.toFixed(1) }}U</b></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 已平倉 + 統計 -->
+      <template v-if="support && support.stats.closed">
+        <h3 class="psub">已平倉 · 勝率 {{ support.stats.win_rate }}% · 累計 {{ support.stats.total_u >= 0 ? '+' : '' }}{{ support.stats.total_u }}U ({{ support.stats.wins }}勝 / {{ support.stats.losses }}敗)</h3>
+        <table class="grid">
+          <thead><tr><th>幣種</th><th class="r">進場</th><th class="r">出場</th><th class="r">結果</th><th class="r">損益</th><th>平倉時間</th></tr></thead>
+          <tbody>
+            <tr v-for="(t, i) in support.closed" :key="i">
+              <td class="coin">{{ t.coin }}</td>
+              <td class="r">{{ fmtPrice(t.entry) }}</td>
+              <td class="r">{{ fmtPrice(t.cur) }}</td>
+              <td class="r"><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ t.outcome === 'tp' ? '止盈' : t.outcome === 'sl' ? '止損' : '逾時' }}</span></td>
+              <td class="r" :class="t.pnl_u >= 0 ? 'long' : 'short'"><b>{{ t.pnl_u >= 0 ? '+' : '' }}{{ t.pnl_u?.toFixed(1) }}U</b></td>
+              <td class="tsmall">{{ t.close_time ? new Date(t.close_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
     </section>
 
     <!-- 後台管理 (admin only) -->
@@ -1547,9 +1628,9 @@ watch(mainTab, loadMe)
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emagamble' || mainTab === 'emaonly'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emagamble' ? '彗星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emagamble'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
       </div>
@@ -2036,9 +2117,11 @@ body::before {
 .gauge-zones { display: flex; gap: 8px; font-size: 10px; color: #5c616b; margin-top: 10px; }
 
 /* nav */
-.mainnav { display: flex; align-items: center; gap: 8px; margin: 8px 0 16px; flex-wrap: wrap; }
-.navgroup { font-size: 11px; color: #5c616b; margin-right: 2px; }
-.navgroup.sep { margin-left: 14px; }
+.mainnav { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 16px; }
+.navrow { display: flex; align-items: flex-start; gap: 10px; }
+.navrow + .navrow { padding-top: 8px; border-top: 1px solid #1c1f25; }
+.navgroup { flex: 0 0 34px; font-size: 11px; font-weight: 700; letter-spacing: .5px; color: #7a8089; padding-top: 8px; }
+.navbtns { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .mainnav button { background: #16181d; border: 1px solid #23262d; color: #b8bcc4; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .mainnav button.active { background: #2a2410; border-color: #e0b341; color: #f4d774; }
 
@@ -2063,6 +2146,21 @@ body::before {
 .dir { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 .dir.long { background: #103a24; color: #2ec26b; } .dir.short { background: #3a1010; color: #ff5c5c; }
 .otag { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+
+/* 支撐跌破策略卡片 */
+.sup-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0 4px; }
+.sup-card { background: #16181d; border: 1px solid #23262d; border-radius: 10px; padding: 12px 14px; }
+.sup-card.broken { border-color: #6a2020; background: #1c1416; }
+.sup-coin { font-size: 15px; font-weight: 700; color: #f4f5f7; }
+.sup-price { font-size: 11px; color: #8b909a; margin-top: 2px; }
+.sup-level { font-size: 13px; color: #c8ccd4; margin-top: 8px; }
+.sup-level b { color: #e0b341; font-size: 15px; }
+.sup-meta { display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px; }
+.sup-touch { color: #8b909a; }
+.sup-tag { display: inline-block; margin-top: 8px; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+.sup-tag.short { background: #3a1010; color: #ff5c5c; }
+.sup-none { font-size: 12px; color: #6b7078; margin-top: 8px; line-height: 1.5; }
+@media (max-width: 640px) { .sup-cards { grid-template-columns: repeat(2, 1fr); } }
 .otag.tp { background: #103a24; color: #2ec26b; } .otag.sl { background: #3a1010; color: #ff5c5c; } .otag.expired { background: #1f2229; color: #b8bcc4; } .otag.reversed { background: #2a2410; color: #f4d774; } .otag.trail { background: #11261a; color: #4ec77f; }
 .tsmall { font-size: 11px; color: #8b909a; }
 .upbit-link { color: #e8eaed; text-decoration: none; font-weight: 600; }
@@ -2372,6 +2470,10 @@ footer { padding: 18px 0 30px; text-align: center; }
 
   /* nav chips a touch tighter */
   .mainnav { gap: 6px; margin: 6px 0 12px; }
+  .navrow { gap: 8px; }
+  .navrow + .navrow { padding-top: 6px; }
+  .navgroup { flex-basis: 30px; font-size: 10.5px; padding-top: 7px; }
+  .navbtns { gap: 6px; }
   .mainnav button { padding: 6px 11px; font-size: 12px; }
 
   /* section headers wrap instead of squashing */
