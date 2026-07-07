@@ -404,7 +404,9 @@ func (s *Store) UpbitTick() {
 		if n.IsListing() {
 			tag = "🚀 Upbit 上架"
 		}
-		s.PushSend(tag, n.Title, n.URL())
+		// Web Push opens our own Upbit board tab (not upbit.com); the Telegram
+		// message still links out to the real notice.
+		s.PushSend(tag, n.Title, "/?tab=upbit")
 		go s.notifier.Send(n.TelegramText())
 	}
 	s.updateUpbitBoard(all)

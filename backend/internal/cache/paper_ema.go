@@ -206,6 +206,42 @@ func (s *Store) emaConfirm(coin, dir string) bool {
 	return st.shortReady
 }
 
+// ManualCloseEMA force-closes an open 銀河 (standalone-EMA) trade at the current
+// market price, recorded as an "expired" (逾時) exit, and fires the usual close
+// alert (Telegram + Web Push). id is the trade's ID. Returns false if no OPEN
+// trade in the EMA book matches id.
+func (s *Store) ManualCloseEMA(id string) bool {
+	px := s.livePrices() // read before the lock (livePrices does its own locking)
+	now := time.Now()
+	s.paperMu.Lock()
+	var target *PaperTrade
+	for _, tr := range s.paperEMA.trades {
+		if tr.ID == id && tr.Status == "open" {
+			target = tr
+			break
+		}
+	}
+	if target == nil {
+		s.paperMu.Unlock()
+		return false
+	}
+	exit := px[target.Coin]
+	if exit <= 0 {
+		exit = target.Cur // fall back to the last seen price
+	}
+	if exit <= 0 {
+		exit = target.Entry
+	}
+	closeTrade(target, exit, "expired", now) // outcome "expired" → UI shows 逾時
+	s.paperMu.Unlock()
+
+	s.notifyTradeClose(s.paperEMA, target, now) // TG + Web Push, same as an auto close
+	if s.db != nil {
+		s.db.upsertTrade("emaonly", target)
+	}
+	return true
+}
+
 // tickEMAOnly is the standalone "EMA策略" book: it does NOT use the radar. It
 // enters when both 1h flags first hold — golden state (EMA5>EMA20) AND close
 // above EMA50 for long (mirror for short). Stop-loss = the 20-bar swing extreme

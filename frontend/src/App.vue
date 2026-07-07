@@ -71,7 +71,16 @@ async function loadMe() {
   }
   try {
     const res = await authFetch('/api/auth/me')
-    const d = res.ok ? await res.json() : {}
+    // /api/auth/me ALWAYS answers 200 with a JSON role (public for an invalid
+    // token). So a non-200 here is a transient server/proxy/network hiccup —
+    // common right when a PWA/tab returns to the foreground — NOT a real logout.
+    // Treat it as a hiccup and keep the current session, or a stray 502 on resume
+    // would wipe the role and blank whatever gated tab the user was on.
+    if (!res.ok) {
+      authReady.value = true
+      return
+    }
+    const d = await res.json()
     if (!d.role || d.role === 'public') {
       // no idle timeout now — public means the account was removed or the
       // signing secret was rotated, so the stored token is no longer valid.
@@ -479,6 +488,24 @@ const book = computed(() =>
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
+
+// admin-only: force-close an open 銀河 trade at market (recorded as 逾時), then
+// refresh the book. Pushes to TG + admin the same as an automatic close.
+async function manualExit(t) {
+  if (!confirm(`確定手動出場 ${t.coin}？將以現價結算並標記「逾時」。`)) return
+  try {
+    const res = await authFetch('/api/admin/ema-close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: t.id }),
+    })
+    if (!res.ok) { showToast((await res.text()).trim() || '出場失敗', 'err'); return }
+    showToast('已手動出場（逾時結算）', 'ok')
+    loadPaper()
+  } catch (e) {
+    showToast('出場失敗', 'err')
+  }
+}
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
@@ -899,8 +926,11 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support', 'upbit']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
+let onVisibility = null
+let onPageShow = null
+let hiddenAt = 0
 onMounted(async () => {
   loadConfig()
   await loadMe()
@@ -925,9 +955,40 @@ onMounted(async () => {
     deferredPrompt.value = e
     canInstall.value = true
   })
+  // PWA/tab resume: mobile browsers throttle background timers and may freeze or
+  // discard a backgrounded standalone PWA — you return to a blank/stale screen.
+  // On return to the foreground, re-sync immediately; after a long background,
+  // reload to rebuild a clean state instead of risking the blank-resume screen.
+  onVisibility = () => {
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return }
+    if (hiddenAt && Date.now() - hiddenAt > 30 * 60 * 1000) { location.reload(); return }
+    tick()
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  // restored from the back/forward cache → reload to get a clean, current page
+  onPageShow = (e) => { if (e.persisted) location.reload() }
+  window.addEventListener('pageshow', onPageShow)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
+  if (onPageShow) window.removeEventListener('pageshow', onPageShow)
+})
 watch(mainTab, loadMe)
+
+// keep the visible tab renderable: if a role change (a resume re-check, a ban,
+// or a rotated token) drops the user below the current tab's requirement, fall
+// back to the public ranking tab — so the content area can never land on a gated
+// v-else-if branch that matches nothing and renders blank.
+const TAB_MIN_ROLE = {
+  oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
+  paper: 'vip', gamble: 'vip', emaonly: 'vip',
+  admin: 'admin', support: 'admin',
+}
+watch(role, () => {
+  const need = TAB_MIN_ROLE[mainTab.value]
+  if (need && !can(need)) mainTab.value = 'ranking'
+})
 </script>
 
 <template>
@@ -1657,7 +1718,7 @@ watch(mainTab, loadMe)
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1670,6 +1731,7 @@ watch(mainTab, loadMe)
             <td class="r short">{{ fmtPrice(t.sl) }} <small>({{ fmtPct(pnlAt(t, t.sl)) }})</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
+            <td v-if="mainTab === 'emaonly' && can('admin')" class="r"><button class="exitbtn" @click.stop="manualExit(t)">手動出場</button></td>
           </tr>
         </tbody>
       </table>
@@ -2440,6 +2502,9 @@ footer { padding: 18px 0 30px; text-align: center; }
 .csvbtn { margin-left: auto; background: #17321f; border: 1px solid #2f7a4d; color: #7fe0a6;
   padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .csvbtn:hover { background: #1f4a2c; }
+.exitbtn { background: #3a1010; border: 1px solid #7a2f2f; color: #ff9a9a; padding: 4px 10px;
+  border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.exitbtn:hover { background: #4a1616; }
 </style>
 
 <style>

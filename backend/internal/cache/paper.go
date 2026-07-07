@@ -48,7 +48,7 @@ func roundPx(v float64) float64 {
 // PaperTrade is one simulated trade taken from a breakout-radar signal. Entry is
 // the market price when the signal fired; TP/SL are the radar's fib levels.
 type PaperTrade struct {
-	ID         string     `json:"-"` // book|coin|dir|opentime, for persistence
+	ID         string     `json:"id"` // book|coin|dir|opentime; also the manual-close key
 	Coin       string     `json:"coin"`
 	Dir        string     `json:"dir"` // long | short
 	Score      int        `json:"score"`

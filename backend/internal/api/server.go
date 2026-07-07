@@ -104,6 +104,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
 	mux.HandleFunc("/api/admin/support", s.gate(A, s.handleSupport))      // 支撐跌破策略 (admin-only)
+	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))   // 銀河: 手動出場 (admin-only)
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -393,6 +394,25 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 // handleEMAOnly serves the standalone "EMA策略" tracker (1h cross + 15m EMA200).
 func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMAOnly())
+}
+
+// handleEMAClose force-closes an open 銀河 (EMA-only) trade at market, recorded as
+// 逾時 (expired). Admin only. POST {id}.
+func (s *Server) handleEMAClose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct{ ID string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.ID == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.ManualCloseEMA(in.ID) {
+		http.Error(w, "找不到此進行中的部位(可能已平倉)", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleScoreLog serves the log of when coins crossed the ±20 signal line.
