@@ -470,7 +470,16 @@ async function loadRadar() {
 
 const paper = ref(null)
 const gamble = ref(null)
+const gambleHedge = ref(null)
 const emaOnly = ref(null)
+async function loadGambleHedge() {
+  try {
+    const res = await authFetch('/api/admin/gamble-hedge')
+    if (res.ok) gambleHedge.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 async function loadPaper() {
   try {
     const [p, g, eo] = await Promise.all([
@@ -485,6 +494,7 @@ async function loadPaper() {
 }
 const book = computed(() =>
   mainTab.value === 'gamble' ? gamble.value
+    : mainTab.value === 'gamblehedge' ? gambleHedge.value
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
@@ -509,7 +519,7 @@ async function manualExit(t) {
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
-  const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
+  const map = { paper: 'main', gamble: 'gamble', gamblehedge: 'gamblehedge', emaonly: 'emaonly' }
   const bookName = map[mainTab.value]
   if (!bookName) return
   try {
@@ -859,6 +869,7 @@ function loadAll() {
   if (can('admin')) {
     loadUsers()
     loadSupport()
+    loadGambleHedge()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
@@ -926,7 +937,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support', 'upbit']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support', 'upbit']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -983,7 +994,7 @@ watch(mainTab, loadMe)
 const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
-  admin: 'admin', support: 'admin',
+  admin: 'admin', support: 'admin', gamblehedge: 'admin',
 }
 watch(role, () => {
   const need = TAB_MIN_ROLE[mainTab.value]
@@ -1283,6 +1294,9 @@ watch(role, () => {
           </button>
           <button :class="{ active: mainTab === 'support' }" @click="mainTab = 'support'; loadSupport()">
             支撐跌破<em v-if="support && support.open.length" class="navbadge">{{ support.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'gamblehedge' }" @click="mainTab = 'gamblehedge'; loadGambleHedge()">
+            超新星·保本<em v-if="gambleHedge && gambleHedge.open.length" class="navbadge">{{ gambleHedge.open.length }}</em>
           </button>
         </div>
       </div>
@@ -1689,9 +1703,9 @@ watch(role, () => {
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gamblehedge' ? '超新星·保本(管理)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamblehedge'">管理員 A/B 測試:與超新星相同進場,但獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變,回落至保本即「套保出場」。⚠️ 回測顯示此保本會剪掉肥尾止盈、期望值較差,僅供觀察。</template><template v-else-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
       </div>
@@ -1718,7 +1732,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="mainTab === 'gamblehedge'" class="r" title="獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變並推播管理員;顯示保本停損價,回落至此為套保出場">套保</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1726,6 +1740,8 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td v-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
+            <td v-if="mainTab === 'gamblehedge'" class="r"><span v-if="t.hedged" class="hedgetag">🛡 {{ fmtPrice(t.hedge_price) }}</span><span v-else class="tsmall">—</span></td>
             <td class="r tsmall">{{ fmtFund(t.cur_funding) }}</td>
             <td class="r long">{{ fmtPrice(t.tp) }} <small>({{ fmtPct(pnlAt(t, t.tp)) }})</small></td>
             <td class="r short">{{ fmtPrice(t.sl) }} <small>({{ fmtPct(pnlAt(t, t.sl)) }})</small></td>
@@ -1746,7 +1762,7 @@ watch(role, () => {
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome">{{ t.outcome === 'tp' ? '止盈 TP' : t.outcome === 'sl' ? '止損 SL' : t.outcome === 'trail' ? '移動止損' : t.outcome === 'reversed' ? '反向出場' : '逾時' }}</span></td>
+            <td><span class="otag" :class="t.outcome">{{ t.outcome === 'tp' ? '止盈 TP' : t.outcome === 'sl' ? '止損 SL' : t.outcome === 'trail' ? '移動止損' : t.outcome === 'reversed' ? '反向出場' : t.outcome === 'hedge' ? '套保出場' : '逾時' }}</span></td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
@@ -2048,6 +2064,7 @@ body::before {
 .mom-alive { background: rgba(46,160,90,0.16); color: #4cd17e; }
 .mom-weak { background: rgba(224,179,65,0.16); color: #f4d774; }
 .mom-dead { background: rgba(229,72,77,0.16); color: #ff6b6f; }
+.hedgetag { font-size: 11.5px; white-space: nowrap; padding: 2px 7px; border-radius: 6px; font-weight: 600; background: rgba(74,163,255,0.16); color: #6db5ff; }
 .qtag { font-size: 10px; font-style: normal; padding: 1px 5px; border-radius: 6px; margin-left: 5px; vertical-align: middle; }
 .qtag.hq { background: #2a2410; color: #f4d774; border: 1px solid #e0b341; }
 .qtag.good { background: #11261a; color: #4ec77f; }
@@ -2223,7 +2240,7 @@ body::before {
 .sup-tag.short { background: #3a1010; color: #ff5c5c; }
 .sup-none { font-size: 12px; color: #6b7078; margin-top: 8px; line-height: 1.5; }
 @media (max-width: 640px) { .sup-cards { grid-template-columns: repeat(2, 1fr); } }
-.otag.tp { background: #103a24; color: #2ec26b; } .otag.sl { background: #3a1010; color: #ff5c5c; } .otag.expired { background: #1f2229; color: #b8bcc4; } .otag.reversed { background: #2a2410; color: #f4d774; } .otag.trail { background: #11261a; color: #4ec77f; }
+.otag.tp { background: #103a24; color: #2ec26b; } .otag.sl { background: #3a1010; color: #ff5c5c; } .otag.expired { background: #1f2229; color: #b8bcc4; } .otag.reversed { background: #2a2410; color: #f4d774; } .otag.trail { background: #11261a; color: #4ec77f; } .otag.hedge { background: #0e2a44; color: #6db5ff; }
 .tsmall { font-size: 11px; color: #8b909a; }
 .upbit-link { color: #e8eaed; text-decoration: none; font-weight: 600; }
 .upbit-link:hover { color: #4aa3ff; text-decoration: underline; }

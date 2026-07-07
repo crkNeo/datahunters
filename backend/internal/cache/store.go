@@ -55,9 +55,10 @@ type Store struct {
 	symTime  time.Time
 
 	paperMu        sync.Mutex // guards the paper-trading books
-	paperMain   *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble *paperBook // loose: low bar, chases already-elevated coins
-	paperEMA    *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+	paperMain        *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble      *paperBook // loose: low bar, chases already-elevated coins
+	paperGambleHedge *paperBook // admin-only A/B: gamble + break-even hedge (推播僅管理員)
+	paperEMA         *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
 	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
@@ -122,9 +123,10 @@ func NewStore(coins []string) *Store {
 		details:           map[string]CoinDetail{},
 		ex:                exchange.NewClient(),
 		coins:             coins,
-		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 45, false, 1*time.Hour, 0), // gamble, fixed TP/SL
-		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)
+		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),         // disciplined, fixed TP/SL
+		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),      // gamble, fixed TP/SL (門檻 50:實盤數據顯示 45–49 桶淨虧)
+		paperGambleHedge:  newBook("gamblehedge", 50, false, 1*time.Hour, 0), // admin A/B: gamble + 保本停損
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),               // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
@@ -148,6 +150,7 @@ func NewStore(coins []string) *Store {
 	s.trader = newBitunixTrader() // nil unless BITUNIX_AUTOTRADE=1 + keys set
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
+	s.paperGambleHedge.adminOnly = true // admin-only tab + admin-only push
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -160,10 +163,11 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
+		s.paperGambleHedge.trades = db.loadTrades("gamblehedge")
 		s.paperEMA.trades = db.loadTrades("emaonly")
-		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
+		log.Printf("mysql loaded: %d score events, main=%d gamble=%d gamblehedge=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
-			len(s.paperEMA.trades))
+			len(s.paperGambleHedge.trades), len(s.paperEMA.trades))
 	}
 	return s
 }

@@ -68,6 +68,8 @@ type PaperTrade struct {
 	Funding    float64    `json:"funding"`            // funding rate at entry (persisted)
 	CurFunding float64    `json:"cur_funding"`        // live funding rate (transient, set at serve)
 	Momentum   string     `json:"momentum,omitempty"` // live momentum light: alive|weak|dead (transient)
+	Hedged     bool       `json:"hedged"`             // 超新星: profit crossed 1/3-to-TP → manual-hedge cue fired (in-memory)
+	HedgePrice float64    `json:"hedge_price,omitempty"`
 }
 
 // PaperStats summarises closed trades.
@@ -124,6 +126,7 @@ type paperBook struct {
 	requireAlign bool    // only enter when OI and CVD both agree with direction
 	requireFuel  bool    // only enter when funding is "fuel" (contrarian) for the direction
 	requireEMA   bool    // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
+	adminOnly    bool    // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
 	trades       []*PaperTrade
 	armed        map[string]bool
 	lastOpen     map[string]time.Time // coin|dir → last entry time (dedupe guard)
@@ -173,6 +176,7 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
+	s.tickBook(s.paperGambleHedge, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -193,6 +197,7 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
+		collect("gamblehedge", s.paperGambleHedge)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -238,6 +243,23 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 		}
 		tr.Cur = p
 		tr.PnLPct = pnl(tr.Dir, tr.Entry, p)
+		// 超新星 套保提醒: once an open trade's UNLEVERAGED profit passes 1/3 of the
+		// way to TP, flag it + fire a manual-hedge alert (fires once per trade).
+		if b.name == "gamblehedge" && !tr.Hedged {
+			if tpMove := pnl(tr.Dir, tr.Entry, tr.TP); tpMove > 0 && tr.PnLPct > tpMove/3 {
+				tr.Hedged = true
+				// once 1/3 of the way to TP, move the stop up to break-even +0.05%:
+				// the trade can no longer lose (worst case exits at +0.05%), while TP is
+				// left untouched so the upside is fully preserved. long → entry+, short → −.
+				if tr.Dir == "long" {
+					tr.HedgePrice = roundPx(tr.Entry * 1.0005)
+				} else {
+					tr.HedgePrice = roundPx(tr.Entry * 0.9995)
+				}
+				tr.SL = tr.HedgePrice // 止損上移至保本+
+				s.notifyHedge(tr)
+			}
+		}
 		if b.trail > 0 {
 			// self-heal R/Peak after a restart (not persisted): R from TP/entry,
 			// Peak from entry (tr.SL — the live stop — IS persisted, so protection holds)
@@ -269,6 +291,10 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 					closeTrade(tr, tr.SL, "trail", now)
 				}
 			}
+		} else if tr.Hedged && tr.HedgePrice > 0 &&
+			((tr.Dir == "long" && p <= tr.HedgePrice) || (tr.Dir == "short" && p >= tr.HedgePrice)) {
+			// hedged = break-even stop armed; a pullback to it exits as "套保出場"
+			closeTrade(tr, tr.HedgePrice, "hedge", now)
 		} else {
 			switch tr.Dir {
 			case "long":
@@ -377,6 +403,8 @@ func bookLabel(name string) string {
 	switch name {
 	case "gamble":
 		return "超新星"
+	case "gamblehedge":
+		return "超新星·保本"
 	case "emaonly":
 		return "銀河"
 	case "trail":
@@ -389,7 +417,7 @@ func bookLabel(name string) string {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly":
+	case "gamble", "gamblehedge", "emaonly":
 		return name
 	}
 	return "paper" // main
@@ -414,6 +442,8 @@ func outcomeCN(o string) string {
 		return "反向出場"
 	case "expired":
 		return "逾時平倉"
+	case "hedge":
+		return "套保出場"
 	}
 	return o
 }
@@ -430,6 +460,9 @@ func abs2(f float64) float64 {
 // book has no radar fields (score/OI/CVD), so it gets its own signal-style
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
+	if b.adminOnly {
+		return // admin A/B book: silent on open (mirrors 超新星's signals; only its 套保 alerts fire)
+	}
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
 		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
 	if s.trader != nil { // mirror the open onto a real Bitunix account (admin, Phase 1)
@@ -453,7 +486,30 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 		fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
 }
 
+// notifyHedge alerts (Telegram + Web Push) that a 超新星 position's unleveraged
+// profit has reached 1/3 of the way to TP — the manual-hedge cue. HedgePrice is
+// the suggested hedge level (market ±0.05%). This does NOT change the paper
+// trade's TP/SL; the user hedges their real position manually.
+// notifyHedge fires only for the admin 保本 book, so it is routed to ADMINS ONLY
+// (admin Web Push + Telegram admin chat).
+func (s *Store) notifyHedge(tr *PaperTrade) {
+	if s.pushMgr != nil && s.db != nil {
+		if subs := s.db.adminSubs(); len(subs) > 0 {
+			s.pushMgr.SendTo(subs, "🛡 超新星·保本 止損上移保本",
+				fmt.Sprintf("%s %s 獲利達止盈 1/3 · 止損上移至保本 @ $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.HedgePrice)),
+				"/?tab=gamblehedge")
+		}
+	}
+	if s.notifier.Enabled() {
+		go s.notifier.Send(fmt.Sprintf("🛡 <b>[超新星·保本] 套保</b> %s %s\n獲利已達止盈 1/3(目前 %+.2f%%)\n止損上移至保本+ $%s(進場±0.05%%)· TP 不變 $%s\n回落至此→套保出場",
+			tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.HedgePrice), fmtPx(tr.TP)))
+	}
+}
+
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
+	if b.adminOnly {
+		return // admin A/B book: silent on close (visible on its admin page)
+	}
 	// Web Push (independent of Telegram): fires for EVERY close outcome
 	// (tp / sl / trail / reversed / expired).
 	s.PushSend(bookLabel(b.name)+" 平倉",
@@ -536,7 +592,11 @@ func (b *paperBook) state() PaperState {
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
 func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 45) }
+func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
+
+// GambleHedge is the admin-only A/B: same entries as 超新星 but with the
+// break-even 保本 stop. Admin page + admin-only alerts.
+func (s *Store) GambleHedge() PaperState { return s.serve(s.paperGambleHedge, 50) }
 
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
@@ -554,6 +614,8 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
+	case "gamblehedge":
+		b = s.paperGambleHedge
 	case "emaonly":
 		b = s.paperEMA
 	default:

@@ -104,7 +104,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
 	mux.HandleFunc("/api/admin/support", s.gate(A, s.handleSupport))      // 支撐跌破策略 (admin-only)
-	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))   // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))      // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/gamble-hedge", s.gate(A, s.handleGambleHedge)) // 超新星·保本 A/B (admin-only)
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -358,12 +359,12 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleExport streams a strategy book's full trade history as CSV (admin only).
-// ?book=main|gamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
+// ?book=main|gamble|gamblehedge|emaonly. A UTF-8 BOM is emitted so Excel opens the
 // Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch book {
-	case "main", "gamble", "emaonly":
+	case "main", "gamble", "gamblehedge", "emaonly":
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -394,6 +395,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 // handleEMAOnly serves the standalone "EMA策略" tracker (1h cross + 15m EMA200).
 func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMAOnly())
+}
+
+// handleGambleHedge serves the admin-only 超新星·保本 A/B tracker.
+func (s *Server) handleGambleHedge(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.GambleHedge())
 }
 
 // handleEMAClose force-closes an open 銀河 (EMA-only) trade at market, recorded as
