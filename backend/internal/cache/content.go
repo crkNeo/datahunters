@@ -39,12 +39,26 @@ func (db *DB) allConfig() map[string]string {
 	return out
 }
 
-// SiteConfig returns all public site settings (logo, social JSON, qr, etc.).
+// publicConfigKeys is the whitelist of site_config entries that /api/config may
+// expose. Anything not listed (e.g. vapid_priv, the Web Push PRIVATE key) stays
+// server-side — a whitelist means future secrets can't leak by being added.
+var publicConfigKeys = map[string]bool{
+	"logo": true, "social": true, "qr": true, "qr_link": true,
+}
+
+// SiteConfig returns the PUBLIC site settings only (logo, social JSON, qr, qr_link).
 func (s *Store) SiteConfig() map[string]string {
 	if s.db == nil {
 		return map[string]string{}
 	}
-	return s.db.allConfig()
+	all := s.db.allConfig()
+	out := make(map[string]string, len(publicConfigKeys))
+	for k := range publicConfigKeys {
+		if v, ok := all[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // SetConfig upserts one config key (admin only).
@@ -116,6 +130,64 @@ func (db *DB) adminSubs() []string {
 		}
 	}
 	return out
+}
+
+// subsByRole returns push subscription rows for users of exactly the given role.
+func (db *DB) subsByRole(role string) []string {
+	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
+	  JOIN users u ON u.username = p.username WHERE u.role = ?`, role)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sub string
+		if rows.Scan(&sub) == nil {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// subsVIPPlus returns push subscriptions for VIP and admin accounts (the paying
+// tiers), for VIP-only alerts like the support/resistance monitor.
+func (db *DB) subsVIPPlus() []string {
+	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
+	  JOIN users u ON u.username = p.username WHERE u.role IN ('vip','admin')`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sub string
+		if rows.Scan(&sub) == nil {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// PushBroadcast sends an immediate Web Push to a user group and returns how many
+// subscriptions were targeted. group is one of all|member|vip|admin; url is the
+// deep-link opened on tap (e.g. "/" or "/?tab=articles&article=12").
+func (s *Store) PushBroadcast(title, body, group, url string) int {
+	var subs []string
+	switch group {
+	case "all":
+		subs = s.AllSubs()
+	case "member", "vip", "admin":
+		if s.db != nil {
+			subs = s.db.subsByRole(group)
+		}
+	default:
+		return 0
+	}
+	if s.pushMgr != nil && len(subs) > 0 {
+		s.pushMgr.SendTo(subs, title, body, url)
+	}
+	return len(subs)
 }
 
 // NotifyNewRegister alerts admins that a new account is awaiting review — via

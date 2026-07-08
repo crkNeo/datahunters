@@ -427,6 +427,30 @@ async function onQrPick(e) {
   const f = e.target.files && e.target.files[0]
   if (f) { const p = await uploadImage(f, 'qr'); if (p) await setConfig('qr', p) }
 }
+// ---- admin: instant push broadcast to a user group (optional article deep-link) ----
+const bcTitle = ref('')
+const bcBody = ref('')
+const bcGroup = ref('admin')
+const bcArticle = ref('') // '' = no jump; otherwise an article id → push opens that article
+async function sendBroadcast() {
+  if (!bcTitle.value.trim() || !bcBody.value.trim()) { showToast('標題與內容必填', 'err'); return }
+  const res = await authFetch('/api/admin/push-broadcast', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: bcTitle.value.trim(), body: bcBody.value.trim(), group: bcGroup.value, article: bcArticle.value }),
+  })
+  if (!res.ok) { showToast((await res.text()).trim() || '推播失敗', 'err'); return }
+  const d = await res.json()
+  showToast('已推播給 ' + d.sent + ' 個裝置', 'ok')
+  bcTitle.value = ''; bcBody.value = ''
+}
+
+// open a specific article by id (used by push deep-links → 文章專欄)
+async function openArticleById(id) {
+  try {
+    const res = await authFetch('/api/articles/' + id)
+    if (res.ok) { articleView.value = await res.json(); mainTab.value = 'articles' }
+  } catch (e) { /* ignore */ }
+}
 
 async function loadHome() {
   try {
@@ -643,14 +667,19 @@ function upbitTime(s) {
   return d.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-const support = ref(null)
-async function loadSupport() {
+const sr = ref(null)
+async function loadSR() {
   try {
-    const res = await authFetch('/api/admin/support')
-    if (res.ok) support.value = await res.json()
+    const res = await authFetch('/api/sr')
+    if (res.ok) sr.value = await res.json()
   } catch (e) {
     /* secondary */
   }
+}
+const srStatusMeta = {
+  break_down: { txt: '🔻 跌破支撐', cls: 'short' },
+  break_up: { txt: '🚀 突破壓力', cls: 'long' },
+  range: { txt: '區間內', cls: 'neutral' },
 }
 
 const boardRows = computed(() =>
@@ -865,10 +894,12 @@ function loadAll() {
     loadRadar()
     loadScoreLog()
   }
-  if (can('vip')) loadPaper()
+  if (can('vip')) {
+    loadPaper()
+    loadSR()
+  }
   if (can('admin')) {
     loadUsers()
-    loadSupport()
     loadGambleHedge()
   }
 }
@@ -937,7 +968,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'support', 'upbit']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'articles']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -947,15 +978,23 @@ onMounted(async () => {
   await loadMe()
   loadAll()
   timer = setInterval(tick, 15000)
-  // deep-link: notification opened the app cold with /?tab=gamble → switch to it
-  const qtab = new URLSearchParams(location.search).get('tab')
-  if (qtab) { gotoTab(qtab); history.replaceState({}, '', location.pathname) }
+  // deep-link: notification opened the app cold with /?tab=gamble (and optionally
+  // &article=<id> to jump straight into a column post) → apply it
+  const qs = new URLSearchParams(location.search)
+  const qtab = qs.get('tab')
+  const qart = qs.get('article')
+  if (qtab) gotoTab(qtab)
+  if (qart) openArticleById(qart)
+  if (qtab || qart) history.replaceState({}, '', location.pathname)
   // register service worker for PWA + push
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
-    // app already open → SW tells us which tab the tapped notification wants
+    // app already open → SW tells us which tab (and article) the tapped notification wants
     navigator.serviceWorker.addEventListener('message', (e) => {
-      if (e.data && e.data.type === 'nav') gotoTab(e.data.tab)
+      if (e.data && e.data.type === 'nav') {
+        gotoTab(e.data.tab)
+        if (e.data.article) openArticleById(e.data.article)
+      }
     })
   }
   // silent self-heal: if notifications were already granted, make sure this
@@ -994,7 +1033,8 @@ watch(mainTab, loadMe)
 const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
-  admin: 'admin', support: 'admin', gamblehedge: 'admin',
+  sr: 'vip',
+  admin: 'admin', gamblehedge: 'admin',
 }
 watch(role, () => {
   const need = TAB_MIN_ROLE[mainTab.value]
@@ -1284,6 +1324,7 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
             銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
           </button>
+          <button :class="{ active: mainTab === 'sr' }" @click="mainTab = 'sr'; loadSR()">支撐壓力</button>
         </div>
       </div>
       <div class="navrow" v-if="can('admin')">
@@ -1291,9 +1332,6 @@ watch(role, () => {
         <div class="navbtns">
           <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor()">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
-          </button>
-          <button :class="{ active: mainTab === 'support' }" @click="mainTab = 'support'; loadSupport()">
-            支撐跌破<em v-if="support && support.open.length" class="navbadge">{{ support.open.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'gamblehedge' }" @click="mainTab = 'gamblehedge'; loadGambleHedge()">
             超新星·保本<em v-if="gambleHedge && gambleHedge.open.length" class="navbadge">{{ gambleHedge.open.length }}</em>
@@ -1346,66 +1384,25 @@ watch(role, () => {
       </p>
     </section>
 
-    <!-- 支撐跌破 3R (admin only) -->
-    <section v-else-if="mainTab === 'support' && can('admin')">
+    <!-- 支撐壓力 (VIP) -->
+    <section v-else-if="mainTab === 'sr' && can('vip')">
       <div class="mk-head">
-        <h2>支撐跌破 3R<span class="help" tabindex="0">?<span class="help-pop">1h 週期,只掃 BTC/ETH/SOL/BNB。用左右各 3 根的分形法找 swing low,價差 0.4% 內併為一群,取被測 ≥3 次的最強支撐。<b>最新收盤跌破支撐才開空</b>(盤中插針不算):進場=跌破那根收盤、SL=支撐×1.006、TP=進場−3R(1R=10U)。同根同碰 SL/TP 算停損,超 200 根市價結算。⚠️ 模擬單,僅管理員可見,重啟後歸零。</span></span></h2>
-        <span class="mk-count" v-if="support">開倉 {{ support.open.length }} · 已平 {{ support.stats.closed }}</span>
+        <h2>支撐壓力<span class="help" tabindex="0">?<span class="help-pop">追蹤系統常駐的主流永續幣種(1h 週期)。用左右各 3 根的分形法找 swing low/high,價差 0.4% 內併為一群,取被測 ≥3 次的最近關卡。<b>僅提示,不進場、無止盈止損</b>:最新 1h 收盤跌破支撐或突破壓力時推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="sr && sr.levels">{{ sr.levels.length }} 檔有關卡 · 每根 1h 收盤更新</span>
       </div>
 
-      <!-- 四顆當前支撐 -->
-      <div class="sup-cards" v-if="support">
-        <div v-for="c in support.supports" :key="c.coin" class="sup-card" :class="{ broken: c.has_open }">
+      <div class="sup-cards" v-if="sr">
+        <div v-for="c in sr.levels" :key="c.coin" class="sup-card"
+             :class="{ broken: c.status === 'break_down', broke: c.status === 'break_up' }">
           <div class="sup-coin">{{ c.coin }}</div>
           <div class="sup-price">現價 {{ c.price ? fmtPrice(c.price) : '—' }}</div>
-          <template v-if="c.ok">
-            <div class="sup-level">支撐 <b>{{ fmtPrice(c.support) }}</b></div>
-            <div class="sup-meta">
-              <span class="sup-touch">測試 {{ c.touches }} 次</span>
-              <span :class="c.dist_pct >= 0 ? 'long' : 'short'">距 {{ c.dist_pct >= 0 ? '+' : '' }}{{ c.dist_pct?.toFixed(2) }}%</span>
-            </div>
-            <div v-if="c.has_open" class="sup-tag short">已跌破 · 持空單</div>
-          </template>
-          <div v-else class="sup-none">尚無合格支撐<br /><span class="tsmall">(需 ≥3 次測試)</span></div>
+          <div class="sup-level">壓力 <b class="short">{{ c.res_ok ? fmtPrice(c.resistance) : '—' }}</b><small v-if="c.res_ok"> ×{{ c.res_touches }}</small></div>
+          <div class="sup-level">支撐 <b class="long">{{ c.sup_ok ? fmtPrice(c.support) : '—' }}</b><small v-if="c.sup_ok"> ×{{ c.sup_touches }}</small></div>
+          <div class="sup-tag" :class="(srStatusMeta[c.status] || {}).cls">{{ (srStatusMeta[c.status] || {}).txt || '—' }}</div>
         </div>
       </div>
-      <p v-else class="loading">載入策略中…(首個收盤週期後才會建立支撐)</p>
-
-      <!-- 持倉中 -->
-      <h3 class="psub" v-if="support && support.open.length">持倉中 ({{ support.open.length }})</h3>
-      <table v-if="support && support.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">支撐</th><th class="r">SL</th><th class="r">TP</th><th class="r">現價</th><th class="r">浮動</th></tr></thead>
-        <tbody>
-          <tr v-for="t in support.open" :key="t.coin + t.open_time">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir short">做空</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r tsmall">{{ fmtPrice(t.support) }}</td>
-            <td class="r">{{ fmtPrice(t.sl) }}</td>
-            <td class="r">{{ fmtPrice(t.tp) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td class="r" :class="t.pnl_u >= 0 ? 'long' : 'short'"><b>{{ t.pnl_u >= 0 ? '+' : '' }}{{ t.pnl_u?.toFixed(1) }}U</b></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- 已平倉 + 統計 -->
-      <template v-if="support && support.stats.closed">
-        <h3 class="psub">已平倉 · 勝率 {{ support.stats.win_rate }}% · 累計 {{ support.stats.total_u >= 0 ? '+' : '' }}{{ support.stats.total_u }}U ({{ support.stats.wins }}勝 / {{ support.stats.losses }}敗)</h3>
-        <table class="grid">
-          <thead><tr><th>幣種</th><th class="r">進場</th><th class="r">出場</th><th class="r">結果</th><th class="r">損益</th><th>平倉時間</th></tr></thead>
-          <tbody>
-            <tr v-for="(t, i) in support.closed" :key="i">
-              <td class="coin">{{ t.coin }}</td>
-              <td class="r">{{ fmtPrice(t.entry) }}</td>
-              <td class="r">{{ fmtPrice(t.cur) }}</td>
-              <td class="r"><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ t.outcome === 'tp' ? '止盈' : t.outcome === 'sl' ? '止損' : '逾時' }}</span></td>
-              <td class="r" :class="t.pnl_u >= 0 ? 'long' : 'short'"><b>{{ t.pnl_u >= 0 ? '+' : '' }}{{ t.pnl_u?.toFixed(1) }}U</b></td>
-              <td class="tsmall">{{ t.close_time ? new Date(t.close_time).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </template>
+      <p v-else class="loading">載入中…(首個 1h 收盤週期後才會建立支撐壓力)</p>
+      <p class="loginhint" style="margin-top:12px">跌破支撐或突破壓力時,會即時推播給 VIP(需在裝置開啟通知)。</p>
     </section>
 
     <!-- 後台管理 (admin only) -->
@@ -1546,6 +1543,38 @@ watch(role, () => {
         </div>
         <p class="loginhint">社群會顯示在頁尾(logo 引導跳轉);QR 懸浮在首頁右下角。</p>
       </section>
+
+      <!-- 即時推播 (Feature: broadcast) -->
+      <section class="card adminbox">
+        <h3 class="psub">即時推播</h3>
+        <div class="cfg-row">
+          <span class="cfg-k">標題</span>
+          <input class="authin" v-model="bcTitle" maxlength="20" placeholder="例:測試" />
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">內容</span>
+          <input class="authin" v-model="bcBody" maxlength="20" placeholder="20 字內,例:我只是個測試文" />
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">用戶組</span>
+          <select class="authin cfg-sel" v-model="bcGroup">
+            <option value="all">全部</option>
+            <option value="member">會員</option>
+            <option value="vip">VIP</option>
+            <option value="admin">管理員</option>
+          </select>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">點擊跳轉</span>
+          <select class="authin cfg-sel" v-model="bcArticle">
+            <option value="">不跳轉(開啟首頁)</option>
+            <option v-for="a in articles" :key="a.id" :value="String(a.id)">📄 {{ a.title }}</option>
+          </select>
+          <button class="loginbtn" @click="sendBroadcast">發送推播</button>
+        </div>
+        <p class="loginhint">立即發送 Web Push 給選定用戶組(標題/內容各上限 20 字);可選點擊後跳轉到指定文章。僅發給已開啟通知的裝置。</p>
+      </section>
+
     </section>
 
     <!-- 合約市場 (幣種一覽) -->
@@ -1858,7 +1887,6 @@ watch(role, () => {
       <template v-if="articleView">
         <button class="backbtn" @click="articleView = null">← 返回列表</button>
         <article class="artpost">
-          <img v-if="articleView.cover" :src="articleView.cover" class="artcover" />
           <h1 class="arttitle">{{ articleView.title }}</h1>
           <div class="arttags"><span v-for="t in articleView.tags" :key="t" class="arttag">{{ t }}</span></div>
           <div v-for="(b, i) in articleView.blocks" :key="i" class="artblock">
@@ -2226,19 +2254,21 @@ body::before {
 .dir.long { background: #103a24; color: #2ec26b; } .dir.short { background: #3a1010; color: #ff5c5c; }
 .otag { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 
-/* 支撐跌破策略卡片 */
+/* 支撐壓力卡片 */
 .sup-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0 4px; }
 .sup-card { background: #16181d; border: 1px solid #23262d; border-radius: 10px; padding: 12px 14px; }
 .sup-card.broken { border-color: #6a2020; background: #1c1416; }
+.sup-card.broke { border-color: #1f5a34; background: #101a14; }
 .sup-coin { font-size: 15px; font-weight: 700; color: #f4f5f7; }
 .sup-price { font-size: 11px; color: #8b909a; margin-top: 2px; }
 .sup-level { font-size: 13px; color: #c8ccd4; margin-top: 8px; }
-.sup-level b { color: #e0b341; font-size: 15px; }
-.sup-meta { display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px; }
-.sup-touch { color: #8b909a; }
-.sup-tag { display: inline-block; margin-top: 8px; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+.sup-level b { font-size: 15px; }
+.sup-level b.long { color: #2ec26b; } .sup-level b.short { color: #ff5c5c; }
+.sup-level small { font-size: 10px; color: #6b7078; }
+.sup-tag { display: inline-block; margin-top: 10px; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 .sup-tag.short { background: #3a1010; color: #ff5c5c; }
-.sup-none { font-size: 12px; color: #6b7078; margin-top: 8px; line-height: 1.5; }
+.sup-tag.long { background: #103a24; color: #2ec26b; }
+.sup-tag.neutral { background: #1f2229; color: #b8bcc4; }
 @media (max-width: 640px) { .sup-cards { grid-template-columns: repeat(2, 1fr); } }
 .otag.tp { background: #103a24; color: #2ec26b; } .otag.sl { background: #3a1010; color: #ff5c5c; } .otag.expired { background: #1f2229; color: #b8bcc4; } .otag.reversed { background: #2a2410; color: #f4d774; } .otag.trail { background: #11261a; color: #4ec77f; } .otag.hedge { background: #0e2a44; color: #6db5ff; }
 .tsmall { font-size: 11px; color: #8b909a; }
@@ -2377,6 +2407,7 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .nobtn { flex: 1; padding: 6px 0; border: none; border-radius: 7px; cursor: pointer; background: #5a1f1f; color: #f7d4d4; font-weight: 700; }
 .proofthumb { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; cursor: zoom-in; border: 1px solid #23262d; }
 .proofbox { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.85); z-index: 9998; }
+.cfg-sel { max-width: 200px; }
 .prooffull { max-width: 90vw; max-height: 82vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6); cursor: zoom-out; }
 .proofclose { position: fixed; z-index: 9999; cursor: pointer;
   top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
@@ -2405,16 +2436,16 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .artcard-cover img { width: 100%; height: 100%; object-fit: cover; }
 .artcard-cover span { color: #3a3222; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
 .artcard-body { padding: 10px 12px; }
-.artcard-title { font-weight: 800; color: #e8e9ec; line-height: 1.35; }
+.artcard-title { font-weight: 800; color: #e8e9ec; line-height: 1.35; overflow-wrap: break-word; }
 .artcard-date { font-size: 11px; color: #6b7078; margin-top: 6px; }
 .arttags { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
 .arttag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #2a2410; color: #e8b84b; }
 .backbtn { background: none; border: none; color: #8b909a; cursor: pointer; font-size: 13px; margin-bottom: 10px; }
 .artpost { max-width: 760px; margin: 0 auto; }
 .artcover { width: 100%; border-radius: 12px; margin-bottom: 14px; }
-.arttitle { font-size: 26px; color: #f0f1f4; margin: 4px 0 8px; }
+.arttitle { font-size: 26px; color: #f0f1f4; margin: 4px 0 8px; overflow-wrap: break-word; }
 .artblock { margin: 12px 0; }
-.arttext { color: #cdd0d6; line-height: 1.85; white-space: pre-wrap; }
+.arttext { color: #cdd0d6; line-height: 1.85; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; }
 .artimg { width: 100%; border-radius: 10px; }
 .artadmin { display: flex; gap: 8px; margin-top: 20px; border-top: 1px solid #23262d; padding-top: 14px; }
 /* editor */

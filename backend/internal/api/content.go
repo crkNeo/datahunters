@@ -40,6 +40,56 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "subs": subs})
 }
 
+// handlePushBroadcast (admin): POST {title, body, group} → immediate Web Push to
+// the chosen user group (all|member|vip|admin). Content capped at 20 runes.
+func (s *Server) handlePushBroadcast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct{ Title, Body, Group, Article string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	in.Body = strings.TrimSpace(in.Body)
+	if in.Title == "" || in.Body == "" {
+		http.Error(w, "標題與內容必填", http.StatusBadRequest)
+		return
+	}
+	if len([]rune(in.Title)) > 20 || len([]rune(in.Body)) > 20 {
+		http.Error(w, "標題與內容各需在 20 字以內", http.StatusBadRequest)
+		return
+	}
+	switch in.Group {
+	case "all", "member", "vip", "admin":
+	default:
+		http.Error(w, "無效的用戶組", http.StatusBadRequest)
+		return
+	}
+	// optional deep-link to a column post; only accept a numeric id so nothing
+	// arbitrary can be injected into the notification URL.
+	url := "/"
+	if in.Article != "" && isDigits(in.Article) {
+		url = "/?tab=articles&article=" + in.Article
+	}
+	writeJSON(w, map[string]any{"ok": true, "sent": s.store.PushBroadcast(in.Title, in.Body, in.Group, url)})
+}
+
+// isDigits reports whether s is non-empty and all ASCII digits.
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // handlePushReset (admin): regenerate VAPID keys and clear subscriptions, then
 // return the new public key so the caller can re-subscribe immediately.
 func (s *Server) handlePushReset(w http.ResponseWriter, r *http.Request) {

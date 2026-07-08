@@ -141,13 +141,13 @@ func main() {
 		}
 	}()
 
-	// 支撐跌破 3R strategy (admin-only): BTC/ETH/SOL/BNB, evaluated per closed 1h bar.
-	// Runs off the in-memory WS klines (no REST); first tick only seeds the bar clock.
+	// 支撐壓力 monitor (VIP): BTC/ETH/SOL/BNB support & resistance, breach alerts per
+	// closed 1h bar. Runs off the in-memory WS klines (no REST); first tick seeds only.
 	go func() {
-		store.SupportTick()
+		store.SRTick()
 		ticker := time.NewTicker(30 * time.Second)
 		for range ticker.C {
-			store.SupportTick()
+			store.SRTick()
 		}
 	}()
 

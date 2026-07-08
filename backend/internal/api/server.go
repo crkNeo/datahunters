@@ -101,9 +101,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
 	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
-	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))   // fire a test Web Push
+	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))           // fire a test Web Push
+	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
-	mux.HandleFunc("/api/admin/support", s.gate(A, s.handleSupport))      // 支撐跌破策略 (admin-only)
 	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))      // 銀河: 手動出場 (admin-only)
 	mux.HandleFunc("/api/admin/gamble-hedge", s.gate(A, s.handleGambleHedge)) // 超新星·保本 A/B (admin-only)
 
@@ -119,6 +119,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/paper", s.gate(V, s.handlePaper))
 	mux.HandleFunc("/api/gamble", s.gate(V, s.handleGamble))
 	mux.HandleFunc("/api/ema-only", s.gate(V, s.handleEMAOnly))
+	mux.HandleFunc("/api/sr", s.gate(V, s.handleSR)) // 支撐壓力監控 (VIP)
 
 	// web push (PWA notifications)
 	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
@@ -436,10 +437,10 @@ func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
 }
 
-// handleSupport serves the admin-only 支撐跌破 strategy: the four coins' current
-// support levels plus its simulated open/closed trades.
-func (s *Server) handleSupport(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.SupportState())
+// handleSR serves the VIP 支撐壓力 monitor: mainstream coins' current support &
+// resistance levels and breach status (no trades).
+func (s *Server) handleSR(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SR())
 }
 
 // handleUpbit serves the recent Upbit announcements (Korean titles translated to

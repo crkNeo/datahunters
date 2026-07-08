@@ -127,6 +127,7 @@ type paperBook struct {
 	requireFuel  bool    // only enter when funding is "fuel" (contrarian) for the direction
 	requireEMA   bool    // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
 	adminOnly    bool    // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
+	maxSLPct     float64 // >0: skip entries whose SL distance exceeds this % (caps far-SL / liquidation risk)
 	trades       []*PaperTrade
 	armed        map[string]bool
 	lastOpen     map[string]time.Time // coin|dir → last entry time (dedupe guard)
@@ -369,6 +370,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 			}
 			if dir == "short" && !(it.TP < p && it.SL > p) {
 				continue
+			}
+			if b.maxSLPct > 0 { // SL 距離超過上限(波動過大的低市值幣)→ 不進場
+				if slDist := math.Abs(p-it.SL) / p * 100; slDist > b.maxSLPct {
+					continue
+				}
 			}
 			tr := &PaperTrade{
 				ID:   fmt.Sprintf("%s|%s|%s|%d", b.name, it.Coin, dir, now.UnixMilli()),

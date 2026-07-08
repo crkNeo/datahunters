@@ -23,18 +23,22 @@ self.addEventListener('push', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const url = (e.notification.data && e.notification.data.url) || '/'
-  let tab = ''
-  try { tab = new URL(url, self.location.origin).searchParams.get('tab') || '' } catch (err) {}
+  let tab = '', article = ''
+  try {
+    const p = new URL(url, self.location.origin).searchParams
+    tab = p.get('tab') || ''
+    article = p.get('article') || ''
+  } catch (err) {}
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const c of list) {
         if ('focus' in c) {
-          // app already open: focus it and tell the SPA which tab to switch to
-          if (tab) c.postMessage({ type: 'nav', tab })
+          // app already open: focus it and tell the SPA which tab (and article) to open
+          if (tab || article) c.postMessage({ type: 'nav', tab, article })
           return c.focus()
         }
       }
-      return clients.openWindow(url) // app closed: open with ?tab= so it deep-links
+      return clients.openWindow(url) // app closed: open with ?tab=&article= so it deep-links
     }),
   )
 })

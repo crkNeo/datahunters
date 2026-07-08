@@ -107,10 +107,10 @@ type Store struct {
 	upbitBoard        []UpbitNotice  // recent notices (newest first), titles translated to zh-TW
 	upbitTrans        map[int]string // notice id → translated title (so we translate each title once)
 
-	supMu     sync.Mutex             // guards the support-breakdown strategy (admin-only)
-	supTrades []*SupportTrade        // simulated support-breakdown shorts (in-memory)
-	supInfo   map[string]SupportInfo // coin → current support read (for the admin page)
-	supBar    int64                  // last processed closed-bar Ts (per-bar throttle)
+	srMu    sync.Mutex         // guards the support/resistance monitor (VIP)
+	srInfo  map[string]SRLevel // coin → current support/resistance read
+	srState map[string]string  // coin → last emitted breach ("" | down | up) for alert dedupe
+	srBar   int64              // last processed closed-bar Ts (per-bar throttle)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -135,7 +135,8 @@ func NewStore(coins []string) *Store {
 		upbitW:            upbit.NewWatcher(),
 		upbitListingsOnly: os.Getenv("UPBIT_LISTINGS_ONLY") == "1",
 		upbitTrans:        map[int]string{},
-		supInfo:           map[string]SupportInfo{},
+		srInfo:            map[string]SRLevel{},
+		srState:           map[string]string{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
@@ -151,6 +152,7 @@ func NewStore(coins []string) *Store {
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
 	s.paperGambleHedge.adminOnly = true // admin-only tab + admin-only push
+	s.paperGambleHedge.maxSLPct = 12    // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
