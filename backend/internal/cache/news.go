@@ -1,8 +1,11 @@
 package cache
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
+	"datahunter/internal/etf"
 	"datahunter/internal/gdelt"
 )
 
@@ -29,27 +32,39 @@ var newsCats = []struct {
 	kw         []string
 }{
 	{"figure", "🗣 人物", []string{"trump", "musk", "powell", "biden", "yellen", "putin", "xi jinping", "zelensky"}},
-	{"cb", "🏦 央行/利率", []string{"federal reserve", "interest rate", "rate cut", "rate hike", "inflation", "fomc", "cpi"}},
+	{"cb", "🏦 央行/利率", []string{"federal reserve", "the fed", "interest rate", "rate cut", "rate hike", "inflation", "fomc", "cpi", "bank of japan", "european central bank", "ecb"}},
 	{"trade", "📉 貿易/制裁", []string{"tariff", "trade war", "sanction", "embargo"}},
 	{"geo", "⚔️ 地緣/戰爭", []string{"war", "invasion", "missile", "ceasefire", "conflict", "nuclear", "airstrike", "attack"}},
+	{"reg", "⚖️ 監管", []string{"lawsuit", "regulator", "regulation", "cftc", "securities and exchange", "crackdown", "court rules", "sued", "etf approval", "etf denial"}},
+	{"hack", "🚨 爆雷/駭客", []string{"hack", "exploit", "breach", "bankruptcy", "insolvency", "depeg", "rug pull", "stolen", "drained"}},
+	{"inst", "🏛 機構", []string{"blackrock", "microstrategy", "grayscale", "bitcoin etf", "spot etf", "institutional", "fidelity", "ishares"}},
 	{"crypto", "🪙 加密", []string{"bitcoin", "ethereum", "crypto"}},
 }
 
-func categorizeNews(title string) (category, label string) {
+// cryptoCtx is the extra context required to tag a "whale" headline as 巨鯨 (so a
+// literal marine-whale story doesn't get miscategorised).
+var cryptoCtx = []string{"bitcoin", "ethereum", "crypto", "wallet", "token", "transfer", "btc", "eth"}
+
+// categorizeNews tags a headline. ok=false means no market-moving category matched
+// (generic 市場) → the caller drops it.
+func categorizeNews(title string) (category, label string, ok bool) {
 	t := strings.ToLower(title)
-	for _, c := range newsCats {
-		for _, k := range c.kw {
-			if strings.Contains(t, k) {
-				return c.key, c.label
+	if strings.Contains(t, "whale") {
+		for _, c := range cryptoCtx {
+			if strings.Contains(t, c) {
+				return "whale", "🐋 巨鯨", true
 			}
 		}
 	}
-	return "market", "📰 市場"
+	for _, c := range newsCats {
+		for _, k := range c.kw {
+			if strings.Contains(t, k) {
+				return c.key, c.label, true
+			}
+		}
+	}
+	return "", "", false
 }
-
-// newsPushCats are the high-impact categories that trigger an admin Web Push.
-// Generic 市場 and frequent 加密 headlines are display-only to avoid spam.
-var newsPushCats = map[string]bool{"figure": true, "geo": true, "cb": true, "trade": true}
 
 // GdeltTick polls GDELT for fresh market-moving headlines, translates the new ones
 // to Traditional Chinese (each URL once), and prepends them to the feed. GDELT
@@ -82,7 +97,10 @@ func (s *Store) GdeltTick() {
 
 	items := make([]NewsItem, 0, len(fresh))
 	for _, a := range fresh {
-		cat, label := categorizeNews(a.Title)
+		cat, label, ok := categorizeNews(a.Title)
+		if !ok {
+			continue // generic 市場 (no market-moving category) → drop
+		}
 		items = append(items, NewsItem{
 			Title:    s.gdeltW.Translate(a.Title), // network; each URL translated once
 			TitleEN:  a.Title,
@@ -93,6 +111,9 @@ func (s *Store) GdeltTick() {
 			Country:  a.SourceCountry,
 			Time:     gdelt.ParseTime(a.SeenDate),
 		})
+	}
+	if len(items) == 0 {
+		return
 	}
 
 	s.gdeltMu.Lock()
@@ -109,25 +130,59 @@ func (s *Store) GdeltTick() {
 	}
 	s.gdeltMu.Unlock()
 
-	// admin-only Web Push for high-impact headlines (not the seeding tick, and never
-	// generic 市場/加密 — capped per tick so a busy news window can't flood).
-	if seeded && s.pushMgr != nil && s.db != nil {
-		var hot []NewsItem
+	// Web Push to ALL users for every new categorised headline (skip the seeding
+	// tick). No throttle — report as it comes.
+	if seeded {
 		for _, it := range items {
-			if newsPushCats[it.Category] {
-				hot = append(hot, it)
-			}
+			s.PushSend(it.Label, it.Title, "/?tab=news")
 		}
-		if len(hot) > 6 {
-			hot = hot[:6]
+	}
+}
+
+// EtfTick scrapes Farside for the latest daily BTC/ETH spot-ETF net flow and, once
+// per new trading day per asset, injects it into the news feed (🏛 機構) + pushes
+// it. No free official API exists — Farside HTML is the de-facto public source.
+func (s *Store) EtfTick() {
+	for _, asset := range []string{"BTC", "ETH"} {
+		f, err := etf.FetchFlow(asset)
+		if err != nil || f.Date == "" {
+			continue
 		}
-		if len(hot) > 0 {
-			if subs := s.db.adminSubs(); len(subs) > 0 {
-				for _, it := range hot {
-					s.pushMgr.SendTo(subs, it.Label, it.Title, "/?tab=news")
-				}
-			}
+		s.gdeltMu.Lock()
+		if s.etfSeen[asset] == f.Date { // already reported this day
+			s.gdeltMu.Unlock()
+			continue
 		}
+		firstSeed := s.etfSeen[asset] == ""
+		s.etfSeen[asset] = f.Date
+		item := etfNewsItem(f)
+		s.gdeltFeed = append([]NewsItem{item}, s.gdeltFeed...)
+		if len(s.gdeltFeed) > 60 {
+			s.gdeltFeed = s.gdeltFeed[:60]
+		}
+		s.gdeltMu.Unlock()
+		if !firstSeed { // don't push the pre-existing latest value on boot
+			s.PushSend(item.Label, item.Title, "/?tab=news")
+		}
+	}
+}
+
+// etfNewsItem renders a daily ETF flow as a 🏛 機構 news item.
+func etfNewsItem(f etf.Flow) NewsItem {
+	amt := f.NetM
+	dir, emoji, dirEN := "淨流入", "🟢", "inflow"
+	if amt < 0 {
+		amt, dir, emoji, dirEN = -amt, "淨流出", "🔴", "outflow"
+	}
+	return NewsItem{
+		Title:    fmt.Sprintf("%s %s 現貨 ETF %s $%.1fM(%s)", emoji, f.Asset, dir, amt, f.Date),
+		TitleEN:  fmt.Sprintf("%s spot ETF net %s $%.1fM (%s)", f.Asset, dirEN, amt, f.Date),
+		URL:      "https://farside.co.uk/" + strings.ToLower(f.Asset) + "/",
+		Domain:   "farside.co.uk",
+		Category: "inst",
+		Label:    "🏛 機構",
+		Country:  "US",
+		Time:     time.Now().UTC().Format(time.RFC3339),
 	}
 }
 

@@ -682,8 +682,11 @@ const newsCatList = [
   { key: 'cb', label: '🏦 央行' },
   { key: 'trade', label: '📉 貿易' },
   { key: 'geo', label: '⚔️ 地緣' },
+  { key: 'reg', label: '⚖️ 監管' },
+  { key: 'hack', label: '🚨 爆雷' },
+  { key: 'inst', label: '🏛 機構' },
+  { key: 'whale', label: '🐋 巨鯨' },
   { key: 'crypto', label: '🪙 加密' },
-  { key: 'market', label: '📰 市場' },
 ]
 const newsF = computed(() => (newsCat.value ? news.value.filter((n) => n.category === newsCat.value) : news.value))
 
@@ -1908,7 +1911,7 @@ watch(role, () => {
     <!-- 市場快訊 (GDELT 免費新聞事件) -->
     <section v-else-if="mainTab === 'news'">
       <div class="mk-head">
-        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">來源 GDELT(全球新聞事件庫,免費)。涵蓋人物發言(川普/馬斯克/Powell)、央行利率、貿易關稅制裁、地緣戰爭、加密等可能影響市場的頭條。英文原標題已自動翻譯為繁體中文;點擊開原文。⚠️ 為新聞回聲,有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
+        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">來源 GDELT(全球新聞事件庫,免費)。涵蓋人物發言(川普/馬斯克/Powell)、央行利率(美聯儲)、貿易關稅制裁、地緣戰爭、機構(BlackRock/ETF)、巨鯨、加密等可能影響市場的頭條;無關類別已濾除。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 為新聞回聲、有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
         <span class="mk-count">共 {{ news.length }} 則 · 每 5 分更新</span>
       </div>
       <div class="timefilter" v-if="news.length">
@@ -1929,6 +1932,7 @@ watch(role, () => {
           </tr>
         </tbody>
       </table>
+      <p v-else-if="news.length" class="empty">此分類暫無快訊</p>
       <p v-else class="loading">載入市場快訊中…(首次載入需翻譯,請稍候)</p>
     </section>
 
@@ -2331,6 +2335,10 @@ body::before {
 .newscat.nc-cb { background: #10233a; color: #6db5ff; }
 .newscat.nc-trade { background: #2f1e10; color: #f0a24b; }
 .newscat.nc-geo { background: #3a1010; color: #ff8a8a; }
+.newscat.nc-reg { background: #10202f; color: #7fb0d8; }
+.newscat.nc-hack { background: #3a1408; color: #ff9b57; }
+.newscat.nc-inst { background: #1a1030; color: #b79cff; }
+.newscat.nc-whale { background: #08303a; color: #5fd0e0; }
 .newscat.nc-crypto { background: #103a24; color: #4cd17e; }
 .navbadge { font-style: normal; font-size: 10px; font-weight: 700; background: #e0b341; color: #1a1407; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
 .dir { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }

@@ -161,6 +161,16 @@ func main() {
 		}
 	}()
 
+	// spot-ETF daily net flow (Farside scrape) → injected into 快訊 once per new
+	// trading day. Flows update once daily after the US close; poll every 3h.
+	go func() {
+		store.EtfTick()
+		ticker := time.NewTicker(3 * time.Hour)
+		for range ticker.C {
+			store.EtfTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.

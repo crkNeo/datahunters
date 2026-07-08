@@ -150,25 +150,6 @@ func (db *DB) subsByRole(role string) []string {
 	return out
 }
 
-// subsVIPPlus returns push subscriptions for VIP and admin accounts (the paying
-// tiers), for VIP-only alerts like the support/resistance monitor.
-func (db *DB) subsVIPPlus() []string {
-	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
-	  JOIN users u ON u.username = p.username WHERE u.role IN ('vip','admin')`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var sub string
-		if rows.Scan(&sub) == nil {
-			out = append(out, sub)
-		}
-	}
-	return out
-}
-
 // PushBroadcast sends an immediate Web Push to a user group and returns how many
 // subscriptions were targeted. group is one of all|member|vip|admin; url is the
 // deep-link opened on tap (e.g. "/" or "/?tab=articles&article=12").

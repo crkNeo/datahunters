@@ -118,6 +118,7 @@ type Store struct {
 	gdeltFeed   []NewsItem      // recent market-moving headlines (newest first), titles zh-TW
 	gdeltSeen   map[string]bool // seen article URLs (dedupe; bounded)
 	gdeltSeeded bool            // first tick only seeds (no push burst of history on boot)
+	etfSeen     map[string]string // asset → last reported ETF-flow date (dedupe: once/day)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -146,6 +147,7 @@ func NewStore(coins []string) *Store {
 		srState:           map[string]string{},
 		gdeltW:            gdelt.NewWatcher(),
 		gdeltSeen:         map[string]bool{},
+		etfSeen:           map[string]string{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
