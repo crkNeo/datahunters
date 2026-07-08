@@ -996,8 +996,18 @@ const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
+let onDocClick = null
 let hiddenAt = 0
 onMounted(async () => {
+  // help popovers: click the ? to toggle, click anywhere else (or another ?) to
+  // close — mobile :hover would otherwise stick open until a re-render.
+  onDocClick = (e) => {
+    if (e.target.closest('.help-pop')) return // tap inside the tooltip → keep open
+    const help = e.target.closest('.help')
+    document.querySelectorAll('.help.open').forEach((el) => { if (el !== help) el.classList.remove('open') })
+    if (help) help.classList.toggle('open')
+  }
+  document.addEventListener('click', onDocClick)
   loadConfig()
   await loadMe()
   loadAll()
@@ -1047,6 +1057,7 @@ onUnmounted(() => {
   clearInterval(timer)
   if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
   if (onPageShow) window.removeEventListener('pageshow', onPageShow)
+  if (onDocClick) document.removeEventListener('click', onDocClick)
 })
 watch(mainTab, loadMe)
 
@@ -1639,7 +1650,7 @@ watch(role, () => {
       </div>
       <table class="grid">
         <thead>
-          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%（來源 OKX）">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th><th class="r">資金費率</th></tr>
+          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th><th class="r">資金費率</th></tr>
         </thead>
         <tbody>
           <tr v-for="r in boardRows" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">
@@ -1761,7 +1772,7 @@ watch(role, () => {
 
     <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gamblehedge' ? '超新星·保本(管理)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamblehedge'">管理員 A/B 測試:與超新星相同進場,但獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變,回落至保本即「套保出場」。⚠️ 回測顯示此保本會剪掉肥尾止盈、期望值較差,僅供觀察。</template><template v-else-if="mainTab === 'gamble'">此為幣種分享，不代表任何投資建議。<br>此策略波動較大，請務必控制好本金與倉位。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x</b></template><template v-else-if="mainTab === 'emaonly'">此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>2%</b><br>建議槓桿：<b>25x-40x</b></template><template v-else>此為幣種分享，不代表任何投資建議。<br>建議使用總本金：<b>1%</b><br>建議槓桿：<b>25x-30x</b></template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gamblehedge' ? '超新星·保本(管理)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamblehedge'">管理員 A/B 測試:與超新星相同進場,但獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變,回落至保本即「套保出場」。⚠️ 回測顯示此保本會剪掉肥尾止盈、期望值較差,僅供觀察。</template><template v-else-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
       </div>
@@ -1833,7 +1844,7 @@ watch(role, () => {
     <!-- 財經事件 (high-impact US economic calendar) -->
     <section v-else-if="mainTab === 'events'">
       <div class="mk-head">
-        <h2>財經事件(高影響 · 美國)<span class="help" tabindex="0">?<span class="help-pop">高影響美國經濟事件(來源 faireconomy/ForexFactory,免費)。這是唯一能「事前」的——<b>事件前可降風險、預期波動</b>。釋出後顯示「實際 vs 預期」(實際優於預期通常利多風險資產)。時間為你的本地時區。⚠️ 30 分鐘更新一次(來源會限流)。</span></span></h2>
+        <h2>財經事件(高影響 · 美國)<span class="help" tabindex="0">?<span class="help-pop">高影響美國經濟事件。這是唯一能「事前」的——<b>事件前可降風險、預期波動</b>。釋出後顯示「實際 vs 預期」(實際優於預期通常利多風險資產)。時間為你的本地時區。⚠️ 約 30 分鐘更新一次。</span></span></h2>
         <span class="mk-count">CPI / FOMC / 非農… · 共 {{ eventList.length }} 筆</span>
       </div>
       <table v-if="eventList.length" class="grid">
@@ -1852,7 +1863,7 @@ watch(role, () => {
           </tr>
         </tbody>
       </table>
-      <p v-else class="loading">載入經濟行事曆中…(若持續空白,可能本週無高影響美國事件,或來源限流中)</p>
+      <p v-else class="loading">載入經濟行事曆中…(若持續空白,可能本週無高影響美國事件)</p>
     </section>
 
     <!-- 清算 (liquidation feed, OKX) -->
@@ -1886,7 +1897,7 @@ watch(role, () => {
     <!-- Upbit 公告 (韓文原文自動翻譯為繁體中文) -->
     <section v-else-if="mainTab === 'upbit'">
       <div class="mk-head">
-        <h2>Upbit 公告<span class="help" tabindex="0">?<span class="help-pop">韓國 Upbit 交易所官方公告(來源 Upbit 公開 API)。原文為韓文,已自動翻譯為繁體中文;點擊可開啟原公告。<b>「上架」標記代表新幣上架/交易支援類公告</b>,通常對該幣種有較大影響。</span></span></h2>
+        <h2>Upbit 公告<span class="help" tabindex="0">?<span class="help-pop">韓國 Upbit 交易所官方公告。原文為韓文,已自動翻譯為繁體中文;點擊可開啟原公告。<b>「上架」標記代表新幣上架/交易支援類公告</b>,通常對該幣種有較大影響。</span></span></h2>
         <span class="mk-count">共 {{ upbitNotices.length }} 筆</span>
       </div>
       <table v-if="upbitNotices.length" class="grid">
@@ -1908,10 +1919,10 @@ watch(role, () => {
       <p v-else class="loading">載入 Upbit 公告中…(首次載入需翻譯,請稍候)</p>
     </section>
 
-    <!-- 市場快訊 (GDELT 免費新聞事件) -->
+    <!-- 市場快訊 (全球新聞事件) -->
     <section v-else-if="mainTab === 'news'">
       <div class="mk-head">
-        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">來源 GDELT(全球新聞事件庫,免費)。涵蓋人物發言(川普/馬斯克/Powell)、央行利率(美聯儲)、貿易關稅制裁、地緣戰爭、機構(BlackRock/ETF)、巨鯨、加密等可能影響市場的頭條;無關類別已濾除。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 為新聞回聲、有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
+        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">涵蓋人物發言(川普/馬斯克/Powell)、央行利率(美聯儲)、貿易關稅制裁、地緣戰爭、機構(BlackRock/ETF)、巨鯨、加密等可能影響市場的頭條;無關類別已濾除。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
         <span class="mk-count">共 {{ news.length }} 則 · 每 5 分更新</span>
       </div>
       <div class="timefilter" v-if="news.length">
@@ -1919,7 +1930,7 @@ watch(role, () => {
         <button v-for="c in newsCatList" :key="c.key" :class="{ on: newsCat === c.key }" @click="newsCat = c.key">{{ c.label }}</button>
       </div>
       <table v-if="newsF.length" class="grid">
-        <thead><tr><th>時間</th><th>類型</th><th>標題(繁中)</th><th>來源</th></tr></thead>
+        <thead><tr><th>時間</th><th>類型</th><th>標題(繁中)</th><th>媒體</th></tr></thead>
         <tbody>
           <tr v-for="(n, i) in newsF" :key="i">
             <td class="tsmall">{{ upbitTime(n.time) }}</td>
@@ -2587,7 +2598,10 @@ footer { padding: 18px 0 30px; text-align: center; }
   font-size: 12px; font-weight: 400; line-height: 1.65; color: #cdd0d6; text-align: left; white-space: normal;
   box-shadow: 0 10px 34px rgba(0,0,0,.55); }
 .help-pop b { color: #e8b84b; }
-.help:hover .help-pop, .help:focus .help-pop, .help:focus-within .help-pop { display: block; }
+/* desktop mouse: show on hover. touch/click: toggle via .open (JS) so tapping
+   elsewhere closes it (mobile :hover would otherwise stick until re-render). */
+@media (hover: hover) { .help:hover .help-pop { display: block; } }
+.help.open .help-pop { display: block; }
 .mk-head .help, h2 .help, h3 .help { font-weight: 800; }
 </style>
 
