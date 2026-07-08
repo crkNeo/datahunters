@@ -667,6 +667,26 @@ function upbitTime(s) {
   return d.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+const news = ref([])
+async function loadNews() {
+  try {
+    const res = await authFetch('/api/news')
+    if (res.ok) news.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const newsCat = ref('')
+const newsCatList = [
+  { key: 'figure', label: '🗣 人物' },
+  { key: 'cb', label: '🏦 央行' },
+  { key: 'trade', label: '📉 貿易' },
+  { key: 'geo', label: '⚔️ 地緣' },
+  { key: 'crypto', label: '🪙 加密' },
+  { key: 'market', label: '📰 市場' },
+]
+const newsF = computed(() => (newsCat.value ? news.value.filter((n) => n.category === newsCat.value) : news.value))
+
 const sr = ref(null)
 async function loadSR() {
   try {
@@ -888,6 +908,7 @@ function loadAll() {
   loadEvents()
   loadFlow()
   loadUpbit()
+  loadNews()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -968,7 +989,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'articles']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'articles']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1293,6 +1314,9 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
           <button :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
             Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'news' }" @click="mainTab = 'news'; loadNews()">
+            市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
@@ -1881,6 +1905,33 @@ watch(role, () => {
       <p v-else class="loading">載入 Upbit 公告中…(首次載入需翻譯,請稍候)</p>
     </section>
 
+    <!-- 市場快訊 (GDELT 免費新聞事件) -->
+    <section v-else-if="mainTab === 'news'">
+      <div class="mk-head">
+        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">來源 GDELT(全球新聞事件庫,免費)。涵蓋人物發言(川普/馬斯克/Powell)、央行利率、貿易關稅制裁、地緣戰爭、加密等可能影響市場的頭條。英文原標題已自動翻譯為繁體中文;點擊開原文。⚠️ 為新聞回聲,有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
+        <span class="mk-count">共 {{ news.length }} 則 · 每 5 分更新</span>
+      </div>
+      <div class="timefilter" v-if="news.length">
+        <button :class="{ on: newsCat === '' }" @click="newsCat = ''">全部</button>
+        <button v-for="c in newsCatList" :key="c.key" :class="{ on: newsCat === c.key }" @click="newsCat = c.key">{{ c.label }}</button>
+      </div>
+      <table v-if="newsF.length" class="grid">
+        <thead><tr><th>時間</th><th>類型</th><th>標題(繁中)</th><th>來源</th></tr></thead>
+        <tbody>
+          <tr v-for="(n, i) in newsF" :key="i">
+            <td class="tsmall">{{ upbitTime(n.time) }}</td>
+            <td class="tsmall"><span class="newscat" :class="'nc-' + n.category">{{ n.label }}</span></td>
+            <td>
+              <a :href="n.url" target="_blank" rel="noopener" class="upbit-link">{{ n.title }}</a>
+              <div class="upbit-orig">{{ n.title_en }}</div>
+            </td>
+            <td class="tsmall">{{ n.domain }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="loading">載入市場快訊中…(首次載入需翻譯,請稍候)</p>
+    </section>
+
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
       <!-- 內頁 -->
@@ -2275,6 +2326,12 @@ body::before {
 .upbit-link { color: #e8eaed; text-decoration: none; font-weight: 600; }
 .upbit-link:hover { color: #4aa3ff; text-decoration: underline; }
 .upbit-orig { font-size: 11px; color: #6b7078; margin-top: 2px; }
+.newscat { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 5px; white-space: nowrap; background: #1f2229; color: #b8bcc4; }
+.newscat.nc-figure { background: #2a2410; color: #f4d774; }
+.newscat.nc-cb { background: #10233a; color: #6db5ff; }
+.newscat.nc-trade { background: #2f1e10; color: #f0a24b; }
+.newscat.nc-geo { background: #3a1010; color: #ff8a8a; }
+.newscat.nc-crypto { background: #103a24; color: #4cd17e; }
 .navbadge { font-style: normal; font-size: 10px; font-weight: 700; background: #e0b341; color: #1a1407; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
 .dir { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .dir.long { background: #103a24; color: #2ec26b; } .dir.short { background: #3a1010; color: #ff5c5c; }

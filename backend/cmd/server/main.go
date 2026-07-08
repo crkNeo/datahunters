@@ -151,6 +151,16 @@ func main() {
 		}
 	}()
 
+	// GDELT market-news feed (free, no key). GDELT updates ~15 min and rate-limits
+	// to ~1 req/5s, so poll slowly; each tick translates only new headlines.
+	go func() {
+		store.GdeltTick()
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			store.GdeltTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.

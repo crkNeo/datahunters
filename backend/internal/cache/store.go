@@ -12,6 +12,7 @@ import (
 
 	"datahunter/internal/auth"
 	"datahunter/internal/exchange"
+	"datahunter/internal/gdelt"
 	"datahunter/internal/notify"
 	"datahunter/internal/push"
 	"datahunter/internal/upbit"
@@ -112,6 +113,12 @@ type Store struct {
 	srState map[string]string  // coin → last emitted breach ("" | down | up) for alert dedupe
 	srBar   int64              // last processed closed-bar Ts (per-bar throttle)
 
+	gdeltW      *gdelt.Watcher  // GDELT market-news watcher (free, no key)
+	gdeltMu     sync.RWMutex    // guards the news feed + dedupe set
+	gdeltFeed   []NewsItem      // recent market-moving headlines (newest first), titles zh-TW
+	gdeltSeen   map[string]bool // seen article URLs (dedupe; bounded)
+	gdeltSeeded bool            // first tick only seeds (no push burst of history on boot)
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -137,6 +144,8 @@ func NewStore(coins []string) *Store {
 		upbitTrans:        map[int]string{},
 		srInfo:            map[string]SRLevel{},
 		srState:           map[string]string{},
+		gdeltW:            gdelt.NewWatcher(),
+		gdeltSeen:         map[string]bool{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
