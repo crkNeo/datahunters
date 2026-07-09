@@ -2776,7 +2776,7 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .artcard-cover { position: relative; height: 130px; background: #0b0c0f; display: flex; align-items: center; justify-content: center; }
 .artcard-cover img { width: 100%; height: 100%; object-fit: cover; }
 .artcard-cover span { color: #3a3222; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
-.pinbadge { position: absolute; top: 6px; left: 6px; background: #d8ad48; color: #14161c; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
+.pinbadge { position: absolute; top: 6px; left: 6px; background: #d8ad48; color: #14161c; font-size: 12px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
 .artcard-body { padding: 10px 12px; }
 .artcard-title { font-weight: 800; color: #e8e9ec; line-height: 1.35; overflow-wrap: break-word; }
 .artcard-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
