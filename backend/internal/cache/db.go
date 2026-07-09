@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS articles (
   tags    VARCHAR(512) NOT NULL DEFAULT '',
   blocks  LONGTEXT,
   created BIGINT,
-  updated BIGINT
+  updated BIGINT,
+  pinned  TINYINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS push_subs (
@@ -119,6 +120,13 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 			d.Close()
 			return nil, err
 		}
+	}
+	// add the articles.pinned column to pre-existing tables (CREATE ... IF NOT
+	// EXISTS won't alter an already-created table). Idempotent: skip if present.
+	var hasPinned int
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='articles' AND COLUMN_NAME='pinned'`).Scan(&hasPinned)
+	if hasPinned == 0 {
+		d.Exec(`ALTER TABLE articles ADD COLUMN pinned TINYINT NOT NULL DEFAULT 0`)
 	}
 	return d, nil
 }

@@ -15,6 +15,7 @@ import (
 	"datahunter/internal/gdelt"
 	"datahunter/internal/notify"
 	"datahunter/internal/push"
+	"datahunter/internal/unlock"
 	"datahunter/internal/upbit"
 )
 
@@ -136,6 +137,11 @@ type Store struct {
 	fundBoard     []FundingRow
 	fundBoardTime time.Time
 
+	unlockW     *unlock.Watcher // 代幣解鎖 board (DefiLlama emissions, free, no key)
+	unlockMu    sync.RWMutex    // guards the token-unlock board (public tab)
+	unlockBoard []unlock.Row
+	unlockTime  time.Time
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -162,6 +168,7 @@ func NewStore(coins []string) *Store {
 		srInfo:            map[string]SRLevel{},
 		srState:           map[string]string{},
 		gdeltW:            gdelt.NewWatcher(),
+		unlockW:           unlock.NewWatcher(),
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},

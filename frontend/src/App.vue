@@ -371,6 +371,11 @@ async function removeArticle(a) {
   articleView.value = null
   loadArticles()
 }
+async function togglePin(a) {
+  const pin = a.pinned ? 0 : 1
+  const res = await authFetch('/api/admin/article-pin?id=' + a.id + '&pin=' + pin, { method: 'POST' })
+  if (res.ok) { a.pinned = !a.pinned; loadArticles() }
+}
 
 // ---- site config: logo / social / QR (Feature 4) ----
 const config = ref({})
@@ -732,6 +737,40 @@ const fundingRows = computed(() => {
   if (fundingAbs.value) rows = [...rows].sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate))
   return rows
 })
+// 代幣解鎖 (DefiLlama emissions) — public tab
+const unlock = ref(null)
+async function loadUnlock() {
+  try {
+    const res = await authFetch('/api/unlock')
+    if (res.ok) unlock.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
+const unlockRows = computed(() => {
+  if (!unlock.value) return []
+  const rows = [...unlock.value.rows]
+  if (unlockSort.value === 'date') {
+    rows.sort((a, b) => {
+      const ta = a.peak_date ? new Date(a.peak_date).getTime() : Infinity
+      const tb = b.peak_date ? new Date(b.peak_date).getTime() : Infinity
+      return ta - tb
+    })
+  }
+  return rows
+})
+function unlockDays(d) {
+  if (!d) return '—'
+  const days = Math.round((new Date(d).getTime() - Date.now()) / 86400000)
+  if (days <= 0) return '今日'
+  return days + ' 天'
+}
+function unlockDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' })
+}
+
 const newsCat = ref('')
 const newsCatList = [
   { key: 'figure', label: '🗣 人物' },
@@ -970,6 +1009,7 @@ function loadAll() {
   loadUpbit()
   loadNews()
   loadFunding()
+  loadUnlock()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1052,7 +1092,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'articles', 'pool', 'conv']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1393,6 +1433,7 @@ watch(role, () => {
             市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'; loadFunding()">資金費率</button>
+          <button :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'; loadUnlock()">代幣解鎖</button>
           <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
@@ -2133,6 +2174,33 @@ watch(role, () => {
       <p v-else class="loading">載入資金費率中…</p>
     </section>
 
+    <!-- 代幣解鎖 (DefiLlama) -->
+    <section v-else-if="mainTab === 'unlock'">
+      <div class="mk-head">
+        <h2>代幣解鎖<span class="help" tabindex="0">?<span class="help-pop">主流代幣的即將解鎖佔<b>流通供給</b>的比例=市場潛在賣壓;比例越高、越集中,拋壓風險越大。「下次懸崖」為未來 30 天內單日最大解鎖(佔最大供給%)。持續性的質押釋放不計入。⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="unlock && unlock.updated_at">來源 DefiLlama · {{ unlockRows.length }} 檔 · {{ fundClock(new Date(unlock.updated_at).getTime()) }} 更新</span>
+      </div>
+      <div class="timefilter" v-if="unlock && unlock.rows.length">
+        <span class="tf-label">排序</span>
+        <button :class="{ on: unlockSort === 'sell' }" @click="unlockSort = 'sell'">賣壓(30天%)</button>
+        <button :class="{ on: unlockSort === 'date' }" @click="unlockSort = 'date'">最近懸崖</button>
+      </div>
+      <table v-if="unlockRows.length" class="grid">
+        <thead><tr><th>代幣</th><th class="r" title="未來 7 天解鎖佔流通供給">7天</th><th class="r" title="未來 30 天解鎖佔流通供給 + 數量">30天</th><th class="r">30天估值</th><th class="r" title="30 天內單日最大解鎖(佔最大供給%)">下次懸崖</th><th>解鎖對象</th></tr></thead>
+        <tbody>
+          <tr v-for="u in unlockRows" :key="u.name">
+            <td class="coin">{{ u.coin }}<small class="vtag"> {{ u.name }}</small></td>
+            <td class="r tsmall">{{ u.next7_pct ? u.next7_pct.toFixed(2) + '%' : '—' }}</td>
+            <td class="r"><b :class="{ short: u.next30_pct >= 3 }">{{ u.next30_pct.toFixed(2) }}%</b><small class="vtag"> {{ fmtNum(u.next30_amt) }}<template v-if="!u.by_circ"> ⚠</template></small></td>
+            <td class="r tsmall">{{ u.usd30 ? '$' + fmtNum(u.usd30) : '—' }}</td>
+            <td class="r tsmall">{{ unlockDate(u.peak_date) }} <span class="vtag">{{ unlockDays(u.peak_date) }}</span> · {{ u.peak_pct_max ? u.peak_pct_max.toFixed(2) + '%' : '—' }}</td>
+            <td class="tsmall">{{ u.cats.join('、') }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="loading">載入代幣解鎖中…</p>
+    </section>
+
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
       <!-- 內頁 -->
@@ -2147,6 +2215,7 @@ watch(role, () => {
           </div>
           <div v-if="can('admin')" class="artadmin">
             <button class="regbtn" @click="editArticle(articleView)">編輯</button>
+            <button class="pinbtn" :class="{ on: articleView.pinned }" @click="togglePin(articleView)">{{ articleView.pinned ? '取消置頂' : '置頂' }}</button>
             <button class="nobtn" @click="removeArticle(articleView)">刪除</button>
           </div>
         </article>
@@ -2159,12 +2228,18 @@ watch(role, () => {
           <button v-if="can('admin')" class="loginbtn" @click="newArticle">＋ 新增文章</button>
         </div>
         <div v-if="articles.length" class="artgrid">
-          <div v-for="a in articles" :key="a.id" class="artcard" @click="articleView = a">
-            <div class="artcard-cover"><img v-if="a.cover" :src="a.cover" /><span v-else>JMCH</span></div>
+          <div v-for="a in articles" :key="a.id" class="artcard" :class="{ pinned: a.pinned }" @click="articleView = a">
+            <div class="artcard-cover">
+              <img v-if="a.cover" :src="a.cover" /><span v-else>JMCH</span>
+              <span v-if="a.pinned" class="pinbadge">📌 置頂</span>
+            </div>
             <div class="artcard-body">
               <div class="artcard-title">{{ a.title }}</div>
               <div class="arttags"><span v-for="t in a.tags" :key="t" class="arttag">{{ t }}</span></div>
-              <div class="artcard-date">{{ a.created ? new Date(a.created).toLocaleDateString() : '' }}</div>
+              <div class="artcard-foot">
+                <span class="artcard-date">{{ a.created ? new Date(a.created).toLocaleDateString() : '' }}</span>
+                <button v-if="can('admin')" class="pinbtn" :class="{ on: a.pinned }" @click.stop="togglePin(a)">{{ a.pinned ? '取消置頂' : '置頂' }}</button>
+              </div>
             </div>
           </div>
         </div>
@@ -2697,12 +2772,18 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .artgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .artcard { background: #14161c; border: 1px solid #23262d; border-radius: 12px; overflow: hidden; cursor: pointer; transition: .15s; }
 .artcard:hover { border-color: #d8ad48; transform: translateY(-2px); }
-.artcard-cover { height: 130px; background: #0b0c0f; display: flex; align-items: center; justify-content: center; }
+.artcard.pinned { border-color: #d8ad48; }
+.artcard-cover { position: relative; height: 130px; background: #0b0c0f; display: flex; align-items: center; justify-content: center; }
 .artcard-cover img { width: 100%; height: 100%; object-fit: cover; }
 .artcard-cover span { color: #3a3222; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
+.pinbadge { position: absolute; top: 8px; left: 8px; background: #d8ad48; color: #14161c; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 6px; }
 .artcard-body { padding: 10px 12px; }
 .artcard-title { font-weight: 800; color: #e8e9ec; line-height: 1.35; overflow-wrap: break-word; }
-.artcard-date { font-size: 11px; color: #6b7078; margin-top: 6px; }
+.artcard-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.artcard-date { font-size: 11px; color: #6b7078; }
+.pinbtn { background: transparent; border: 1px solid #3a3d45; color: #9aa0a8; font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer; transition: .15s; }
+.pinbtn:hover { border-color: #d8ad48; color: #d8ad48; }
+.pinbtn.on { background: #d8ad48; border-color: #d8ad48; color: #14161c; font-weight: 700; }
 .arttags { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
 .arttag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #2a2410; color: #e8b84b; }
 .backbtn { background: none; border: none; color: #8b909a; cursor: pointer; font-size: 13px; margin-bottom: 10px; }

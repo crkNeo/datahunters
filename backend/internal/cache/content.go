@@ -264,6 +264,7 @@ type Article struct {
 	Blocks  []ArticleBlock `json:"blocks"`
 	Created int64          `json:"created"`
 	Updated int64          `json:"updated"`
+	Pinned  bool           `json:"pinned"` // 置頂:pinned posts sort to the top
 }
 
 func splitTags(s string) []string {
@@ -279,9 +280,11 @@ func splitTags(s string) []string {
 func scanArticle(scan func(...any) error) (Article, error) {
 	var a Article
 	var tags, blocks string
-	if err := scan(&a.ID, &a.Title, &a.Cover, &tags, &blocks, &a.Created, &a.Updated); err != nil {
+	var pinned int
+	if err := scan(&a.ID, &a.Title, &a.Cover, &tags, &blocks, &a.Created, &a.Updated, &pinned); err != nil {
 		return a, err
 	}
+	a.Pinned = pinned != 0
 	a.Tags = splitTags(tags)
 	if json.Unmarshal([]byte(blocks), &a.Blocks) != nil || a.Blocks == nil {
 		a.Blocks = []ArticleBlock{}
@@ -289,10 +292,10 @@ func scanArticle(scan func(...any) error) (Article, error) {
 	return a, nil
 }
 
-const articleCols = `id,title,cover,tags,blocks,created,updated`
+const articleCols = `id,title,cover,tags,blocks,created,updated,pinned`
 
 func (db *DB) articleList() []Article {
-	rows, err := db.sql.Query(`SELECT ` + articleCols + ` FROM articles ORDER BY created DESC`)
+	rows, err := db.sql.Query(`SELECT ` + articleCols + ` FROM articles ORDER BY pinned DESC, created DESC`)
 	if err != nil {
 		return nil
 	}
@@ -332,6 +335,14 @@ func (db *DB) articleUpsert(a *Article) int64 {
 
 func (db *DB) articleDelete(id int64) { db.sql.Exec(`DELETE FROM articles WHERE id=?`, id) }
 
+func (db *DB) articleSetPinned(id int64, pinned bool) {
+	p := 0
+	if pinned {
+		p = 1
+	}
+	db.sql.Exec(`UPDATE articles SET pinned=? WHERE id=?`, p, id)
+}
+
 // Store wrappers.
 func (s *Store) Articles() []Article {
 	if s.db == nil {
@@ -357,5 +368,12 @@ func (s *Store) SaveArticle(a *Article) int64 {
 func (s *Store) DeleteArticle(id int64) {
 	if s.db != nil {
 		s.db.articleDelete(id)
+	}
+}
+
+// SetArticlePinned pins/unpins a post (admin). Pinned posts sort to the top.
+func (s *Store) SetArticlePinned(id int64, pinned bool) {
+	if s.db != nil {
+		s.db.articleSetPinned(id, pinned)
 	}
 }

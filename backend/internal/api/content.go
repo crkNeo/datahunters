@@ -195,3 +195,18 @@ func (s *Server) handleAdminArticles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method", http.StatusMethodNotAllowed)
 	}
 }
+
+// handleAdminArticlePin (admin): POST ?id=&pin=1|0 → pin/unpin a column post.
+func (s *Server) handleAdminArticlePin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if id == 0 {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	s.store.SetArticlePinned(id, r.URL.Query().Get("pin") == "1")
+	writeJSON(w, map[string]any{"ok": true})
+}

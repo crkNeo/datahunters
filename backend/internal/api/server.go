@@ -94,6 +94,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit)) // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))   // GDELT market headlines (zh-TW)
 	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding)) // OKX funding-rate board
+	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))   // DefiLlama token-unlock board
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
@@ -102,6 +103,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/config", s.gate(A, s.handleAdminConfig))
 	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
+	mux.HandleFunc("/api/admin/article-pin", s.gate(A, s.handleAdminArticlePin)) // 置頂/取消置頂
 	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))           // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
@@ -472,6 +474,11 @@ func (s *Server) handleNews(w http.ResponseWriter, r *http.Request) {
 // handleFunding serves the OKX funding-rate board.
 func (s *Server) handleFunding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.FundingBoard())
+}
+
+// handleUnlock serves the DefiLlama token-unlock board.
+func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Unlocks())
 }
 
 // handleEvents serves the full high-impact US economic calendar.

@@ -208,6 +208,16 @@ func main() {
 		}
 	}()
 
+	// 代幣解鎖 board (DefiLlama emissions + CoinGecko, free, no key). Unlock
+	// schedules are static, so refresh slowly; each tick pulls the curated slugs.
+	go func() {
+		store.UnlockTick()
+		ticker := time.NewTicker(12 * time.Hour)
+		for range ticker.C {
+			store.UnlockTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.
