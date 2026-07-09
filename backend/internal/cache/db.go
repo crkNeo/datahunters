@@ -265,6 +265,9 @@ func (db *DB) insertLiquidation(r LiqRow) {
 		r.Time, r.Coin, r.Side, r.Px, r.USD)
 }
 
+// clearTrades deletes every simulated trade for one strategy book (admin reset).
+func (db *DB) clearTrades(book string) { db.sql.Exec(`DELETE FROM paper_trades WHERE book=?`, book) }
+
 func (db *DB) loadTrades(book string) []*PaperTrade {
 	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)

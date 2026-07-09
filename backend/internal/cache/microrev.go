@@ -397,6 +397,39 @@ func (s *Store) RSIFadeMarkTick()  { s.microMarkTick(s.rsiFadeBook) }
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
 
+// ClearStrategy wipes an admin strategy book's simulated trades (memory + DB) so
+// stale/backfilled positions can be reset. Returns false for an unknown book.
+func (s *Store) ClearStrategy(book string) bool {
+	switch book {
+	case "rsifade":
+		s.rsiFadeBook.mu.Lock()
+		s.rsiFadeBook.trades = nil
+		s.rsiFadeBook.mu.Unlock()
+	case "bollfade":
+		s.bollFadeBook.mu.Lock()
+		s.bollFadeBook.trades = nil
+		s.bollFadeBook.mu.Unlock()
+	case "meanrev":
+		s.meanRevBook.mu.Lock()
+		s.meanRevBook.trades = nil
+		s.meanRevBook.mu.Unlock()
+	case "pool":
+		s.poolMu.Lock()
+		s.poolTrades = nil
+		s.poolMu.Unlock()
+	case "conv":
+		s.convMu.Lock()
+		s.convTrades = nil
+		s.convMu.Unlock()
+	default:
+		return false
+	}
+	if s.db != nil {
+		s.db.clearTrades(book)
+	}
+	return true
+}
+
 func (s *Store) RSIFadeState() PaperState  { return s.microState(s.rsiFadeBook) }
 func (s *Store) BollFadeState() PaperState { return s.microState(s.bollFadeBook) }
 func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) }

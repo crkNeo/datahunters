@@ -566,6 +566,12 @@ async function loadMeanrev() {
     /* secondary */
   }
 }
+// admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
+async function clearStrat(book, loader) {
+  if (!confirm('確定清空此策略的所有模擬單?此動作無法復原。')) return
+  const res = await authFetch('/api/admin/strat-clear?book=' + book, { method: 'POST' })
+  if (res.ok && loader) loader()
+}
 async function loadPaper() {
   try {
     const [p, g, eo] = await Promise.all([
@@ -1597,7 +1603,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'pool' && can('admin')">
       <div class="mk-head">
         <h2>30幣掃描池 · 1H<span class="help" tabindex="0">?<span class="help-pop"><b>進場條件</b><br>EMA50 上穿 EMA200 金叉,且收盤 > EMA800(= 4H 的 EMA200)。<br><br><b>出場</b><br>持倉最高收盤 −8×ATR 吊燈停損,或 EMA50 下穿 EMA200(死叉)。<br><b>早鎖利</b>:浮盈達 +2×ATR 後,止損下限上移至 進場+0.5×ATR,之後吊燈續跟蹤。<br><b>無固定止盈</b>——跟著吊燈移動停損吃趨勢,表格「動態止損」即當前停損位。<br><br>掃描池=成交量前 30 檔;做多。進場每根 1H 收盤評估;停損以即時價執行、死叉以 1H 收盤判定。⚠️ 管理員專屬模擬單,非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="pool">進行中 {{ pool.open.length }} · 已結束 {{ pool.stats.closed }}</span>
+        <span class="mk-actions"><span class="mk-count" v-if="pool">進行中 {{ pool.open.length }} · 已結束 {{ pool.stats.closed }}</span><button class="clearbtn" @click="clearStrat('pool', loadPool)">清空</button></span>
       </div>
       <div v-if="pool" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ pool.stats.closed }}</div></div>
@@ -1645,7 +1651,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'conv' && can('admin')">
       <div class="mk-head">
         <h2>動態ATR 均線收斂 · 4H<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b><br>4H 價格在 EMA200 同側 + 連續 4 根橫盤(區間 ≤ 3×ATR)+ 該 4 根靠 EMA200 的極值離 EMA200 ≤ 1.5×ATR(動態空間,取代固定 3%)。<br><b>止損</b>:4 根盤整區極值 ±0.3×ATR(結構止損+掃針緩衝)。<br><b>止盈</b>:成交量輪廓(VRVP 近似)——進場上方(多)/下方(空)最近的高量節點(POC/大量區)。<br><b>濾網</b>:盈虧比(TP距/SL距)≥ 1.5 才開倉。<br><br>多空雙向、每根 4H 收盤評估。⚠️ POC 為 K 線近似,管理員專屬模擬單,非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span>
+        <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button class="clearbtn" @click="clearStrat('conv', loadConv)">清空</button></span>
       </div>
       <div v-if="conv" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ conv.stats.closed }}</div></div>
@@ -1695,7 +1701,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'rsifade' && can('admin')">
       <div class="mk-head">
         <h2>逆勢超買空 · 30m<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:RSI(3) &gt; 90 且收盤價 &lt; EMA200(空頭中的反彈)→ 收盤<b>放空</b>。<br><b>止損</b> +2.5×ATR,<b>止盈</b> −2.0×ATR。<br>最多持有 16 根(30m),出場後冷卻 4 根。只做空;進場以 30m 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="rsifade">進行中 {{ rsifade.open.length }} · 已結束 {{ rsifade.stats.closed }}</span>
+        <span class="mk-actions"><span class="mk-count" v-if="rsifade">進行中 {{ rsifade.open.length }} · 已結束 {{ rsifade.stats.closed }}</span><button class="clearbtn" @click="clearStrat('rsifade', loadRsifade)">清空</button></span>
       </div>
       <div v-if="rsifade" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ rsifade.stats.closed }}</div></div>
@@ -1742,7 +1748,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'bollfade' && can('admin')">
       <div class="mk-head">
         <h2>布林重回 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:前一根收盤在布林(20, 2σ)通道<b>外</b>、本根收<b>回</b>通道內(過度延伸失敗),且方向與 EMA200 同側(空單需價在 EMA200 下方、多單反之)→ 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>止盈</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="bollfade">進行中 {{ bollfade.open.length }} · 已結束 {{ bollfade.stats.closed }}</span>
+        <span class="mk-actions"><span class="mk-count" v-if="bollfade">進行中 {{ bollfade.open.length }} · 已結束 {{ bollfade.stats.closed }}</span><button class="clearbtn" @click="clearStrat('bollfade', loadBollfade)">清空</button></span>
       </div>
       <div v-if="bollfade" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ bollfade.stats.closed }}</div></div>
@@ -1789,7 +1795,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'meanrev' && can('admin')">
       <div class="mk-head">
         <h2>乖離回歸 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:收盤價偏離 EMA20 超過 2.0×ATR,且與 EMA200 趨勢同側(價在 EMA200 上方只接多、下方只接空)→ 朝 EMA20 回歸。<br><b>止損</b> 3.0×ATR,<b>止盈</b>=EMA20。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="meanrev">進行中 {{ meanrev.open.length }} · 已結束 {{ meanrev.stats.closed }}</span>
+        <span class="mk-actions"><span class="mk-count" v-if="meanrev">進行中 {{ meanrev.open.length }} · 已結束 {{ meanrev.stats.closed }}</span><button class="clearbtn" @click="clearStrat('meanrev', loadMeanrev)">清空</button></span>
       </div>
       <div v-if="meanrev" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ meanrev.stats.closed }}</div></div>
@@ -2809,6 +2815,9 @@ body::before {
 .mk-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 .mk-head h2 { font-size: 16px; margin: 0; }
 .mk-count { font-size: 12px; color: #8b909a; }
+.mk-actions { display: flex; align-items: center; gap: 10px; }
+.clearbtn { background: transparent; border: 1px solid #4a2c2c; color: #c56a6a; font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: .15s; }
+.clearbtn:hover { border-color: #e05555; color: #e05555; background: rgba(224, 85, 85, 0.08); }
 .sorttabs { display: flex; gap: 8px; margin-bottom: 8px; }
 .sorttabs button { background: #16181d; border: 1px solid #23262d; color: #b8bcc4; padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .sorttabs button.active { background: #2a2410; border-color: #e0b341; color: #f4d774; }

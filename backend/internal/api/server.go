@@ -115,6 +115,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))         // 逆勢超買空 30m (admin-only)
 	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))       // 布林重回 1h (admin-only)
 	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))         // 乖離回歸 1h (admin-only)
+	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))  // 清空某策略模擬單
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -435,6 +436,20 @@ func (s *Server) handleBollFade(w http.ResponseWriter, r *http.Request) {
 // handleMeanRev serves the admin-only 乖離回歸 1h strategy tracker.
 func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.MeanRevState())
+}
+
+// handleStratClear (admin): POST ?book=rsifade|bollfade|meanrev|pool|conv wipes
+// that strategy's simulated trades (memory + DB).
+func (s *Server) handleStratClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.store.ClearStrategy(r.URL.Query().Get("book")) {
+		http.Error(w, "unknown book", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleEMAClose force-closes an open 銀河 (EMA-only) trade at market, recorded as
