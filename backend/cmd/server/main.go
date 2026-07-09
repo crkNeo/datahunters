@@ -171,6 +171,25 @@ func main() {
 		}
 	}()
 
+	// 30幣掃描池 1H strategy (admin): evaluated once per closed 1H bar; REST-fetches
+	// long history only on bar close (throttled internally).
+	go func() {
+		store.PoolTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.PoolTick()
+		}
+	}()
+
+	// 動態ATR均線收斂 4H strategy (admin): evaluated once per closed 4H bar.
+	go func() {
+		store.ConvTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.ConvTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.

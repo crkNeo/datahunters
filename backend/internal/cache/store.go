@@ -55,7 +55,7 @@ type Store struct {
 	symTypes map[string]string
 	symTime  time.Time
 
-	paperMu        sync.Mutex // guards the paper-trading books
+	paperMu          sync.Mutex // guards the paper-trading books
 	paperMain        *paperBook // disciplined: high bar, fresh-cross only
 	paperGamble      *paperBook // loose: low bar, chases already-elevated coins
 	paperGambleHedge *paperBook // admin-only A/B: gamble + break-even hedge (推播僅管理員)
@@ -113,12 +113,20 @@ type Store struct {
 	srState map[string]string  // coin → last emitted breach ("" | down | up) for alert dedupe
 	srBar   int64              // last processed closed-bar Ts (per-bar throttle)
 
-	gdeltW      *gdelt.Watcher  // GDELT market-news watcher (free, no key)
-	gdeltMu     sync.RWMutex    // guards the news feed + dedupe set
-	gdeltFeed   []NewsItem      // recent market-moving headlines (newest first), titles zh-TW
-	gdeltSeen   map[string]bool // seen article URLs (dedupe; bounded)
-	gdeltSeeded bool            // first tick only seeds (no push burst of history on boot)
+	gdeltW      *gdelt.Watcher    // GDELT market-news watcher (free, no key)
+	gdeltMu     sync.RWMutex      // guards the news feed + dedupe set
+	gdeltFeed   []NewsItem        // recent market-moving headlines (newest first), titles zh-TW
+	gdeltSeen   map[string]bool   // seen article URLs (dedupe; bounded)
+	gdeltSeeded bool              // first tick only seeds (no push burst of history on boot)
 	etfSeen     map[string]string // asset → last reported ETF-flow date (dedupe: once/day)
+
+	poolMu     sync.Mutex    // guards the 30幣掃描池 1H strategy (admin, scanpool.go)
+	poolTrades []*PaperTrade // simulated scan-pool trades
+	poolBucket int64         // last processed 1H wall-clock bucket
+
+	convMu       sync.Mutex    // guards the 動態ATR均線收斂 4H strategy (admin, convergence.go)
+	convTrades   []*PaperTrade // simulated convergence trades (long+short)
+	conv4hBucket int64         // last processed 4H wall-clock bucket
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -134,7 +142,7 @@ func NewStore(coins []string) *Store {
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),         // disciplined, fixed TP/SL
 		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),      // gamble, fixed TP/SL (門檻 50:實盤數據顯示 45–49 桶淨虧)
 		paperGambleHedge:  newBook("gamblehedge", 50, false, 1*time.Hour, 0), // admin A/B: gamble + 保本停損
-		paperEMA:          newBook("emaonly", 0, false, 0, 0),               // standalone EMA cross (no time cooldown; signal-hour dedup)
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),                // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
@@ -178,6 +186,8 @@ func NewStore(coins []string) *Store {
 		s.paperGamble.trades = db.loadTrades("gamble")
 		s.paperGambleHedge.trades = db.loadTrades("gamblehedge")
 		s.paperEMA.trades = db.loadTrades("emaonly")
+		s.poolTrades = db.loadTrades("pool")
+		s.convTrades = db.loadTrades("conv")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d gamblehedge=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
 			len(s.paperGambleHedge.trades), len(s.paperEMA.trades))

@@ -107,6 +107,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
 	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))      // 銀河: 手動出場 (admin-only)
 	mux.HandleFunc("/api/admin/gamble-hedge", s.gate(A, s.handleGambleHedge)) // 超新星·保本 A/B (admin-only)
+	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))               // 30幣掃描池 1H (admin-only)
+	mux.HandleFunc("/api/admin/conv", s.gate(A, s.handleConv))               // 動態ATR均線收斂 4H (admin-only)
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -402,6 +404,16 @@ func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 // handleGambleHedge serves the admin-only 超新星·保本 A/B tracker.
 func (s *Server) handleGambleHedge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.GambleHedge())
+}
+
+// handlePool serves the admin-only 30幣掃描池 1H strategy tracker.
+func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PoolState())
+}
+
+// handleConv serves the admin-only 動態ATR均線收斂 4H strategy tracker.
+func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.ConvState())
 }
 
 // handleEMAClose force-closes an open 銀河 (EMA-only) trade at market, recorded as
