@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   status     VARCHAR(16), outcome VARCHAR(16),
   open_time  BIGINT, close_time BIGINT,
   oi DOUBLE DEFAULT 0, cvd DOUBLE DEFAULT 0, funding DOUBLE DEFAULT 0,
+  tp1 DOUBLE NOT NULL DEFAULT 0, tp2 DOUBLE NOT NULL DEFAULT 0,
+  legs TINYINT NOT NULL DEFAULT 0, filled DOUBLE NOT NULL DEFAULT 0, realized DOUBLE NOT NULL DEFAULT 0,
   KEY idx_pt_open (open_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -127,6 +129,20 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='articles' AND COLUMN_NAME='pinned'`).Scan(&hasPinned)
 	if hasPinned == 0 {
 		d.Exec(`ALTER TABLE articles ADD COLUMN pinned TINYINT NOT NULL DEFAULT 0`)
+	}
+	// multi-TP (分批止盈) state columns on pre-existing paper_trades tables. Idempotent.
+	for col, ddl := range map[string]string{
+		"tp1":      "ADD COLUMN tp1 DOUBLE NOT NULL DEFAULT 0",
+		"tp2":      "ADD COLUMN tp2 DOUBLE NOT NULL DEFAULT 0",
+		"legs":     "ADD COLUMN legs TINYINT NOT NULL DEFAULT 0",
+		"filled":   "ADD COLUMN filled DOUBLE NOT NULL DEFAULT 0",
+		"realized": "ADD COLUMN realized DOUBLE NOT NULL DEFAULT 0",
+	} {
+		var has int
+		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)
+		if has == 0 {
+			d.Exec(`ALTER TABLE paper_trades ` + ddl)
+		}
 	}
 	return d, nil
 }
@@ -251,13 +267,16 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		ct = t.CloseTime.UnixMilli()
 	}
 	db.sql.Exec(`INSERT INTO paper_trades
-	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding)
-	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	  ON DUPLICATE KEY UPDATE
 	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
-	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl)`,
+	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl),
+	    tp1=VALUES(tp1), tp2=VALUES(tp2),
+	    legs=VALUES(legs), filled=VALUES(filled), realized=VALUES(realized)`,
 		t.ID, book, t.Coin, t.Dir, t.Score, t.Entry, t.TP, t.SL, t.Cur, t.PnLPct,
-		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding)
+		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding,
+		t.TP1, t.TP2, t.Legs, t.Filled, t.Realized)
 }
 
 func (db *DB) insertLiquidation(r LiqRow) {
@@ -268,8 +287,13 @@ func (db *DB) insertLiquidation(r LiqRow) {
 // clearTrades deletes every simulated trade for one strategy book (admin reset).
 func (db *DB) clearTrades(book string) { db.sql.Exec(`DELETE FROM paper_trades WHERE book=?`, book) }
 
+// clearClosedTrades deletes only the CLOSED trades of a book, keeping open positions.
+func (db *DB) clearClosedTrades(book string) {
+	db.sql.Exec(`DELETE FROM paper_trades WHERE book=? AND status='closed'`, book)
+}
+
 func (db *DB) loadTrades(book string) []*PaperTrade {
-	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding
+	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -280,7 +304,8 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 		t := &PaperTrade{}
 		var ot, ct int64
 		if err := rows.Scan(&t.ID, &t.Coin, &t.Dir, &t.Score, &t.Entry, &t.TP, &t.SL,
-			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding); err != nil {
+			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
+			&t.TP1, &t.TP2, &t.Legs, &t.Filled, &t.Realized); err != nil {
 			continue
 		}
 		t.OpenTime = time.UnixMilli(ot).UTC()

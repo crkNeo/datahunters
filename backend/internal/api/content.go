@@ -102,6 +102,36 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SiteConfig())
 }
 
+// handleNotice (member): returns the current login-notice popup.
+func (s *Server) handleNotice(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Notice())
+}
+
+// handleAdminNotice (admin): POST {title, text, expiry} sets the login notice.
+// Empty text disables it.
+func (s *Server) handleAdminNotice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Title, Text string
+		Expiry      int64
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	in.Text = strings.TrimSpace(in.Text)
+	if len([]rune(in.Title)) > 60 || len([]rune(in.Text)) > 2000 {
+		http.Error(w, "標題上限 60 字、內容上限 2000 字", http.StatusBadRequest)
+		return
+	}
+	s.store.SetNotice(in.Title, in.Text, in.Expiry)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 // handleAdminConfig (admin): POST {key, value} upserts one setting.
 func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

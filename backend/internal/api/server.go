@@ -96,11 +96,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding)) // OKX funding-rate board
 	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))   // DefiLlama token-unlock board
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
+	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))     // login 公告彈窗 (members)
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
 
 	// admin content management
 	mux.HandleFunc("/api/admin/config", s.gate(A, s.handleAdminConfig))
+	mux.HandleFunc("/api/admin/notice", s.gate(A, s.handleAdminNotice)) // 設定登入公告彈窗
 	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
 	mux.HandleFunc("/api/admin/article-pin", s.gate(A, s.handleAdminArticlePin)) // 置頂/取消置頂
@@ -108,9 +110,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))           // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
-	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))      // 銀河: 手動出場 (admin-only)
-	mux.HandleFunc("/api/admin/gamble-hedge", s.gate(A, s.handleGambleHedge)) // 超新星·保本 A/B (admin-only)
-	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))               // 30幣掃描池 1H (admin-only)
+	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose)) // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))         // 30幣掃描池 1H (admin-only)
 	mux.HandleFunc("/api/admin/conv", s.gate(A, s.handleConv))               // 動態ATR均線收斂 4H (admin-only)
 	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))         // 逆勢超買空 30m (admin-only)
 	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))       // 布林重回 1h (admin-only)
@@ -370,12 +371,12 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleExport streams a strategy book's full trade history as CSV (admin only).
-// ?book=main|gamble|gamblehedge|emaonly. A UTF-8 BOM is emitted so Excel opens the
+// ?book=main|gamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
 // Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch book {
-	case "main", "gamble", "gamblehedge", "emaonly":
+	case "main", "gamble", "emaonly":
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -408,10 +409,6 @@ func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMAOnly())
 }
 
-// handleGambleHedge serves the admin-only 超新星·保本 A/B tracker.
-func (s *Server) handleGambleHedge(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.GambleHedge())
-}
 
 // handlePool serves the admin-only 30幣掃描池 1H strategy tracker.
 func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
@@ -438,14 +435,16 @@ func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.MeanRevState())
 }
 
-// handleStratClear (admin): POST ?book=rsifade|bollfade|meanrev|pool|conv wipes
-// that strategy's simulated trades (memory + DB).
+// handleStratClear (admin): POST ?book=<name>[&scope=closed] resets a strategy's
+// simulated trades (memory + DB). scope=closed keeps open positions and drops only
+// the closed history; otherwise everything is wiped.
 func (s *Server) handleStratClear(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.store.ClearStrategy(r.URL.Query().Get("book")) {
+	closedOnly := r.URL.Query().Get("scope") == "closed"
+	if !s.store.ClearStrategy(r.URL.Query().Get("book"), closedOnly) {
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
 	}

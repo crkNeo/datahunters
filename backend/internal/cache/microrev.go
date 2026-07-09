@@ -31,9 +31,10 @@ type microBook struct {
 	barSec   int64  // bar length in seconds (bucketing + expiry)
 	klimit   int
 	minBars  int
-	expiry   int // max hold in bars → market exit ("expired")
-	cooldown int // bars to wait after a close before re-entering the same coin
-	keep     int // closed-trade cap
+	expiry   int     // max hold in bars → market exit ("expired")
+	cooldown int     // bars to wait after a close before re-entering the same coin
+	keep     int     // closed-trade cap
+	plan     *tpPlan // 分批止盈 config (nil = single TP)
 	signal   func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
 
 	mu     sync.Mutex
@@ -243,19 +244,33 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	}
 	var dirty *PaperTrade
 	if open != nil {
-		open.Cur = roundPx(last.Close)
-		open.PnLPct = round2(pnl(open.Dir, open.Entry, last.Close))
-		exit, outcome, px := convExit(last, open) // fixed TP/SL on the closed bar (same-bar both → SL)
+		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
+		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
+		exit, outcome, px := false, "", 0.0
+		if open.Dir == "long" {
+			if last.Low <= open.SL {
+				exit, outcome, px = true, slOutcome(open), open.SL
+			} else if last.High >= open.TP {
+				exit, outcome, px = true, "tp3", open.TP
+			}
+		} else {
+			if last.High >= open.SL {
+				exit, outcome, px = true, slOutcome(open), open.SL
+			} else if last.Low <= open.TP {
+				exit, outcome, px = true, "tp3", open.TP
+			}
+		}
 		if !exit && (last.Ts-open.OpenTime.UnixMilli())/barMs >= int64(b.expiry) {
 			exit, outcome, px = true, "expired", last.Close
 		}
 		if exit {
-			open.Status = "closed"
-			open.Outcome = outcome
-			open.Cur = roundPx(px)
-			open.PnLPct = round2(pnl(open.Dir, open.Entry, px))
-			t := now
-			open.CloseTime = &t
+			if outcome == "tp3" {
+				open.Legs = 3
+			}
+			closeTrade(open, px, outcome, now) // blends any realized tranches
+		} else {
+			open.Cur = roundPx(last.Close)
+			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
 	} else if !microCooling(b, coin, last.Ts, barMs) {
@@ -271,6 +286,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				Status:   "open",
 				OpenTime: time.UnixMilli(last.Ts).UTC(),
 			}
+			setupTP(tr, b.plan) // compute TP1/TP2 (分批止盈) at entry
 			b.trades = append(b.trades, tr)
 			dirty = tr
 			microTrim(b)
@@ -333,16 +349,10 @@ func (s *Store) microMarkTick(b *microBook) {
 		if p <= 0 {
 			continue
 		}
-		tr.Cur = roundPx(p)
-		tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, p))
-		if exit, outcome, lvl := convExitLive(tr, p); exit {
-			tr.Status = "closed"
-			tr.Outcome = outcome
-			tr.Cur = roundPx(lvl)
-			tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, lvl))
-			t := now
-			tr.CloseTime = &t
-			dirty = append(dirty, tr)
+		before := tr.Legs
+		closed := stepTP(tr, p, b.plan, now) // books partial TPs, ratchets stop, closes at TP3/SL
+		if closed || tr.Legs != before {
+			dirty = append(dirty, tr) // persist on any leg change or final close
 		}
 	}
 	b.mu.Unlock()
@@ -359,7 +369,8 @@ func (s *Store) microState(b *microBook) PaperState {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
-	var sum float64
+	st.Stats.MultiTP = b.plan != nil
+	var sum, grossWin, grossLoss float64
 	for _, tr := range b.trades {
 		if tr.Status == "open" {
 			st.Open = append(st.Open, tr)
@@ -373,6 +384,7 @@ func (s *Store) microState(b *microBook) PaperState {
 		} else {
 			st.Stats.Losses++
 		}
+		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
 	}
 	markLiveOpen(st.Open, px)
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
@@ -383,6 +395,11 @@ func (s *Store) microState(b *microBook) PaperState {
 		st.Stats.WinRate = round2(float64(st.Stats.Wins) / float64(st.Stats.Closed) * 100)
 		st.Stats.AvgPnl = round2(sum / float64(st.Stats.Closed))
 		st.Stats.TotalPnl = round2(sum)
+		if grossLoss > 0 {
+			st.Stats.ProfitFactor = round2(grossWin / grossLoss)
+		} else if grossWin > 0 {
+			st.Stats.ProfitFactor = 99.99 // no losers yet
+		}
 	}
 	return st
 }
@@ -397,37 +414,107 @@ func (s *Store) RSIFadeMarkTick()  { s.microMarkTick(s.rsiFadeBook) }
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
 
-// ClearStrategy wipes an admin strategy book's simulated trades (memory + DB) so
-// stale/backfilled positions can be reset. Returns false for an unknown book.
-func (s *Store) ClearStrategy(book string) bool {
+// keepIf filters trades to those still open (closedOnly=true) or wipes all (false).
+func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
+	if !closedOnly {
+		return nil
+	}
+	var open []*PaperTrade
+	for _, tr := range trades {
+		if tr.Status == "open" {
+			open = append(open, tr)
+		}
+	}
+	return open
+}
+
+// ClearStrategy resets a strategy book's simulated trades (memory + DB). closedOnly
+// keeps open positions and drops only the closed history. Returns false for an
+// unknown book.
+func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 	switch book {
 	case "rsifade":
 		s.rsiFadeBook.mu.Lock()
-		s.rsiFadeBook.trades = nil
+		s.rsiFadeBook.trades = keepIf(s.rsiFadeBook.trades, closedOnly)
 		s.rsiFadeBook.mu.Unlock()
 	case "bollfade":
 		s.bollFadeBook.mu.Lock()
-		s.bollFadeBook.trades = nil
+		s.bollFadeBook.trades = keepIf(s.bollFadeBook.trades, closedOnly)
 		s.bollFadeBook.mu.Unlock()
 	case "meanrev":
 		s.meanRevBook.mu.Lock()
-		s.meanRevBook.trades = nil
+		s.meanRevBook.trades = keepIf(s.meanRevBook.trades, closedOnly)
 		s.meanRevBook.mu.Unlock()
 	case "pool":
 		s.poolMu.Lock()
-		s.poolTrades = nil
+		s.poolTrades = keepIf(s.poolTrades, closedOnly)
 		s.poolMu.Unlock()
 	case "conv":
 		s.convMu.Lock()
-		s.convTrades = nil
+		s.convTrades = keepIf(s.convTrades, closedOnly)
 		s.convMu.Unlock()
+	case "main", "gamble", "emaonly":
+		s.paperMu.Lock()
+		b := s.paperMain
+		if book == "gamble" {
+			b = s.paperGamble
+		} else if book == "emaonly" {
+			b = s.paperEMA
+		}
+		b.trades = keepIf(b.trades, closedOnly)
+		s.paperMu.Unlock()
 	default:
 		return false
 	}
 	if s.db != nil {
-		s.db.clearTrades(book)
+		if closedOnly {
+			s.db.clearClosedTrades(book)
+		} else {
+			s.db.clearTrades(book)
+		}
 	}
 	return true
+}
+
+// retrofitMultiTP backfills 分批止盈 levels onto OPEN trades that predate multi-TP,
+// so on-going positions adopt the new rules. Idempotent: only trades with no TP1
+// set (and no legs booked) are touched. Runs once at startup.
+func (s *Store) retrofitMultiTP() {
+	type dirtyRow struct {
+		book string
+		tr   *PaperTrade
+	}
+	var dirty []dirtyRow
+	fill := func(book string, plan *tpPlan, trades []*PaperTrade) {
+		if plan == nil {
+			return
+		}
+		for _, tr := range trades {
+			if tr.Status == "open" && tr.TP1 == 0 && tr.Legs == 0 && tr.Filled == 0 {
+				setupTP(tr, plan)
+				dirty = append(dirty, dirtyRow{book, tr})
+			}
+		}
+	}
+	s.rsiFadeBook.mu.Lock()
+	fill("rsifade", s.rsiFadeBook.plan, s.rsiFadeBook.trades)
+	s.rsiFadeBook.mu.Unlock()
+	s.bollFadeBook.mu.Lock()
+	fill("bollfade", s.bollFadeBook.plan, s.bollFadeBook.trades)
+	s.bollFadeBook.mu.Unlock()
+	s.meanRevBook.mu.Lock()
+	fill("meanrev", s.meanRevBook.plan, s.meanRevBook.trades)
+	s.meanRevBook.mu.Unlock()
+	s.paperMu.Lock()
+	fill("main", s.paperMain.plan, s.paperMain.trades)
+	fill("gamble", s.paperGamble.plan, s.paperGamble.trades)
+	fill("emaonly", s.paperEMA.plan, s.paperEMA.trades)
+	s.paperMu.Unlock()
+	if s.db != nil {
+		for _, d := range dirty {
+			s.db.upsertTrade(d.book, d.tr)
+		}
+	}
 }
 
 func (s *Store) RSIFadeState() PaperState  { return s.microState(s.rsiFadeBook) }

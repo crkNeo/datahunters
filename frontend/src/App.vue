@@ -130,6 +130,7 @@ async function doLogin() {
     showToast('登入成功,歡迎回來!', 'ok')
     welcomeOpen.value = true // 使用須知 modal(續用資格 / 加入主畫面 / 訊號提醒)
     loadAll()
+    loadNotice().then(maybeShowNotice) // 登入公告彈窗(若有且未關閉過)
   } catch (e) {
     loginErr.value = '登入失敗'
     showToast('登入失敗,請稍後再試', 'err')
@@ -432,6 +433,59 @@ async function onQrPick(e) {
   const f = e.target.files && e.target.files[0]
   if (f) { const p = await uploadImage(f, 'qr'); if (p) await setConfig('qr', p) }
 }
+
+// ---- login notice popup (公告彈窗) ----
+const notice = ref(null)
+const noticeShow = ref(false)
+const noticeDont = ref(false)
+const noticeForm = ref({ title: '', text: '', until: '' }) // admin editor
+async function loadNotice() {
+  try {
+    const res = await authFetch('/api/notice')
+    if (res.ok) notice.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+function maybeShowNotice() {
+  const n = notice.value
+  if (!n || !n.active) return
+  if (localStorage.getItem('notice_seen') === String(n.ver)) return // dismissed this version
+  noticeDont.value = false
+  noticeShow.value = true
+}
+function closeNotice() {
+  if (noticeDont.value && notice.value) localStorage.setItem('notice_seen', String(notice.value.ver))
+  noticeShow.value = false
+}
+// admin editor helpers
+function localInput(ms) {
+  if (!ms) return ''
+  return new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+function loadNoticeEditor() {
+  const n = notice.value || {}
+  noticeForm.value = { title: n.title || '', text: n.text || '', until: localInput(n.expiry) }
+}
+async function saveNotice() {
+  const f = noticeForm.value
+  if (!f.text.trim()) { showToast('內容必填', 'err'); return }
+  const expiry = f.until ? new Date(f.until).getTime() : 0
+  const res = await authFetch('/api/admin/notice', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: f.title, text: f.text, expiry }),
+  })
+  if (res.ok) { await loadNotice(); adminMsg.value = '✓ 已更新登入公告' } else { showToast((await res.text()).trim() || '儲存失敗', 'err') }
+}
+async function clearNotice() {
+  if (!confirm('確定停用登入公告?')) return
+  const res = await authFetch('/api/admin/notice', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '', text: '', expiry: 0 }),
+  })
+  if (res.ok) { noticeForm.value = { title: '', text: '', until: '' }; await loadNotice(); adminMsg.value = '✓ 已停用登入公告' }
+}
+
 // ---- admin: instant push broadcast to a user group (optional article deep-link) ----
 const bcTitle = ref('')
 const bcBody = ref('')
@@ -499,16 +553,7 @@ async function loadRadar() {
 
 const paper = ref(null)
 const gamble = ref(null)
-const gambleHedge = ref(null)
 const emaOnly = ref(null)
-async function loadGambleHedge() {
-  try {
-    const res = await authFetch('/api/admin/gamble-hedge')
-    if (res.ok) gambleHedge.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 
 // ---- admin: 30幣掃描池 1H strategy ----
 const pool = ref(null)
@@ -535,8 +580,21 @@ async function loadConv() {
   }
 }
 function convOutcome(o) {
-  return o === 'tp' ? '止盈 TP' : o === 'sl' ? '止損 SL' : o === 'expired' ? '逾時' : o
+  return o === 'tp' ? '止盈 TP' : o === 'tp3' ? 'TP3 完整'
+    : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
+    : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
+    : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
+    : o === 'expired' ? '逾時' : o
 }
+// otag colour class for an outcome (reuses existing tp/sl/reversed/expired styles)
+function outcomeCls(o) {
+  if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
+  if (o === 'tp1sl') return 'reversed'
+  if (o === 'sl') return 'sl'
+  if (o === 'trail' || o === 'reversed' || o === 'hedge') return 'reversed'
+  return 'expired'
+}
+function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 
 // ---- admin: mean-reversion strategies (逆勢超買空 / 布林重回 / 乖離回歸) ----
 const rsifade = ref(null)
@@ -567,11 +625,34 @@ async function loadMeanrev() {
   }
 }
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
-async function clearStrat(book, loader) {
-  if (!confirm('確定清空此策略的所有模擬單?此動作無法復原。')) return
-  const res = await authFetch('/api/admin/strat-clear?book=' + book, { method: 'POST' })
+async function clearStrat(book, loader, closedOnly) {
+  const msg = closedOnly
+    ? '確定清除此策略「已結束」的單?進行中的開倉單會保留(並沿用新規則)。'
+    : '確定清空此策略的全部模擬單(含進行中)?此動作無法復原。'
+  if (!confirm(msg)) return
+  const url = '/api/admin/strat-clear?book=' + book + (closedOnly ? '&scope=closed' : '')
+  const res = await authFetch(url, { method: 'POST' })
   if (res.ok && loader) loader()
 }
+// current book name for the shared strategy section (星軌/超新星/銀河)
+const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }[mainTab.value]))
+// the three mean-reversion tabs share one layout; meta drives the unified section.
+const microMeta = {
+  rsifade: {
+    title: '逆勢超買空 · 30m', load: loadRsifade, get: () => rsifade.value,
+    help: '<b>進場</b>:RSI(3) &gt; 90 且收盤價 &lt; EMA200(空頭中的反彈)→ 收盤<b>放空</b>。<br><b>止損</b> +2.5×ATR,<b>最終止盈 TP3</b> −2.0×ATR。<br>最多 16 根(30m)、冷卻 4 根。只做空;進場以 30m 收盤判定,<b>分批止盈以即時價執行</b>(TP1→保本、TP2→鎖 TP1)。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+  bollfade: {
+    title: '布林重回 · 1h', load: loadBollfade, get: () => bollfade.value,
+    help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定,<b>分批止盈以即時價執行</b>。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+  meanrev: {
+    title: '乖離回歸 · 1h', load: loadMeanrev, get: () => meanrev.value,
+    help: '<b>進場</b>:收盤價偏離 EMA20 超過 2.0×ATR,且與 EMA200 趨勢同側(上方接多、下方接空)→ 朝 EMA20 回歸。<br><b>止損</b> 3.0×ATR,<b>最終止盈 TP3</b>=EMA20。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定,<b>分批止盈以即時價執行</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+}
+const micro = computed(() => microMeta[mainTab.value] || null)
+const microState = computed(() => (micro.value ? micro.value.get() : null))
 async function loadPaper() {
   try {
     const [p, g, eo] = await Promise.all([
@@ -586,7 +667,6 @@ async function loadPaper() {
 }
 const book = computed(() =>
   mainTab.value === 'gamble' ? gamble.value
-    : mainTab.value === 'gamblehedge' ? gambleHedge.value
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
@@ -611,7 +691,7 @@ async function manualExit(t) {
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
-  const map = { paper: 'main', gamble: 'gamble', gamblehedge: 'gamblehedge', emaonly: 'emaonly' }
+  const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
   const bookName = map[mainTab.value]
   if (!bookName) return
   try {
@@ -649,11 +729,13 @@ const bookF = computed(() => {
   if (!b) return null
   const open = (b.open || []).filter((t) => withinWin(t.open_time))
   const closed = (b.closed || []).filter((t) => withinWin(t.close_time))
-  let wins = 0,
-    sum = 0
+  let wins = 0, sum = 0, gW = 0, gL = 0, tp1 = 0, tp2 = 0, tp3 = 0
   for (const t of closed) {
-    if (t.pnl_pct > 0) wins++
+    if (t.pnl_pct > 0) { wins++; gW += t.pnl_pct } else { gL += -t.pnl_pct }
     sum += t.pnl_pct
+    if (t.legs >= 1) tp1++
+    if (t.legs >= 2) tp2++
+    if (t.legs >= 3) tp3++
   }
   const n = closed.length
   return {
@@ -666,6 +748,9 @@ const bookF = computed(() => {
       win_rate: n ? +((wins / n) * 100).toFixed(2) : 0,
       avg_pnl: n ? +(sum / n).toFixed(2) : 0,
       total_pnl: +sum.toFixed(2),
+      multi_tp: !!(b.stats && b.stats.multi_tp),
+      profit_factor: gL > 0 ? +(gW / gL).toFixed(2) : (gW > 0 ? 99.99 : 0),
+      tp1, tp2, tp3,
     },
   }
 })
@@ -1057,7 +1142,6 @@ function loadAll() {
   }
   if (can('admin')) {
     loadUsers()
-    loadGambleHedge()
     // load every strategy each cycle so the nav badges show open counts without
     // having to open each tab first
     loadPool()
@@ -1132,7 +1216,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1151,6 +1235,7 @@ onMounted(async () => {
   loadConfig()
   await loadMe()
   loadAll()
+  if (authed.value) loadNotice().then(maybeShowNotice) // 返回用戶(帶 token)登入時的公告彈窗
   timer = setInterval(tick, 15000)
   // deep-link: notification opened the app cold with /?tab=gamble (and optionally
   // &article=<id> to jump straight into a column post) → apply it
@@ -1209,7 +1294,7 @@ const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
-  admin: 'admin', gamblehedge: 'admin', pool: 'admin', conv: 'admin',
+  admin: 'admin', pool: 'admin', conv: 'admin',
   rsifade: 'admin', bollfade: 'admin', meanrev: 'admin',
 }
 watch(role, () => {
@@ -1345,6 +1430,16 @@ watch(role, () => {
       </div>
 
       <button class="authbtn" @click="welcomeOpen = false">我知道了</button>
+    </div>
+  </div>
+
+  <!-- 登入公告彈窗 (admin-set announcement) -->
+  <div v-if="noticeShow && notice" class="overlay" @click="closeNotice">
+    <div class="noticebox" @click.stop>
+      <h3 class="nb-title">📢 {{ notice.title || '公告' }}</h3>
+      <div class="nb-text">{{ notice.text }}</div>
+      <label class="nb-dont"><input type="checkbox" v-model="noticeDont" /> 不再顯示此則</label>
+      <button class="authbtn" @click="closeNotice">我知道了</button>
     </div>
   </div>
 
@@ -1511,11 +1606,8 @@ watch(role, () => {
       <div class="navrow" v-if="can('admin')">
         <span class="navgroup">管理</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor()">
+          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor)">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
-          </button>
-          <button :class="{ active: mainTab === 'gamblehedge' }" @click="mainTab = 'gamblehedge'; loadGambleHedge()">
-            超新星·保本<em v-if="gambleHedge && gambleHedge.open.length" class="navbadge">{{ gambleHedge.open.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'pool' }" @click="mainTab = 'pool'; loadPool()">
             30幣掃描池<em v-if="pool && pool.open.length" class="navbadge">{{ pool.open.length }}</em>
@@ -1603,7 +1695,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'pool' && can('admin')">
       <div class="mk-head">
         <h2>30幣掃描池 · 1H<span class="help" tabindex="0">?<span class="help-pop"><b>進場條件</b><br>EMA50 上穿 EMA200 金叉,且收盤 > EMA800(= 4H 的 EMA200)。<br><br><b>出場</b><br>持倉最高收盤 −8×ATR 吊燈停損,或 EMA50 下穿 EMA200(死叉)。<br><b>早鎖利</b>:浮盈達 +2×ATR 後,止損下限上移至 進場+0.5×ATR,之後吊燈續跟蹤。<br><b>無固定止盈</b>——跟著吊燈移動停損吃趨勢,表格「動態止損」即當前停損位。<br><br>掃描池=成交量前 30 檔;做多。進場每根 1H 收盤評估;停損以即時價執行、死叉以 1H 收盤判定。⚠️ 管理員專屬模擬單,非投資建議。</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="pool">進行中 {{ pool.open.length }} · 已結束 {{ pool.stats.closed }}</span><button class="clearbtn" @click="clearStrat('pool', loadPool)">清空</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="pool">進行中 {{ pool.open.length }} · 已結束 {{ pool.stats.closed }}</span><button class="clearbtn" @click="clearStrat('pool', loadPool, true)">清已結束</button><button class="clearbtn" @click="clearStrat('pool', loadPool, false)">全部</button></span>
       </div>
       <div v-if="pool" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ pool.stats.closed }}</div></div>
@@ -1651,7 +1743,7 @@ watch(role, () => {
     <section v-else-if="mainTab === 'conv' && can('admin')">
       <div class="mk-head">
         <h2>動態ATR 均線收斂 · 4H<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b><br>4H 價格在 EMA200 同側 + 連續 4 根橫盤(區間 ≤ 3×ATR)+ 該 4 根靠 EMA200 的極值離 EMA200 ≤ 1.5×ATR(動態空間,取代固定 3%)。<br><b>止損</b>:4 根盤整區極值 ±0.3×ATR(結構止損+掃針緩衝)。<br><b>止盈</b>:成交量輪廓(VRVP 近似)——進場上方(多)/下方(空)最近的高量節點(POC/大量區)。<br><b>濾網</b>:盈虧比(TP距/SL距)≥ 1.5 才開倉。<br><br>多空雙向、每根 4H 收盤評估。⚠️ POC 為 K 線近似,管理員專屬模擬單,非投資建議。</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button class="clearbtn" @click="clearStrat('conv', loadConv)">清空</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
       <div v-if="conv" class="pstats">
         <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ conv.stats.closed }}</div></div>
@@ -1697,145 +1789,67 @@ watch(role, () => {
       <p v-else-if="!conv" class="loading">載入中…</p>
     </section>
 
-    <!-- 逆勢超買空 · 30m (admin only) -->
-    <section v-else-if="mainTab === 'rsifade' && can('admin')">
+    <!-- 均值回歸策略(逆勢超買空 / 布林重回 / 乖離回歸)· 分批止盈 · admin only -->
+    <section v-else-if="micro && can('admin')">
       <div class="mk-head">
-        <h2>逆勢超買空 · 30m<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:RSI(3) &gt; 90 且收盤價 &lt; EMA200(空頭中的反彈)→ 收盤<b>放空</b>。<br><b>止損</b> +2.5×ATR,<b>止盈</b> −2.0×ATR。<br>最多持有 16 根(30m),出場後冷卻 4 根。只做空;進場以 30m 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="rsifade">進行中 {{ rsifade.open.length }} · 已結束 {{ rsifade.stats.closed }}</span><button class="clearbtn" @click="clearStrat('rsifade', loadRsifade)">清空</button></span>
+        <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
+        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }} · 已結束 {{ microState.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
-      <div v-if="rsifade" class="pstats">
-        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ rsifade.stats.closed }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="rsifade.stats.win_rate >= 50 ? 'long' : 'short'">{{ rsifade.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="rsifade.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(rsifade.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="rsifade.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(rsifade.stats.total_pnl) }}</div></div>
-      </div>
-      <h3 class="psub" v-if="rsifade && rsifade.open.length">進行中 ({{ rsifade.open.length }})</h3>
-      <table v-if="rsifade && rsifade.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="t in rsifade.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r long">{{ fmtPrice(t.tp) }}</td>
-            <td class="r short">{{ fmtPrice(t.sl) }}</td>
-            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <h3 class="psub" v-if="rsifade && rsifade.closed.length">已結束 ({{ rsifade.closed.length }})</h3>
-      <table v-if="rsifade && rsifade.closed.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="(t, i) in rsifade.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="rsifade && !rsifade.open.length && !rsifade.closed.length" class="loading">尚無訊號——需等 30m 收盤觸發 RSI(3)&gt;90 空頭反彈(首次啟動需抓取歷史 K 線)。</p>
-      <p v-else-if="!rsifade" class="loading">載入中…</p>
-    </section>
 
-    <!-- 布林重回 · 1h (admin only) -->
-    <section v-else-if="mainTab === 'bollfade' && can('admin')">
-      <div class="mk-head">
-        <h2>布林重回 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:前一根收盤在布林(20, 2σ)通道<b>外</b>、本根收<b>回</b>通道內(過度延伸失敗),且方向與 EMA200 同側(空單需價在 EMA200 下方、多單反之)→ 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>止盈</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="bollfade">進行中 {{ bollfade.open.length }} · 已結束 {{ bollfade.stats.closed }}</span><button class="clearbtn" @click="clearStrat('bollfade', loadBollfade)">清空</button></span>
+      <div v-if="microState" class="pstats">
+        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="microState.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.total_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="microState.stats.win_rate >= 50 ? 'long' : 'short'">{{ microState.stats.win_rate }}%</div></div>
+        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="microState.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">獲利因子<span class="help" tabindex="0">?<span class="help-pop">總獲利 ÷ 總虧損。&gt;1 代表整體賺錢,&gt;1.5 算不錯。跟勝率互補:高勝率但低獲利因子代表賺小賠大。</span></span></div><div class="stat-v" :class="microState.stats.profit_factor >= 1 ? 'long' : 'short'">{{ microState.stats.profit_factor ? microState.stats.profit_factor.toFixed(2) : '—' }}</div></div>
       </div>
-      <div v-if="bollfade" class="pstats">
-        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ bollfade.stats.closed }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bollfade.stats.win_rate >= 50 ? 'long' : 'short'">{{ bollfade.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="bollfade.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bollfade.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="bollfade.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bollfade.stats.total_pnl) }}</div></div>
-      </div>
-      <h3 class="psub" v-if="bollfade && bollfade.open.length">進行中 ({{ bollfade.open.length }})</h3>
-      <table v-if="bollfade && bollfade.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="t in bollfade.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r long">{{ fmtPrice(t.tp) }}</td>
-            <td class="r short">{{ fmtPrice(t.sl) }}</td>
-            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <h3 class="psub" v-if="bollfade && bollfade.closed.length">已結束 ({{ bollfade.closed.length }})</h3>
-      <table v-if="bollfade && bollfade.closed.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="(t, i) in bollfade.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="bollfade && !bollfade.open.length && !bollfade.closed.length" class="loading">尚無訊號——需等 1H 收盤出現布林通道重回 + 盈虧比達標(首次啟動需抓取歷史 K 線)。</p>
-      <p v-else-if="!bollfade" class="loading">載入中…</p>
-    </section>
 
-    <!-- 乖離回歸 · 1h (admin only) -->
-    <section v-else-if="mainTab === 'meanrev' && can('admin')">
-      <div class="mk-head">
-        <h2>乖離回歸 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:收盤價偏離 EMA20 超過 2.0×ATR,且與 EMA200 趨勢同側(價在 EMA200 上方只接多、下方只接空)→ 朝 EMA20 回歸。<br><b>止損</b> 3.0×ATR,<b>止盈</b>=EMA20。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="meanrev">進行中 {{ meanrev.open.length }} · 已結束 {{ meanrev.stats.closed }}</span><button class="clearbtn" @click="clearStrat('meanrev', loadMeanrev)">清空</button></span>
+      <div v-if="microState && microState.stats.multi_tp && microState.stats.closed" class="tpfunnel">
+        <div class="tpf-title">止盈達成漏斗 · 共 {{ microState.stats.closed }} 筆已結束</div>
+        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp1, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp1 }} 筆 · <b>{{ pctOf(microState.stats.tp1, microState.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp2, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp2 }} 筆 · <b>{{ pctOf(microState.stats.tp2, microState.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp3, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp3 }} 筆 · <b>{{ pctOf(microState.stats.tp3, microState.stats.closed) }}%</b></span></div>
       </div>
-      <div v-if="meanrev" class="pstats">
-        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ meanrev.stats.closed }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="meanrev.stats.win_rate >= 50 ? 'long' : 'short'">{{ meanrev.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="meanrev.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(meanrev.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="meanrev.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(meanrev.stats.total_pnl) }}</div></div>
-      </div>
-      <h3 class="psub" v-if="meanrev && meanrev.open.length">進行中 ({{ meanrev.open.length }})</h3>
-      <table v-if="meanrev && meanrev.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
+
+      <h3 class="psub" v-if="microState && microState.open.length">進行中 ({{ microState.open.length }})</h3>
+      <table v-if="microState && microState.open.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th></tr></thead>
         <tbody>
-          <tr v-for="t in meanrev.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
+          <tr v-for="t in microState.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r long">{{ fmtPrice(t.tp) }}</td>
-            <td class="r short">{{ fmtPrice(t.sl) }}</td>
+            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ('止盈 ' + fmtPrice(t.tp))">
+              <template v-if="t.tp1">
+                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2</span><span class="tsmall"> 剩 {{ Math.round((1 - t.filled) * 100) }}%</span>
+              </template>
+              <span v-else class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
+            </td>
+            <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           </tr>
         </tbody>
       </table>
-      <h3 class="psub" v-if="meanrev && meanrev.closed.length">已結束 ({{ meanrev.closed.length }})</h3>
-      <table v-if="meanrev && meanrev.closed.length" class="grid">
+
+      <h3 class="psub" v-if="microState && microState.closed.length">已結束 ({{ microState.closed.length }})</h3>
+      <table v-if="microState && microState.closed.length" class="grid">
         <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
         <tbody>
-          <tr v-for="(t, i) in meanrev.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
+          <tr v-for="(t, i) in microState.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
+            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
           </tr>
         </tbody>
       </table>
-      <p v-if="meanrev && !meanrev.open.length && !meanrev.closed.length" class="loading">尚無訊號——需等 1H 收盤出現乖離 2×ATR 訊號(首次啟動需抓取歷史 K 線)。</p>
-      <p v-else-if="!meanrev" class="loading">載入中…</p>
+
+      <p v-if="microState && !microState.open.length && !microState.closed.length" class="loading">尚無訊號——需等收盤觸發進場訊號(首次啟動需抓取歷史 K 線)。</p>
+      <p v-else-if="!microState" class="loading">載入中…</p>
     </section>
 
     <!-- 後台管理 (admin only) -->
@@ -1975,6 +1989,34 @@ watch(role, () => {
           <button class="loginbtn" @click="saveSocial">儲存社群</button>
         </div>
         <p class="loginhint">社群會顯示在頁尾(logo 引導跳轉);QR 懸浮在首頁右下角。</p>
+      </section>
+
+      <!-- 登入公告彈窗 -->
+      <section class="card adminbox">
+        <h3 class="psub">登入公告彈窗 <button class="minibtn" @click="loadNoticeEditor">載入目前</button></h3>
+        <div class="cfg-row">
+          <span class="cfg-k">標題</span>
+          <input class="authin" v-model="noticeForm.title" maxlength="60" placeholder="例:系統更新公告(選填)" />
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">內容</span>
+          <textarea class="authin nb-edit" v-model="noticeForm.text" maxlength="2000" placeholder="輸入公告內容,例如更新事項、維護時間、活動通知…(支援換行)"></textarea>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-k">顯示到</span>
+          <input class="authin" type="datetime-local" v-model="noticeForm.until" />
+          <span class="loginhint" style="margin:0">留空=不設期限;到期後自動不再顯示</span>
+        </div>
+        <div class="ae-addrow">
+          <button class="loginbtn" @click="saveNotice">儲存並發佈</button>
+          <button class="delbtn" @click="clearNotice">停用</button>
+        </div>
+        <p class="loginhint">
+          會員登入時彈出;每位用戶可勾「不再顯示此則」關閉。
+          <span v-if="notice && notice.active">目前<b class="long">顯示中</b><span v-if="notice.expiry"> · 到 {{ fundClock(notice.expiry) }}</span>。</span>
+          <span v-else>目前<b class="short">未啟用</b>。</span>
+          修改內容後會重新對所有人顯示一次。
+        </p>
       </section>
 
       <!-- 即時推播 (Feature: broadcast) -->
@@ -2163,11 +2205,12 @@ watch(role, () => {
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge' || mainTab === 'emaonly'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gamblehedge' ? '超新星·保本(管理)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamblehedge'">管理員 A/B 測試:與超新星相同進場,但獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變,回落至保本即「套保出場」。⚠️ 回測顯示此保本會剪掉肥尾止盈、期望值較差,僅供觀察。</template><template v-else-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
+        <button v-if="can('admin')" class="clearbtn" @click="clearStrat(curPaperBook, loadPaper, true)">清已結束</button>
       </div>
 
       <div v-if="mainTab === 'emaonly' && book && book.market && book.market.length" class="mkt-bias">
@@ -2184,15 +2227,21 @@ watch(role, () => {
         <span class="tf-note">統計依所選範圍重算</span>
       </div>
       <div v-if="bookF" class="pstats">
-        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ bookF.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">{{ bookF.stats.multi_tp ? '獲利因子' : '已結束' }}</div><div v-if="bookF.stats.multi_tp" class="stat-v" :class="bookF.stats.profit_factor >= 1 ? 'long' : 'short'">{{ bookF.stats.profit_factor ? bookF.stats.profit_factor.toFixed(2) : '—' }}</div><div v-else class="stat-v">{{ bookF.stats.closed }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bookF.stats.win_rate >= 50 ? 'long' : 'short'">{{ bookF.stats.win_rate }}%</div></div>
         <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="bookF.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.avg_pnl) }}</div></div>
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="bookF.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.total_pnl) }}</div></div>
       </div>
+      <div v-if="bookF && bookF.stats.multi_tp && bookF.stats.closed" class="tpfunnel">
+        <div class="tpf-title">止盈達成漏斗 · 共 {{ bookF.stats.closed }} 筆已結束</div>
+        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp1, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp1 }} 筆 · <b>{{ pctOf(bookF.stats.tp1, bookF.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp2, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp2 }} 筆 · <b>{{ pctOf(bookF.stats.tp2, bookF.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp3, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp3 }} 筆 · <b>{{ pctOf(bookF.stats.tp3, bookF.stats.closed) }}%</b></span></div>
+      </div>
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="mainTab === 'gamblehedge'" class="r" title="獲利達止盈 1/3 時把止損上移至保本(進場+0.05%)、TP 不變並推播管理員;顯示保本停損價,回落至此為套保出場">套保</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="mainTab === 'gamble'">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -2200,11 +2249,14 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td v-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gamblehedge'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
-            <td v-if="mainTab === 'gamblehedge'" class="r"><span v-if="t.hedged" class="hedgetag">🛡 {{ fmtPrice(t.hedge_price) }}</span><span v-else class="tsmall">—</span></td>
+            <td v-if="mainTab === 'paper' || mainTab === 'gamble'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
+            <td v-if="mainTab === 'gamble'" class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ''">
+              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2</span><span class="tsmall"> 剩{{ Math.round((1 - t.filled) * 100) }}%</span></template>
+              <span v-else class="tsmall">單一</span>
+            </td>
             <td class="r tsmall">{{ fmtFund(t.cur_funding) }}</td>
             <td class="r long">{{ fmtPrice(t.tp) }} <small>({{ fmtPct(pnlAt(t, t.tp)) }})</small></td>
-            <td class="r short">{{ fmtPrice(t.sl) }} <small>({{ fmtPct(pnlAt(t, t.sl)) }})</small></td>
+            <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
             <td v-if="mainTab === 'emaonly' && can('admin')" class="r"><button class="exitbtn" @click.stop="manualExit(t)">手動出場</button></td>
@@ -2222,7 +2274,7 @@ watch(role, () => {
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome">{{ t.outcome === 'tp' ? '止盈 TP' : t.outcome === 'sl' ? '止損 SL' : t.outcome === 'trail' ? '移動止損' : t.outcome === 'reversed' ? '反向出場' : t.outcome === 'hedge' ? '套保出場' : '逾時' }}</span></td>
+            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
@@ -2818,6 +2870,17 @@ body::before {
 .mk-actions { display: flex; align-items: center; gap: 10px; }
 .clearbtn { background: transparent; border: 1px solid #4a2c2c; color: #c56a6a; font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: .15s; }
 .clearbtn:hover { border-color: #e05555; color: #e05555; background: rgba(224, 85, 85, 0.08); }
+.tpfunnel { background: #14161c; border-radius: 10px; padding: 12px 14px 13px; margin: 12px 0 4px; }
+.tpf-title { font-size: 12px; color: #8b909a; margin-bottom: 10px; }
+.tpf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tpf-row:last-child { margin-bottom: 0; }
+.tpf-lbl { width: 62px; font-size: 12px; color: #c9cdd4; }
+.tpf-bar { flex: 1; height: 18px; background: #1c1f27; border-radius: 5px; overflow: hidden; }
+.tpf-bar i { display: block; height: 100%; background: #2e9d68; border-radius: 5px; }
+.tpf-val { width: 112px; text-align: right; font-size: 12px; color: #e8e9ec; }
+.tpf-val b { color: #4ec77e; }
+.tppill { display: inline-block; font-size: 10px; color: #6b7078; border: 1px solid #2a2e37; border-radius: 4px; padding: 1px 5px; margin-right: 3px; }
+.tppill.hit { background: #183a2a; color: #5fd39a; border-color: #1f5238; }
 .sorttabs { display: flex; gap: 8px; margin-bottom: 8px; }
 .sorttabs button { background: #16181d; border: 1px solid #23262d; color: #b8bcc4; padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .sorttabs button.active { background: #2a2410; border-color: #e0b341; color: #f4d774; }
@@ -3207,6 +3270,12 @@ footer { padding: 18px 0 30px; text-align: center; }
   padding: 22px 20px; display: flex; flex-direction: column; gap: 12px;
   box-shadow: 0 20px 60px rgba(0,0,0,.55); }
 .welcomebox h3 { margin: 0; color: #e8b84b; text-align: center; font-size: 17px; }
+.noticebox { width: min(440px, 92vw); max-height: 86vh; overflow-y: auto; background: #14161c; border: 1px solid #4a412a; border-radius: 16px; padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+.nb-title { margin: 0; color: #e8b84b; text-align: center; font-size: 17px; }
+.nb-text { background: #0f1116; border: 1px solid #2a2e37; border-radius: 10px; padding: 12px 14px; font-size: 14px; color: #cdd0d6; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+.nb-dont { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #8b909a; cursor: pointer; }
+.nb-dont input { width: 15px; height: 15px; }
+.nb-edit { min-height: 120px; resize: vertical; line-height: 1.6; padding: 8px 10px; font-family: inherit; }
 .wc-sec { background: #0f1116; border: 1px solid #2a2e37; border-radius: 10px; padding: 10px 12px; }
 .wc-title { color: #e8b84b; font-weight: 800; font-size: 14px; margin-bottom: 6px; }
 .wc-sec p { margin: 3px 0; font-size: 13px; color: #cdd0d6; line-height: 1.7; }

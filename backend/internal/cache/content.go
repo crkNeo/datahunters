@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,6 +67,45 @@ func (s *Store) SetConfig(k, v string) {
 	if s.db != nil {
 		s.db.setConfig(k, v)
 	}
+}
+
+// ---- login notice (公告彈窗): a single global announcement shown to members on
+// login, until a set expiry time. Stored in site_config. ----
+
+// NoticeData is the login-notice payload.
+type NoticeData struct {
+	Title  string `json:"title"`
+	Text   string `json:"text"`
+	Expiry int64  `json:"expiry"` // unix ms; 0 = no expiry
+	Ver    int64  `json:"ver"`    // last-updated ms (client dismiss key)
+	Active bool   `json:"active"` // has text and not past expiry
+}
+
+// Notice returns the current login notice (Active reflects text + expiry).
+func (s *Store) Notice() NoticeData {
+	if s.db == nil {
+		return NoticeData{}
+	}
+	all := s.db.allConfig()
+	text := all["notice_text"]
+	exp, _ := strconv.ParseInt(all["notice_expiry"], 10, 64)
+	ver, _ := strconv.ParseInt(all["notice_ver"], 10, 64)
+	return NoticeData{
+		Title: all["notice_title"], Text: text, Expiry: exp, Ver: ver,
+		Active: text != "" && (exp == 0 || time.Now().UnixMilli() < exp),
+	}
+}
+
+// SetNotice upserts the login notice (admin). An empty text disables it. Each save
+// bumps notice_ver so a previously-dismissed client shows the new content.
+func (s *Store) SetNotice(title, text string, expiry int64) {
+	if s.db == nil {
+		return
+	}
+	s.db.setConfig("notice_title", title)
+	s.db.setConfig("notice_text", text)
+	s.db.setConfig("notice_expiry", strconv.FormatInt(expiry, 10))
+	s.db.setConfig("notice_ver", strconv.FormatInt(time.Now().UnixMilli(), 10))
 }
 
 func (db *DB) getConfig(k string) string {

@@ -58,8 +58,7 @@ type Store struct {
 
 	paperMu          sync.Mutex // guards the paper-trading books
 	paperMain        *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble      *paperBook // loose: low bar, chases already-elevated coins
-	paperGambleHedge *paperBook // admin-only A/B: gamble + break-even hedge (推播僅管理員)
+	paperGamble      *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
 	paperEMA         *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
@@ -160,8 +159,7 @@ func NewStore(coins []string) *Store {
 		ex:                exchange.NewClient(),
 		coins:             coins,
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),         // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),      // gamble, fixed TP/SL (門檻 50:實盤數據顯示 45–49 桶淨虧)
-		paperGambleHedge:  newBook("gamblehedge", 50, false, 1*time.Hour, 0), // admin A/B: gamble + 保本停損
+		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
 		paperEMA:          newBook("emaonly", 0, false, 0, 0),                // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
@@ -193,12 +191,14 @@ func NewStore(coins []string) *Store {
 	s.trader = newBitunixTrader() // nil unless BITUNIX_AUTOTRADE=1 + keys set
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
-	s.paperGambleHedge.adminOnly = true // admin-only tab + admin-only push
-	s.paperGambleHedge.maxSLPct = 12    // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
+	// 超新星: 分批止盈 (TP1/TP2 = 進場→TP3 的 40%/70%,因 radar 目標僅 ~1.24R,裝不下 1R/1.5R)
+	// + FILTER@12%(取代已退場的保本版)
+	s.paperGamble.plan = tpMomentum
+	s.paperGamble.maxSLPct = 12 // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
 	// admin mean-reversion strategies (microrev.go)
-	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, signal: rsiFadeSignal}
-	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, signal: bollFadeSignal}
-	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, signal: meanRevSignal}
+	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, signal: rsiFadeSignal}
+	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: bollFadeSignal}
+	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: meanRevSignal}
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -211,17 +211,16 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
-		s.paperGambleHedge.trades = db.loadTrades("gamblehedge")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.poolTrades = db.loadTrades("pool")
 		s.convTrades = db.loadTrades("conv")
 		s.rsiFadeBook.trades = db.loadTrades("rsifade")
 		s.bollFadeBook.trades = db.loadTrades("bollfade")
 		s.meanRevBook.trades = db.loadTrades("meanrev")
-		log.Printf("mysql loaded: %d score events, main=%d gamble=%d gamblehedge=%d emaonly=%d trades",
-			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
-			len(s.paperGambleHedge.trades), len(s.paperEMA.trades))
+		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
+			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}
+	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
 	return s
 }
 
@@ -373,7 +372,9 @@ func markLiveOpen(open []*PaperTrade, px map[string]float64) {
 			continue
 		}
 		tr.Cur = roundPx(p)
-		tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, p))
+		// blend already-realized tranches (分批止盈) with the open remainder marked to
+		// live. Filled=0/Realized=0 for single-TP trades → plain pnl(entry, price).
+		tr.PnLPct = round2(tr.Realized + (1-tr.Filled)*pnl(tr.Dir, tr.Entry, p))
 	}
 }
 
