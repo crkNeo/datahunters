@@ -1742,19 +1742,25 @@ watch(role, () => {
     <!-- 動態ATR 4H 均線收斂 (admin only) -->
     <section v-else-if="mainTab === 'conv' && can('admin')">
       <div class="mk-head">
-        <h2>動態ATR 均線收斂 · 4H<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b><br>4H 價格在 EMA200 同側 + 連續 4 根橫盤(區間 ≤ 3×ATR)+ 該 4 根靠 EMA200 的極值離 EMA200 ≤ 1.5×ATR(動態空間,取代固定 3%)。<br><b>止損</b>:4 根盤整區極值 ±0.3×ATR(結構止損+掃針緩衝)。<br><b>止盈</b>:成交量輪廓(VRVP 近似)——進場上方(多)/下方(空)最近的高量節點(POC/大量區)。<br><b>濾網</b>:盈虧比(TP距/SL距)≥ 1.5 才開倉。<br><br>多空雙向、每根 4H 收盤評估。⚠️ POC 為 K 線近似,管理員專屬模擬單,非投資建議。</span></span></h2>
+        <h2>動態ATR 均線收斂 · 4H<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b><br>4H 價格在 EMA200 同側 + 連續 4 根橫盤(區間 ≤ 3×ATR)+ 該 4 根靠 EMA200 的極值離 EMA200 ≤ 1.5×ATR(動態空間,取代固定 3%)。<br><b>止損</b>:4 根盤整區極值 ±0.3×ATR(結構止損+掃針緩衝)。<br><b>最終止盈 TP3</b>:成交量輪廓(VRVP 近似)——進場上方(多)/下方(空)最近的高量節點(POC/大量區)。<br><b>濾網</b>:盈虧比(TP距/SL距)≥ 1.5 才開倉。<br><b>分批止盈</b>:TP1/TP2 位在進場→TP3 的 40%/70%,分批 40/30/30,TP1 後止損移保本、TP2 後移 TP1(即時價執行)。<br><br>多空雙向、進場每根 4H 收盤評估。⚠️ POC 為 K 線近似,管理員專屬模擬單,非投資建議。</span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
       <div v-if="conv" class="pstats">
-        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ conv.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">獲利因子</div><div class="stat-v" :class="conv.stats.profit_factor >= 1 ? 'long' : 'short'">{{ conv.stats.profit_factor ? conv.stats.profit_factor.toFixed(2) : '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="conv.stats.win_rate >= 50 ? 'long' : 'short'">{{ conv.stats.win_rate }}%</div></div>
         <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="conv.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.avg_pnl) }}</div></div>
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="conv.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.total_pnl) }}</div></div>
       </div>
+      <div v-if="conv && conv.stats.closed" class="tpfunnel">
+        <div class="tpf-title">止盈達成漏斗 · 共 {{ conv.stats.closed }} 筆已結束</div>
+        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp1, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp1 }} 筆 · <b>{{ pctOf(conv.stats.tp1, conv.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp2, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp2 }} 筆 · <b>{{ pctOf(conv.stats.tp2, conv.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp3, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp3 }} 筆 · <b>{{ pctOf(conv.stats.tp3, conv.stats.closed) }}%</b></span></div>
+      </div>
 
       <h3 class="psub" v-if="conv && conv.open.length">進行中 ({{ conv.open.length }})</h3>
       <table v-if="conv && conv.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th></tr></thead>
         <tbody>
           <tr v-for="t in conv.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1762,8 +1768,11 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r long">{{ fmtPrice(t.tp) }}</td>
-            <td class="r short">{{ fmtPrice(t.sl) }}</td>
+            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ('止盈 ' + fmtPrice(t.tp))">
+              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span></template>
+              <span v-else class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
+            </td>
+            <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           </tr>
         </tbody>
@@ -1778,7 +1787,7 @@ watch(role, () => {
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
+            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
           </tr>
@@ -1822,7 +1831,7 @@ watch(role, () => {
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ('止盈 ' + fmtPrice(t.tp))">
               <template v-if="t.tp1">
-                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2</span><span class="tsmall"> 剩 {{ Math.round((1 - t.filled) * 100) }}%</span>
+                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
               </template>
               <span v-else class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
             </td>
@@ -2207,7 +2216,7 @@ watch(role, () => {
 
     <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
         <button v-if="can('admin')" class="clearbtn" @click="clearStrat(curPaperBook, loadPaper, true)">清已結束</button>
@@ -2241,7 +2250,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="mainTab === 'gamble'">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -2250,8 +2259,8 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td v-if="mainTab === 'paper' || mainTab === 'gamble'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
-            <td v-if="mainTab === 'gamble'" class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ''">
-              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2</span><span class="tsmall"> 剩{{ Math.round((1 - t.filled) * 100) }}%</span></template>
+            <td v-if="bookF && bookF.stats.multi_tp" class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ''">
+              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩{{ Math.round((1 - (t.filled || 0)) * 100) }}%</span></template>
               <span v-else class="tsmall">單一</span>
             </td>
             <td class="r tsmall">{{ fmtFund(t.cur_funding) }}</td>

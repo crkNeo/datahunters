@@ -191,10 +191,11 @@ func NewStore(coins []string) *Store {
 	s.trader = newBitunixTrader() // nil unless BITUNIX_AUTOTRADE=1 + keys set
 	// NY session (12-18 UTC) now allowed for all books (user observed losses
 	// weren't NY-concentrated; skipNY left at its default false).
-	// 超新星: 分批止盈 (TP1/TP2 = 進場→TP3 的 40%/70%,因 radar 目標僅 ~1.24R,裝不下 1R/1.5R)
-	// + FILTER@12%(取代已退場的保本版)
+	// 分批止盈 (TP1/TP2 = 進場→TP3 的 40%/70%) 套用到 radar/EMA 書。gamble 另加 FILTER@12%。
 	s.paperGamble.plan = tpMomentum
 	s.paperGamble.maxSLPct = 12 // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
+	s.paperMain.plan = tpMomentum
+	s.paperEMA.plan = tpMomentum
 	// admin mean-reversion strategies (microrev.go)
 	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, signal: rsiFadeSignal}
 	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: bollFadeSignal}

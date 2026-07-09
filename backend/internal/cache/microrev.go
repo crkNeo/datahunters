@@ -354,6 +354,9 @@ func (s *Store) microMarkTick(b *microBook) {
 		if closed || tr.Legs != before {
 			dirty = append(dirty, tr) // persist on any leg change or final close
 		}
+		if tr.Legs > before { // a TP (TP1/TP2/TP3) just filled → 軟體通知 (admin book)
+			s.notifyTPHit(b.name, tr, true, tr.Legs)
+		}
 	}
 	b.mu.Unlock()
 	if s.db != nil {
@@ -510,6 +513,9 @@ func (s *Store) retrofitMultiTP() {
 	fill("gamble", s.paperGamble.plan, s.paperGamble.trades)
 	fill("emaonly", s.paperEMA.plan, s.paperEMA.trades)
 	s.paperMu.Unlock()
+	s.convMu.Lock()
+	fill("conv", tpMomentum, s.convTrades)
+	s.convMu.Unlock()
 	if s.db != nil {
 		for _, d := range dirty {
 			s.db.upsertTrade(d.book, d.tr)

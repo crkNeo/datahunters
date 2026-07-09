@@ -201,19 +201,33 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 	}
 	var dirty *PaperTrade
 	if open != nil {
-		open.Cur = roundPx(last.Close)
-		open.PnLPct = round2(pnl(open.Dir, open.Entry, last.Close))
-		exit, outcome, px := convExit(last, open)
+		// bar-close backstop (partial TP1/TP2 booked on the live ConvMarkTick).
+		// Full-close only: final target / current stop / expiry.
+		exit, outcome, px := false, "", 0.0
+		if open.Dir == "long" {
+			if last.Low <= open.SL {
+				exit, outcome, px = true, slOutcome(open), open.SL
+			} else if last.High >= open.TP {
+				exit, outcome, px = true, "tp3", open.TP
+			}
+		} else {
+			if last.High >= open.SL {
+				exit, outcome, px = true, slOutcome(open), open.SL
+			} else if last.Low <= open.TP {
+				exit, outcome, px = true, "tp3", open.TP
+			}
+		}
 		if !exit && (last.Ts-open.OpenTime.UnixMilli())/conv4hMs >= convExpiryBars {
 			exit, outcome, px = true, "expired", last.Close
 		}
 		if exit {
-			open.Status = "closed"
-			open.Outcome = outcome
-			open.Cur = roundPx(px)
-			open.PnLPct = round2(pnl(open.Dir, open.Entry, px))
-			t := now
-			open.CloseTime = &t
+			if outcome == "tp3" {
+				open.Legs = 3
+			}
+			closeTrade(open, px, outcome, now) // blends any realized tranches
+		} else {
+			open.Cur = roundPx(last.Close)
+			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
 	} else if dir, entry, sl, tp, ok := convSignal(cs); ok {
@@ -228,6 +242,7 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 			Status:   "open",
 			OpenTime: time.UnixMilli(last.Ts).UTC(),
 		}
+		setupTP(tr, tpMomentum) // 分批止盈: TP1/TP2 at 40%/70% of entry→POC target
 		s.convTrades = append(s.convTrades, tr)
 		dirty = tr
 		s.convTrim()
@@ -238,30 +253,9 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 	}
 }
 
-// convExitLive checks the LIVE price against the fixed TP/SL so 止盈止損 trigger
-// intrabar instead of waiting for the 4H bar close. Settles at the level hit.
-func convExitLive(tr *PaperTrade, p float64) (bool, string, float64) {
-	if tr.Dir == "long" {
-		if p <= tr.SL {
-			return true, "sl", tr.SL
-		}
-		if p >= tr.TP {
-			return true, "tp", tr.TP
-		}
-	} else {
-		if p >= tr.SL {
-			return true, "sl", tr.SL
-		}
-		if p <= tr.TP {
-			return true, "tp", tr.TP
-		}
-	}
-	return false, "", 0
-}
-
-// ConvMarkTick marks open positions to the live WS price and exits any that hit
-// TP/SL immediately. Entries are still evaluated per closed 4H bar in ConvTick;
-// the closed-bar convExit in runConv remains a backstop for when the feed is down.
+// ConvMarkTick marks open positions to the live WS price and books partial TPs /
+// exits (分批止盈) intrabar. Entries are still evaluated per closed 4H bar in
+// ConvTick; the closed-bar backstop in runConv covers a feed outage.
 func (s *Store) ConvMarkTick() {
 	px := s.livePrices()
 	if len(px) == 0 {
@@ -278,16 +272,12 @@ func (s *Store) ConvMarkTick() {
 		if p <= 0 {
 			continue
 		}
-		tr.Cur = roundPx(p)
-		tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, p))
-		if exit, outcome, lvl := convExitLive(tr, p); exit {
-			tr.Status = "closed"
-			tr.Outcome = outcome
-			tr.Cur = roundPx(lvl)
-			tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, lvl))
-			t := now
-			tr.CloseTime = &t
-			dirty = append(dirty, tr)
+		before := tr.Legs
+		if closed := stepTP(tr, p, tpMomentum, now); closed || tr.Legs != before {
+			dirty = append(dirty, tr) // persist on any leg change or final close
+		}
+		if tr.Legs > before { // a TP just filled → 軟體通知 (admin book)
+			s.notifyTPHit("conv", tr, true, tr.Legs)
 		}
 	}
 	s.convMu.Unlock()
@@ -296,26 +286,6 @@ func (s *Store) ConvMarkTick() {
 			s.db.upsertTrade("conv", tr)
 		}
 	}
-}
-
-// convExit checks the just-closed bar against the fixed TP/SL (same-bar both → SL).
-func convExit(bar exchange.Candle, tr *PaperTrade) (bool, string, float64) {
-	if tr.Dir == "long" {
-		if bar.Low <= tr.SL {
-			return true, "sl", tr.SL
-		}
-		if bar.High >= tr.TP {
-			return true, "tp", tr.TP
-		}
-	} else {
-		if bar.High >= tr.SL {
-			return true, "sl", tr.SL
-		}
-		if bar.Low <= tr.TP {
-			return true, "tp", tr.TP
-		}
-	}
-	return false, "", 0
 }
 
 func (s *Store) convTrim() {
@@ -340,7 +310,8 @@ func (s *Store) ConvState() PaperState {
 	s.convMu.Lock()
 	defer s.convMu.Unlock()
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
-	var sum float64
+	st.Stats.MultiTP = true
+	var sum, grossWin, grossLoss float64
 	for _, tr := range s.convTrades {
 		if tr.Status == "open" {
 			st.Open = append(st.Open, tr)
@@ -354,6 +325,7 @@ func (s *Store) ConvState() PaperState {
 		} else {
 			st.Stats.Losses++
 		}
+		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
 	}
 	markLiveOpen(st.Open, px) // display-only: live 現價 between 4H bars
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
@@ -364,6 +336,11 @@ func (s *Store) ConvState() PaperState {
 		st.Stats.WinRate = round2(float64(st.Stats.Wins) / float64(st.Stats.Closed) * 100)
 		st.Stats.AvgPnl = round2(sum / float64(st.Stats.Closed))
 		st.Stats.TotalPnl = round2(sum)
+		if grossLoss > 0 {
+			st.Stats.ProfitFactor = round2(grossWin / grossLoss)
+		} else if grossWin > 0 {
+			st.Stats.ProfitFactor = 99.99
+		}
 	}
 	return st
 }

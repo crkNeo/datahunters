@@ -260,7 +260,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 		if b.plan != nil {
 			// 分批止盈: books partial TPs, ratchets the stop (TP1→保本, TP2→TP1), and
 			// closes at TP3 / the (trailed) stop — all on the live price.
+			before := tr.Legs
 			stepTP(tr, p, b.plan, now)
+			if tr.Status == "open" && tr.Legs > before { // partial TP1/TP2 filled (TP3 close → close alert covers it)
+				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
+			}
 		} else if b.trail > 0 {
 			// self-heal R/Peak after a restart (not persisted): R from TP/entry,
 			// Peak from entry (tr.SL — the live stop — IS persisted, so protection holds)
@@ -410,15 +414,54 @@ func bookLabel(name string) string {
 		return "銀河"
 	case "trail":
 		return "移動止損"
+	case "conv":
+		return "均線收斂"
+	case "rsifade":
+		return "逆勢超買空"
+	case "bollfade":
+		return "布林重回"
+	case "meanrev":
+		return "乖離回歸"
+	case "pool":
+		return "掃描池"
 	}
 	return "星軌"
+}
+
+// notifyTPHit sends a Web Push (軟體, no Telegram) when a 分批止盈 leg fills
+// (TP1/TP2/TP3). Public books push to everyone; admin books to admins only. The
+// message is built synchronously (reads tr) and sent async so it never blocks the tick.
+func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int) {
+	if s.pushMgr == nil {
+		return
+	}
+	lvl, stop := tr.TP, ""
+	switch leg {
+	case 1:
+		lvl, stop = tr.TP1, " · 止損移保本"
+	case 2:
+		lvl, stop = tr.TP2, " · 止損移 TP1"
+	}
+	title := fmt.Sprintf("🎯 %s TP%d 達成", bookLabel(name), leg)
+	body := fmt.Sprintf("%s %s @ $%s · 已平 %.0f%%%s", tr.Coin, dirCN(tr.Dir), fmtPx(lvl), tr.Filled*100, stop)
+	url := "/?tab=" + bookTab(name)
+	if adminOnly {
+		if s.db == nil {
+			return
+		}
+		if subs := s.db.adminSubs(); len(subs) > 0 {
+			go s.pushMgr.SendTo(subs, title, body, url)
+		}
+		return
+	}
+	go s.pushMgr.Send(title, body, url)
 }
 
 // bookTab maps a book name to the frontend mainTab, so a push notification can
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly":
+	case "gamble", "emaonly", "conv", "pool", "rsifade", "bollfade", "meanrev":
 		return name
 	}
 	return "paper" // main

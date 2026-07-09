@@ -264,18 +264,26 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 		}
 		tr.Cur = p
 		tr.PnLPct = pnl(tr.Dir, tr.Entry, p)
-		switch tr.Dir {
-		case "long":
-			if p >= tr.TP {
-				closeTrade(tr, tr.TP, "tp", now)
-			} else if p <= tr.SL {
-				closeTrade(tr, tr.SL, "sl", now)
+		if b.plan != nil {
+			before := tr.Legs
+			stepTP(tr, p, b.plan, now) // 分批止盈: partial TPs + trailing stop on live price
+			if tr.Status == "open" && tr.Legs > before {
+				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
 			}
-		case "short":
-			if p <= tr.TP {
-				closeTrade(tr, tr.TP, "tp", now)
-			} else if p >= tr.SL {
-				closeTrade(tr, tr.SL, "sl", now)
+		} else {
+			switch tr.Dir {
+			case "long":
+				if p >= tr.TP {
+					closeTrade(tr, tr.TP, "tp", now)
+				} else if p <= tr.SL {
+					closeTrade(tr, tr.SL, "sl", now)
+				}
+			case "short":
+				if p <= tr.TP {
+					closeTrade(tr, tr.TP, "tp", now)
+				} else if p >= tr.SL {
+					closeTrade(tr, tr.SL, "sl", now)
+				}
 			}
 		}
 		// no time expiry: EMA-strategy trades stay open until TP or SL.
@@ -344,6 +352,7 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),
 			Cur: roundPx(p), Status: "open", OpenTime: now,
 		}
+		setupTP(tr, b.plan) // 分批止盈: TP1/TP2 at entry (no-op if plan == nil)
 		b.trades = append(b.trades, tr)
 		s.notifyTradeOpen(b, tr)
 		active[coin] = true
