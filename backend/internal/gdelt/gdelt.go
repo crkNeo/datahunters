@@ -7,6 +7,7 @@ package gdelt
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,28 +19,34 @@ const docURL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 // query is the OR-of-topics search (English sources only). Keep it moderate so a
 // single request stays fast and inside GDELT's rate limit.
-const query = `(Trump OR "Federal Reserve" OR tariff OR sanctions OR war OR bitcoin OR ethereum OR "crypto") sourcelang:english`
+// GDELT throttles "larger" queries hard (see its 429), so keep this small: only
+// single-word terms, no quoted phrases.
+const query = `(bitcoin OR ethereum OR crypto OR Trump OR tariff OR sanctions OR war OR inflation) sourcelang:english`
 
-// Article is one GDELT headline.
+// Article is one headline (from GDELT or an RSS feed).
 type Article struct {
 	Title         string
 	URL           string
 	Domain        string
-	SeenDate      string // GDELT "YYYYMMDDTHHMMSSZ"
+	SeenDate      string // GDELT "YYYYMMDDTHHMMSSZ" or RSS RFC1123
 	SourceCountry string
+	Zh            bool // title is already (Traditional) Chinese → no translation needed
 }
 
 // Watcher fetches + translates GDELT headlines.
 type Watcher struct{ http *http.Client }
 
-func NewWatcher() *Watcher { return &Watcher{http: &http.Client{Timeout: 15 * time.Second}} }
+// GDELT's DOC API is often slow to respond (heavy backend + rate limiting), so
+// give it a generous timeout — a short cap caused "awaiting headers" timeouts and
+// an empty feed.
+func NewWatcher() *Watcher { return &Watcher{http: &http.Client{Timeout: 45 * time.Second}} }
 
 // Fetch returns recent matching headlines (newest first). Best-effort: on a
 // non-JSON body (GDELT rate-limit / error page) it returns an error so the caller
 // can simply skip that tick.
 func (w *Watcher) Fetch() ([]Article, error) {
 	u := docURL + "?query=" + url.QueryEscape(query) +
-		"&mode=ArtList&format=json&timespan=60min&sort=DateDesc&maxrecords=50"
+		"&mode=ArtList&format=json&timespan=60min&sort=DateDesc&maxrecords=20"
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -82,13 +89,75 @@ func (e gdeltErr) Error() string { return string(e) }
 
 const errNotJSON = gdeltErr("gdelt: non-JSON response (rate limited?)")
 
-// ParseTime turns GDELT's "YYYYMMDDTHHMMSSZ" into RFC3339 ("" on failure).
+// ParseTime normalises a GDELT ("YYYYMMDDTHHMMSSZ") or RSS (RFC1123) timestamp to
+// RFC3339 ("" on failure).
 func ParseTime(s string) string {
-	t, err := time.Parse("20060102T150405Z", s)
-	if err != nil {
-		return ""
+	for _, layout := range []string{"20060102T150405Z", time.RFC3339, time.RFC1123Z, time.RFC1123} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
 	}
-	return t.UTC().Format(time.RFC3339)
+	return ""
+}
+
+// rssFeeds are reliable crypto news RSS sources (fast, free, no key) — the
+// GDELT DOC API proved too slow / rate-limited. zh=true feeds are already
+// Traditional Chinese (no translation needed).
+var rssFeeds = []struct {
+	name, url string
+	zh        bool
+}{
+	{"動區", "https://www.blocktempo.com/feed/", true},
+	{"鏈新聞", "https://abmedia.io/feed", true},
+	{"Coindesk", "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml", false},
+	{"Cointelegraph", "https://cointelegraph.com/rss", false},
+	{"The Block", "https://www.theblock.co/rss.xml", false},
+}
+
+type rssDoc struct {
+	Items []struct {
+		Title   string `xml:"title"`
+		Link    string `xml:"link"`
+		PubDate string `xml:"pubDate"`
+	} `xml:"channel>item"`
+}
+
+// FetchRSS pulls the crypto RSS feeds and returns their items (newest not
+// guaranteed sorted; the caller dedupes by URL). Best-effort per feed.
+func (w *Watcher) FetchRSS() ([]Article, error) {
+	var arts []Article
+	for _, f := range rssFeeds {
+		req, err := http.NewRequest("GET", f.url, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		resp, err := w.http.Do(req)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		var doc rssDoc
+		if xml.Unmarshal(body, &doc) != nil {
+			continue
+		}
+		for _, it := range doc.Items {
+			title := strings.TrimSpace(it.Title)
+			link := strings.TrimSpace(it.Link)
+			if title == "" || link == "" {
+				continue
+			}
+			arts = append(arts, Article{Title: title, URL: link, Domain: f.name, SeenDate: strings.TrimSpace(it.PubDate), Zh: f.zh})
+		}
+	}
+	if len(arts) == 0 {
+		return nil, errNotJSON
+	}
+	return arts, nil
 }
 
 // Translate renders English headline text into Traditional Chinese via Google's

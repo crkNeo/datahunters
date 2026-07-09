@@ -31,14 +31,14 @@ var newsCats = []struct {
 	key, label string
 	kw         []string
 }{
-	{"figure", "🗣 人物", []string{"trump", "musk", "powell", "biden", "yellen", "putin", "xi jinping", "zelensky"}},
-	{"cb", "🏦 央行/利率", []string{"federal reserve", "the fed", "interest rate", "rate cut", "rate hike", "inflation", "fomc", "cpi", "bank of japan", "european central bank", "ecb"}},
-	{"trade", "📉 貿易/制裁", []string{"tariff", "trade war", "sanction", "embargo"}},
-	{"geo", "⚔️ 地緣/戰爭", []string{"war", "invasion", "missile", "ceasefire", "conflict", "nuclear", "airstrike", "attack"}},
-	{"reg", "⚖️ 監管", []string{"lawsuit", "regulator", "regulation", "cftc", "securities and exchange", "crackdown", "court rules", "sued", "etf approval", "etf denial"}},
-	{"hack", "🚨 爆雷/駭客", []string{"hack", "exploit", "breach", "bankruptcy", "insolvency", "depeg", "rug pull", "stolen", "drained"}},
-	{"inst", "🏛 機構", []string{"blackrock", "microstrategy", "grayscale", "bitcoin etf", "spot etf", "institutional", "fidelity", "ishares"}},
-	{"crypto", "🪙 加密", []string{"bitcoin", "ethereum", "crypto"}},
+	{"figure", "🗣 人物", []string{"trump", "musk", "powell", "biden", "yellen", "putin", "xi jinping", "zelensky", "川普", "馬斯克", "鮑爾", "貝森特", "普丁", "拜登"}},
+	{"cb", "🏦 央行/利率", []string{"federal reserve", "the fed", "interest rate", "rate cut", "rate hike", "inflation", "fomc", "cpi", "bank of japan", "european central bank", "ecb", "聯準會", "美聯儲", "升息", "降息", "通膨", "利率", "日本央行", "歐洲央行"}},
+	{"trade", "📉 貿易/制裁", []string{"tariff", "trade war", "sanction", "embargo", "關稅", "貿易戰", "制裁", "禁運"}},
+	{"geo", "⚔️ 地緣/戰爭", []string{"war", "invasion", "missile", "ceasefire", "conflict", "nuclear", "airstrike", "attack", "戰爭", "飛彈", "停火", "衝突", "核武", "空襲", "入侵", "開戰"}},
+	{"reg", "⚖️ 監管", []string{"lawsuit", "regulator", "regulation", "cftc", "securities and exchange", "crackdown", "court rules", "sued", "etf approval", "etf denial", "監管", "訴訟", "起訴", "法院", "證交會", "sec ", "核准"}},
+	{"hack", "🚨 爆雷/駭客", []string{"hack", "exploit", "breach", "bankruptcy", "insolvency", "depeg", "rug pull", "stolen", "drained", "駭客", "被駭", "漏洞", "破產", "脫鉤", "盜取", "資不抵債", "被盜"}},
+	{"inst", "🏛 機構", []string{"blackrock", "microstrategy", "grayscale", "bitcoin etf", "spot etf", "institutional", "fidelity", "ishares", "etf", "貝萊德", "微策略", "灰度", "機構", "富達"}},
+	{"crypto", "🪙 加密", []string{"bitcoin", "ethereum", "crypto", "比特幣", "以太坊", "以太幣", "加密", "虛擬貨幣", "幣圈", "穩定幣"}},
 }
 
 // cryptoCtx is the extra context required to tag a "whale" headline as 巨鯨 (so a
@@ -51,6 +51,9 @@ var cryptoCtx = []string{"bitcoin", "ethereum", "crypto", "wallet", "token", "tr
 // GDELT matches article BODY and many titles don't contain the exact keyword.
 func categorizeNews(title string) (category, label string, ok bool) {
 	t := strings.ToLower(title)
+	if strings.Contains(t, "巨鯨") || strings.Contains(t, "鯨魚") {
+		return "whale", "🐋 巨鯨", true
+	}
 	if strings.Contains(t, "whale") {
 		for _, c := range cryptoCtx {
 			if strings.Contains(t, c) {
@@ -76,12 +79,12 @@ func (s *Store) GdeltTick() {
 	if s.gdeltW == nil {
 		return
 	}
-	arts, err := s.gdeltW.Fetch()
+	arts, err := s.gdeltW.FetchRSS() // crypto RSS: 動區/鏈新聞 (繁中) + Coindesk/Cointelegraph/The Block (英譯) — GDELT was too slow/rate-limited
 	if err != nil {
-		s.apiFail("GDELT 快訊", err.Error())
+		s.apiFail("新聞快訊(RSS)", err.Error())
 		return
 	}
-	s.apiOK("GDELT 快訊")
+	s.apiOK("新聞快訊(RSS)")
 	if len(arts) == 0 {
 		return
 	}
@@ -104,13 +107,16 @@ func (s *Store) GdeltTick() {
 
 	items := make([]NewsItem, 0, len(fresh))
 	for _, a := range fresh {
-		cat, label, ok := categorizeNews(a.Title)
-		if !ok {
-			continue // generic 市場 (no market-moving category) → drop
+		cat, label, _ := categorizeNews(a.Title)
+		title, en := a.Title, a.Title
+		if a.Zh {
+			en = "" // already Traditional Chinese → no English original, no translation
+		} else {
+			title = s.gdeltW.Translate(a.Title) // network; each URL translated once
 		}
 		items = append(items, NewsItem{
-			Title:    s.gdeltW.Translate(a.Title), // network; each URL translated once
-			TitleEN:  a.Title,
+			Title:    title,
+			TitleEN:  en,
 			URL:      a.URL,
 			Domain:   a.Domain,
 			Category: cat,

@@ -719,10 +719,18 @@ function fundClock(ms) {
   return new Date(ms).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 const fundingSector = ref('')
-const fundingSectors = computed(() => (funding.value ? [...new Set(funding.value.rows.map((r) => r.sector))] : []))
+const fundingAbs = ref(false) // true: sort by |rate| (find both-side extremes)
+const fundingSectors = computed(() => {
+  if (!funding.value) return []
+  const counts = {}
+  for (const r of funding.value.rows) counts[r.sector] = (counts[r.sector] || 0) + 1
+  return Object.keys(counts).sort((a, b) => counts[b] - counts[a]) // most coins first
+})
 const fundingRows = computed(() => {
   if (!funding.value) return []
-  return fundingSector.value ? funding.value.rows.filter((r) => r.sector === fundingSector.value) : funding.value.rows
+  let rows = fundingSector.value ? funding.value.rows.filter((r) => r.sector === fundingSector.value) : funding.value.rows
+  if (fundingAbs.value) rows = [...rows].sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate))
+  return rows
 })
 const newsCat = ref('')
 const newsCatList = [
@@ -2074,7 +2082,7 @@ watch(role, () => {
     <!-- 市場快訊 (全球新聞事件) -->
     <section v-else-if="mainTab === 'news'">
       <div class="mk-head">
-        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">涵蓋人物發言(川普/馬斯克/Powell)、央行利率(美聯儲)、貿易關稅制裁、地緣戰爭、機構(BlackRock/ETF)、巨鯨、加密等可能影響市場的頭條;無關類別已濾除。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 有分鐘級延遲,僅供風險參考,非投資建議。</span></span></h2>
+        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">加密市場即時新聞頭條,依主題自動分類(人物/央行/貿易/地緣/監管/爆雷/機構/巨鯨/加密等)。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 僅供風險參考,非投資建議。</span></span></h2>
         <span class="mk-count">共 {{ news.length }} 則 · 每 5 分更新</span>
       </div>
       <div class="timefilter" v-if="news.length">
@@ -2089,7 +2097,7 @@ watch(role, () => {
             <td class="tsmall"><span class="newscat" :class="'nc-' + n.category">{{ n.label }}</span></td>
             <td>
               <a :href="n.url" target="_blank" rel="noopener" class="upbit-link">{{ n.title }}</a>
-              <div class="upbit-orig">{{ n.title_en }}</div>
+              <div v-if="n.title_en" class="upbit-orig">{{ n.title_en }}</div>
             </td>
             <td class="tsmall">{{ n.domain }}</td>
           </tr>
@@ -2102,13 +2110,14 @@ watch(role, () => {
     <!-- 資金費率 (OKX) -->
     <section v-else-if="mainTab === 'funding'">
       <div class="mk-head">
-        <h2>資金費率<span class="help" tabindex="0">?<span class="help-pop">各永續合約的當期資金費率。<b>正費率</b>=多方付費給空方(市場偏多、多單擁擠),<b>負費率</b>=空方付費給多方。每 8 小時結算一次;「年化」為粗估(費率×3×365)。費率極端常是情緒過熱/反轉的參考,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="funding && funding.updated_at">{{ fundingRows.length }} / {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
+        <h2>資金費率<span class="help" tabindex="0">?<span class="help-pop">各永續合約的當期資金費率(資料來源 OKX)。<b>正費率</b>=多方付費給空方(市場偏多、多單擁擠),<b>負費率</b>=空方付費給多方。每 8 小時結算一次。費率極端常是情緒過熱/反轉的參考,⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="funding && funding.updated_at">來源 OKX · {{ fundingRows.length }} / {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
       </div>
       <div class="timefilter" v-if="funding && funding.rows.length">
         <span class="tf-label">板塊</span>
         <button :class="{ on: fundingSector === '' }" @click="fundingSector = ''">全部</button>
         <button v-for="s in fundingSectors" :key="s" :class="{ on: fundingSector === s }" @click="fundingSector = s">{{ s }}</button>
+        <button class="tf-sort" :class="{ on: fundingAbs }" @click="fundingAbs = !fundingAbs" title="切換:費率高→低 / 絕對值大→小(找兩邊極端)">{{ fundingAbs ? '極端排序' : '費率排序' }}</button>
       </div>
       <table v-if="fundingRows.length" class="grid">
         <thead><tr><th>幣種</th><th>板塊</th><th class="r">資金費率</th><th class="r">下次結算</th></tr></thead>
@@ -2365,6 +2374,8 @@ body::before {
 .timefilter button { background: #16181d; border: 1px solid #23262d; color: #c8cdd6; padding: 4px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .timefilter button.on { background: #1b2942; border-color: #5b8def; color: #cfe0ff; }
 .timefilter .tf-note { font-size: 11px; color: #6b7078; margin-left: 6px; }
+.timefilter .tf-sort { margin-left: auto; border-color: #3a3320; color: #e0b341; }
+.timefilter .tf-sort.on { background: #2a2410; border-color: #e0b341; color: #f4d774; }
 .ddbanner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 16px; font-size: 12px; }
 .ddbanner.down.lv-high { background: #3a1014; border-bottom: 1px solid #6b1f27; }
 .ddbanner.down.lv-mid { background: #2e2410; border-bottom: 1px solid #5c4a1a; }

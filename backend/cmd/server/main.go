@@ -151,8 +151,8 @@ func main() {
 		}
 	}()
 
-	// GDELT market-news feed (free, no key). GDELT updates ~15 min and rate-limits
-	// to ~1 req/5s, so poll slowly; each tick translates only new headlines.
+	// 市場快訊 RSS feed (free, no key): 動區/鏈新聞 (繁中, 免翻譯) + Coindesk/
+	// Cointelegraph/The Block (英譯). Poll every 5 min; each tick handles only new URLs.
 	go func() {
 		store.GdeltTick()
 		ticker := time.NewTicker(5 * time.Minute)
