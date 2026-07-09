@@ -45,8 +45,10 @@ var newsCats = []struct {
 // literal marine-whale story doesn't get miscategorised).
 var cryptoCtx = []string{"bitcoin", "ethereum", "crypto", "wallet", "token", "transfer", "btc", "eth"}
 
-// categorizeNews tags a headline. ok=false means no market-moving category matched
-// (generic 市場) → the caller drops it.
+// categorizeNews tags a headline. Every article returned by the GDELT query is
+// already on-topic, so a title that doesn't hit a specific keyword falls back to
+// 綜合 (general) rather than being dropped — otherwise the feed goes empty, since
+// GDELT matches article BODY and many titles don't contain the exact keyword.
 func categorizeNews(title string) (category, label string, ok bool) {
 	t := strings.ToLower(title)
 	if strings.Contains(t, "whale") {
@@ -63,7 +65,7 @@ func categorizeNews(title string) (category, label string, ok bool) {
 			}
 		}
 	}
-	return "", "", false
+	return "misc", "📰 綜合", true
 }
 
 // GdeltTick polls GDELT for fresh market-moving headlines, translates the new ones
@@ -75,7 +77,12 @@ func (s *Store) GdeltTick() {
 		return
 	}
 	arts, err := s.gdeltW.Fetch()
-	if err != nil || len(arts) == 0 {
+	if err != nil {
+		s.apiFail("GDELT 快訊", err.Error())
+		return
+	}
+	s.apiOK("GDELT 快訊")
+	if len(arts) == 0 {
 		return
 	}
 	// pick the URLs we haven't seen (mark them under the lock; translate outside it).
@@ -130,10 +137,13 @@ func (s *Store) GdeltTick() {
 	}
 	s.gdeltMu.Unlock()
 
-	// Web Push to ALL users for every new categorised headline (skip the seeding
-	// tick). No throttle — report as it comes.
+	// Web Push to ALL users for every new headline (skip the seeding tick). The
+	// generic 綜合 bucket shows in the feed but is NOT pushed (avoids noise).
 	if seeded {
 		for _, it := range items {
+			if it.Category == "misc" {
+				continue
+			}
 			s.PushSend(it.Label, it.Title, "/?tab=news")
 		}
 	}
@@ -143,11 +153,13 @@ func (s *Store) GdeltTick() {
 // per new trading day per asset, injects it into the news feed (🏛 機構) + pushes
 // it. No free official API exists — Farside HTML is the de-facto public source.
 func (s *Store) EtfTick() {
+	anyOK := false
 	for _, asset := range []string{"BTC", "ETH"} {
 		f, err := etf.FetchFlow(asset)
 		if err != nil || f.Date == "" {
 			continue
 		}
+		anyOK = true
 		s.gdeltMu.Lock()
 		if s.etfSeen[asset] == f.Date { // already reported this day
 			s.gdeltMu.Unlock()
@@ -164,6 +176,11 @@ func (s *Store) EtfTick() {
 		if !firstSeed { // don't push the pre-existing latest value on boot
 			s.PushSend(item.Label, item.Title, "/?tab=news")
 		}
+	}
+	if anyOK {
+		s.apiOK("ETF 淨流入(Farside)")
+	} else {
+		s.apiFail("ETF 淨流入(Farside)", "Farside 抓取/解析失敗")
 	}
 }
 

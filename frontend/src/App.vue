@@ -704,6 +704,20 @@ async function loadNews() {
     /* secondary */
   }
 }
+
+const funding = ref(null)
+async function loadFunding() {
+  try {
+    const res = await authFetch('/api/funding')
+    if (res.ok) funding.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+function fundClock(ms) {
+  if (!ms) return '—'
+  return new Date(ms).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
 const newsCat = ref('')
 const newsCatList = [
   { key: 'figure', label: '🗣 人物' },
@@ -715,6 +729,7 @@ const newsCatList = [
   { key: 'inst', label: '🏛 機構' },
   { key: 'whale', label: '🐋 巨鯨' },
   { key: 'crypto', label: '🪙 加密' },
+  { key: 'misc', label: '📰 綜合' },
 ]
 const newsF = computed(() => (newsCat.value ? news.value.filter((n) => n.category === newsCat.value) : news.value))
 
@@ -940,6 +955,7 @@ function loadAll() {
   loadFlow()
   loadUpbit()
   loadNews()
+  loadFunding()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1022,7 +1038,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'articles', 'pool', 'conv']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'articles', 'pool', 'conv']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1362,6 +1378,7 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'news' }" @click="mainTab = 'news'; loadNews()">
             市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em>
           </button>
+          <button :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'; loadFunding()">資金費率</button>
           <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
@@ -1424,14 +1441,13 @@ watch(role, () => {
         <section class="card">
           <h3 class="psub"><span class="led long"></span>多頭 Top 10</h3>
           <table class="grid">
-            <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th><th class="r">費率</th></tr></thead>
+            <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr></thead>
             <tbody>
               <tr v-for="(r, i) in ranking.long" :key="r.coin">
                 <td class="rank">{{ i + 1 }}</td><td class="coin">{{ r.coin }}</td>
                 <td class="r score long"><b>{{ r.score }}</b></td>
                 <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
                 <td class="r" :class="r.cvd_ratio >= 0 ? 'long' : 'short'">{{ r.cvd_ratio?.toFixed(2) }}</td>
-                <td class="r">{{ (r.funding_rate * 100)?.toFixed(4) }}%</td>
               </tr>
             </tbody>
           </table>
@@ -1439,14 +1455,13 @@ watch(role, () => {
         <section class="card">
           <h3 class="psub"><span class="led short"></span>空頭 Top 10</h3>
           <table class="grid">
-            <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th><th class="r">費率</th></tr></thead>
+            <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr></thead>
             <tbody>
               <tr v-for="(r, i) in ranking.short" :key="r.coin">
                 <td class="rank">{{ i + 1 }}</td><td class="coin">{{ r.coin }}</td>
                 <td class="r score short"><b>{{ r.score }}</b></td>
                 <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
                 <td class="r" :class="r.cvd_ratio >= 0 ? 'long' : 'short'">{{ r.cvd_ratio?.toFixed(2) }}</td>
-                <td class="r">{{ (r.funding_rate * 100)?.toFixed(4) }}%</td>
               </tr>
             </tbody>
           </table>
@@ -1783,7 +1798,7 @@ watch(role, () => {
       </div>
       <table class="grid">
         <thead>
-          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th><th class="r">資金費率</th></tr>
+          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th></tr>
         </thead>
         <tbody>
           <tr v-for="r in boardRows" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">
@@ -1794,7 +1809,6 @@ watch(role, () => {
             <td class="r" :class="r.okx_chg >= 0 ? 'long' : 'short'">{{ r.okx_chg?.toFixed(2) }}</td>
             <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
             <td class="r" :class="r.cvd_ratio >= 0 ? 'long' : 'short'">{{ r.cvd_ratio?.toFixed(2) }}</td>
-            <td class="r">{{ (r.funding_rate * 100)?.toFixed(4) }}%</td>
           </tr>
         </tbody>
       </table>
@@ -1808,7 +1822,7 @@ watch(role, () => {
       </div>
       <table v-if="signals.length" class="grid">
         <thead>
-          <tr><th>幣種</th><th>方向</th><th class="r">評分</th><th>推薦指數</th><th>品質</th><th class="r">OI 1h%</th><th class="r">CVD%</th><th class="r">資金費率</th></tr>
+          <tr><th>幣種</th><th>方向</th><th class="r">評分</th><th>推薦指數</th><th>品質</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr>
         </thead>
         <tbody>
           <tr v-for="r in signals" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">
@@ -1827,7 +1841,6 @@ watch(role, () => {
             <td>{{ r.quality }}</td>
             <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
             <td class="r" :class="r.cvd_ratio >= 0 ? 'long' : 'short'">{{ r.cvd_ratio?.toFixed(2) }}</td>
-            <td class="r">{{ (r.funding_rate * 100)?.toFixed(4) }}%</td>
           </tr>
         </tbody>
       </table>
@@ -2078,6 +2091,26 @@ watch(role, () => {
       </table>
       <p v-else-if="news.length" class="empty">此分類暫無快訊</p>
       <p v-else class="loading">載入市場快訊中…(首次載入需翻譯,請稍候)</p>
+    </section>
+
+    <!-- 資金費率 (OKX) -->
+    <section v-else-if="mainTab === 'funding'">
+      <div class="mk-head">
+        <h2>資金費率<span class="help" tabindex="0">?<span class="help-pop">各永續合約的當期資金費率。<b>正費率</b>=多方付費給空方(市場偏多、多單擁擠),<b>負費率</b>=空方付費給多方。每 8 小時結算一次;「年化」為粗估(費率×3×365)。費率極端常是情緒過熱/反轉的參考,⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="funding && funding.updated_at">共 {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
+      </div>
+      <table v-if="funding && funding.rows.length" class="grid">
+        <thead><tr><th>幣種</th><th class="r">資金費率</th><th class="r">年化</th><th class="r">下次結算</th></tr></thead>
+        <tbody>
+          <tr v-for="f in funding.rows" :key="f.coin" class="clickable" @click="openDetail(f.coin)">
+            <td class="coin">{{ f.coin }}</td>
+            <td class="r" :class="f.rate >= 0 ? 'short' : 'long'"><b>{{ (f.rate * 100).toFixed(4) }}%</b></td>
+            <td class="r" :class="f.apr >= 0 ? 'short' : 'long'">{{ f.apr >= 0 ? '+' : '' }}{{ f.apr.toFixed(1) }}%</td>
+            <td class="r tsmall">{{ fundClock(f.next_ms) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="loading">載入資金費率中…</p>
     </section>
 
     <!-- 文章專欄 (Feature 3) -->
@@ -2484,6 +2517,7 @@ body::before {
 .newscat.nc-inst { background: #1a1030; color: #b79cff; }
 .newscat.nc-whale { background: #08303a; color: #5fd0e0; }
 .newscat.nc-crypto { background: #103a24; color: #4cd17e; }
+.newscat.nc-misc { background: #1f2229; color: #b8bcc4; }
 .navbadge { font-style: normal; font-size: 10px; font-weight: 700; background: #e0b341; color: #1a1407; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
 .dir { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .dir.long { background: #103a24; color: #2ec26b; } .dir.short { background: #3a1010; color: #ff5c5c; }

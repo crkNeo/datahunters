@@ -128,6 +128,14 @@ type Store struct {
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 
+	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
+	rlFails map[string]int  // source → consecutive failure count
+	rlDown  map[string]bool // source → currently reported down (alert dedupe)
+
+	fundBoardMu   sync.RWMutex // guards the OKX funding board (public tab)
+	fundBoard     []FundingRow
+	fundBoardTime time.Time
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -156,6 +164,8 @@ func NewStore(coins []string) *Store {
 		gdeltW:            gdelt.NewWatcher(),
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
+		rlFails:           map[string]int{},
+		rlDown:            map[string]bool{},
 		homeCache:         newTTLCache(15 * time.Second),
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),

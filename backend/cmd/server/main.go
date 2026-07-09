@@ -190,6 +190,24 @@ func main() {
 		}
 	}()
 
+	// Binance ban/rate-limit watchdog → Telegram alert when all lanes are down.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.BinanceHealthTick()
+		}
+	}()
+
+	// 資金費率 board (OKX) — spreads load off Binance. Funding moves slowly; refresh
+	// every 5 min (one OKX call per coin, paced).
+	go func() {
+		store.FundingTick()
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			store.FundingTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.

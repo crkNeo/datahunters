@@ -93,6 +93,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
 	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit)) // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))   // GDELT market headlines (zh-TW)
+	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding)) // OKX funding-rate board
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
@@ -466,6 +467,11 @@ func (s *Server) handleUpbit(w http.ResponseWriter, r *http.Request) {
 // Chinese), newest first.
 func (s *Server) handleNews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.News())
+}
+
+// handleFunding serves the OKX funding-rate board.
+func (s *Server) handleFunding(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.FundingBoard())
 }
 
 // handleEvents serves the full high-impact US economic calendar.

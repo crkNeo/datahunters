@@ -18,7 +18,7 @@ const docURL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
 // query is the OR-of-topics search (English sources only). Keep it moderate so a
 // single request stays fast and inside GDELT's rate limit.
-const query = `(Trump OR "Elon Musk" OR "Federal Reserve" OR "Bank of Japan" OR "interest rate" OR inflation OR tariff OR sanctions OR war OR ceasefire OR bitcoin OR ethereum OR cryptocurrency OR "Bitcoin ETF" OR "spot ETF" OR BlackRock OR MicroStrategy OR Grayscale OR "SEC lawsuit" OR "crypto hack" OR exploit OR bankruptcy) sourcelang:english`
+const query = `(Trump OR "Federal Reserve" OR tariff OR sanctions OR war OR bitcoin OR ethereum OR "crypto") sourcelang:english`
 
 // Article is one GDELT headline.
 type Article struct {

@@ -119,6 +119,29 @@ func (c *Client) pickBinanceLane() (*lane, error) {
 		len(c.lanes), time.Until(soonest).Round(time.Second))
 }
 
+// AllBanned reports whether EVERY Binance lane is currently ban/weight-paused
+// (i.e. Binance is effectively unusable), and how long until the soonest frees up.
+func (c *Client) AllBanned() (bool, time.Duration) {
+	now := time.Now()
+	var soonest time.Time
+	for _, ln := range c.lanes {
+		ln.mu.Lock()
+		blocked := now.Before(ln.banUntil) || now.Before(ln.pauseTo)
+		t := ln.banUntil
+		if ln.pauseTo.After(t) {
+			t = ln.pauseTo
+		}
+		ln.mu.Unlock()
+		if !blocked {
+			return false, 0 // at least one lane is free
+		}
+		if soonest.IsZero() || t.Before(soonest) {
+			soonest = t
+		}
+	}
+	return len(c.lanes) > 0, time.Until(soonest)
+}
+
 // observeBinance updates one lane's ban / weight state from its response.
 func (c *Client) observeBinance(ln *lane, resp *http.Response, body []byte) {
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 418 {
@@ -236,22 +259,32 @@ func (c *Client) OKXCandles(instID, bar string, limit int) ([]Candle, error) {
 type okxFundingEnvelope struct {
 	Code string `json:"code"`
 	Data []struct {
-		InstID      string `json:"instId"`
-		FundingRate string `json:"fundingRate"`
+		InstID          string `json:"instId"`
+		FundingRate     string `json:"fundingRate"`
+		NextFundingTime string `json:"nextFundingTime"`
 	} `json:"data"`
 }
 
 // OKXFundingRate returns the current funding rate for a SWAP instrument.
 func (c *Client) OKXFundingRate(instID string) (float64, error) {
+	rate, _, err := c.OKXFundingInfo(instID)
+	return rate, err
+}
+
+// OKXFundingInfo returns the current funding rate + next funding time (ms) for a
+// SWAP instrument, e.g. "BTC-USDT-SWAP".
+func (c *Client) OKXFundingInfo(instID string) (rate float64, nextMs int64, err error) {
 	url := fmt.Sprintf("%s/api/v5/public/funding-rate?instId=%s", okxBase, instID)
 	var env okxFundingEnvelope
-	if err := c.get(url, &env); err != nil {
-		return 0, err
+	if err = c.get(url, &env); err != nil {
+		return
 	}
 	if env.Code != "0" || len(env.Data) == 0 {
-		return 0, fmt.Errorf("okx funding empty")
+		return 0, 0, fmt.Errorf("okx funding empty")
 	}
-	return atof(env.Data[0].FundingRate), nil
+	rate = atof(env.Data[0].FundingRate)
+	nextMs, _ = strconv.ParseInt(env.Data[0].NextFundingTime, 10, 64)
+	return
 }
 
 type okxOIEnvelope struct {
