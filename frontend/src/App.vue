@@ -718,6 +718,12 @@ function fundClock(ms) {
   if (!ms) return '—'
   return new Date(ms).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
+const fundingSector = ref('')
+const fundingSectors = computed(() => (funding.value ? [...new Set(funding.value.rows.map((r) => r.sector))] : []))
+const fundingRows = computed(() => {
+  if (!funding.value) return []
+  return fundingSector.value ? funding.value.rows.filter((r) => r.sector === fundingSector.value) : funding.value.rows
+})
 const newsCat = ref('')
 const newsCatList = [
   { key: 'figure', label: '🗣 人物' },
@@ -2097,15 +2103,20 @@ watch(role, () => {
     <section v-else-if="mainTab === 'funding'">
       <div class="mk-head">
         <h2>資金費率<span class="help" tabindex="0">?<span class="help-pop">各永續合約的當期資金費率。<b>正費率</b>=多方付費給空方(市場偏多、多單擁擠),<b>負費率</b>=空方付費給多方。每 8 小時結算一次;「年化」為粗估(費率×3×365)。費率極端常是情緒過熱/反轉的參考,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="funding && funding.updated_at">共 {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
+        <span class="mk-count" v-if="funding && funding.updated_at">{{ fundingRows.length }} / {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
       </div>
-      <table v-if="funding && funding.rows.length" class="grid">
-        <thead><tr><th>幣種</th><th class="r">資金費率</th><th class="r">年化</th><th class="r">下次結算</th></tr></thead>
+      <div class="timefilter" v-if="funding && funding.rows.length">
+        <span class="tf-label">板塊</span>
+        <button :class="{ on: fundingSector === '' }" @click="fundingSector = ''">全部</button>
+        <button v-for="s in fundingSectors" :key="s" :class="{ on: fundingSector === s }" @click="fundingSector = s">{{ s }}</button>
+      </div>
+      <table v-if="fundingRows.length" class="grid">
+        <thead><tr><th>幣種</th><th>板塊</th><th class="r">資金費率</th><th class="r">下次結算</th></tr></thead>
         <tbody>
-          <tr v-for="f in funding.rows" :key="f.coin" class="clickable" @click="openDetail(f.coin)">
+          <tr v-for="f in fundingRows" :key="f.coin" class="clickable" @click="openDetail(f.coin)">
             <td class="coin">{{ f.coin }}</td>
+            <td class="tsmall">{{ f.sector }}</td>
             <td class="r" :class="f.rate >= 0 ? 'short' : 'long'"><b>{{ (f.rate * 100).toFixed(4) }}%</b></td>
-            <td class="r" :class="f.apr >= 0 ? 'short' : 'long'">{{ f.apr >= 0 ? '+' : '' }}{{ f.apr.toFixed(1) }}%</td>
             <td class="r tsmall">{{ fundClock(f.next_ms) }}</td>
           </tr>
         </tbody>

@@ -287,6 +287,37 @@ func (c *Client) OKXFundingInfo(instID string) (rate float64, nextMs int64, err 
 	return
 }
 
+// OKXTicker is a slim SWAP ticker (instId + 24h quote volume) for ranking.
+type OKXTicker struct {
+	InstID    string
+	VolCcy24h float64
+}
+
+type okxTickersEnvelope struct {
+	Code string `json:"code"`
+	Data []struct {
+		InstID    string `json:"instId"`
+		VolCcy24h string `json:"volCcy24h"`
+	} `json:"data"`
+}
+
+// OKXSwapTickers returns all SWAP tickers with their 24h quote volume (one call).
+func (c *Client) OKXSwapTickers() ([]OKXTicker, error) {
+	url := okxBase + "/api/v5/market/tickers?instType=SWAP"
+	var env okxTickersEnvelope
+	if err := c.get(url, &env); err != nil {
+		return nil, err
+	}
+	if env.Code != "0" {
+		return nil, fmt.Errorf("okx tickers error")
+	}
+	out := make([]OKXTicker, 0, len(env.Data))
+	for _, d := range env.Data {
+		out = append(out, OKXTicker{InstID: d.InstID, VolCcy24h: atof(d.VolCcy24h)})
+	}
+	return out, nil
+}
+
 type okxOIEnvelope struct {
 	Code string `json:"code"`
 	Data []struct {

@@ -198,11 +198,11 @@ func main() {
 		}
 	}()
 
-	// 資金費率 board (OKX) — spreads load off Binance. Funding moves slowly; refresh
-	// every 5 min (one OKX call per coin, paced).
+	// 資金費率 board (OKX) — spreads load off Binance. Top-300 by volume, one OKX
+	// call per coin (paced); funding moves slowly so refresh every 10 min.
 	go func() {
 		store.FundingTick()
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(10 * time.Minute)
 		for range ticker.C {
 			store.FundingTick()
 		}
