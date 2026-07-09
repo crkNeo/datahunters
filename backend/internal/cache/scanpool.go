@@ -98,24 +98,37 @@ func poolEnter(cs []exchange.Candle) bool {
 	return e50[n-2] <= e200[n-2] && e50[n-1] > e200[n-1] && cs[n-1].Close > e800[n-1]
 }
 
-// poolExit returns (exit, outcome). outcome: signal | chandelier | lock.
+// poolStop returns the current 8×ATR chandelier / 早鎖利 stop level and its outcome
+// label. ok=false when ATR isn't ready. Stored on the trade each 1H bar so the
+// live tick can enforce it intrabar.
+func poolStop(cs []exchange.Candle, tr *PaperTrade) (stop float64, outcome string, ok bool) {
+	n := len(cs)
+	atr := atrSeries(cs, 22)
+	atrNow := atr[n-1]
+	if atrNow <= 0 {
+		return 0, "", false
+	}
+	peak := peakHighSince(cs, tr.OpenTime.UnixMilli())
+	stop = peak - 8*atrNow // 8×ATR chandelier
+	outcome = "chandelier"
+	if ea := atr[entryIdx(cs, tr.OpenTime.UnixMilli())]; ea > 0 && peak-tr.Entry >= 2*ea {
+		if floor := tr.Entry + 0.5*ea; floor > stop { // 早鎖利: 止損下限上移至 進場+0.5×ATR
+			stop, outcome = floor, "lock"
+		}
+	}
+	return stop, outcome, true
+}
+
+// poolExit returns (exit, outcome). outcome: signal | chandelier | lock. The
+// death-cross (regime) exit needs a closed bar; the stop is also enforced live.
 func poolExit(cs []exchange.Candle, tr *PaperTrade) (bool, string) {
 	n := len(cs)
 	if emaSeries(cs, 50)[n-1] < emaSeries(cs, 200)[n-1] {
 		return true, "signal"
 	}
-	atr := atrSeries(cs, 22)
-	atrNow := atr[n-1]
-	if atrNow <= 0 {
+	stop, outcome, ok := poolStop(cs, tr)
+	if !ok {
 		return false, ""
-	}
-	peak := peakHighSince(cs, tr.OpenTime.UnixMilli())
-	stop := peak - 8*atrNow // 8×ATR chandelier
-	outcome := "chandelier"
-	if ea := atr[entryIdx(cs, tr.OpenTime.UnixMilli())]; ea > 0 && peak-tr.Entry >= 2*ea {
-		if floor := tr.Entry + 0.5*ea; floor > stop { // 早鎖利: 止損下限上移至 進場+0.5×ATR
-			stop, outcome = floor, "lock"
-		}
 	}
 	if cs[n-1].Close < stop {
 		return true, outcome
@@ -159,6 +172,9 @@ func (s *Store) runPool(coin string, cs []exchange.Candle, now time.Time) {
 	if open != nil {
 		open.Cur = roundPx(price)
 		open.PnLPct = round2(pnl("long", open.Entry, price))
+		if stop, _, ok := poolStop(cs, open); ok {
+			open.SL = roundPx(stop) // persist the live stop so PoolMarkTick can enforce it intrabar
+		}
 		if ex, outcome := poolExit(cs, open); ex {
 			open.Status = "closed"
 			open.Outcome = outcome
@@ -176,6 +192,9 @@ func (s *Store) runPool(coin string, cs []exchange.Candle, now time.Time) {
 			Cur:      roundPx(price),
 			Status:   "open",
 			OpenTime: time.UnixMilli(cs[len(cs)-1].Ts).UTC(), // entry bar open time → entryIdx anchor
+		}
+		if stop, _, ok := poolStop(cs, tr); ok {
+			tr.SL = roundPx(stop) // enforce the stop live from the entry bar, not only next bar
 		}
 		s.poolTrades = append(s.poolTrades, tr)
 		dirty = tr
@@ -201,6 +220,49 @@ func (s *Store) poolTrim() {
 		closed = closed[:poolKeepClosed]
 	}
 	s.poolTrades = append(open, closed...)
+}
+
+// PoolMarkTick marks open positions to the live WS price and exits any that break
+// the stored chandelier / 早鎖利 stop intrabar. The death-cross exit still waits
+// for the 1H bar close in PoolTick; entries stay on closed 1H bars.
+func (s *Store) PoolMarkTick() {
+	px := s.livePrices()
+	if len(px) == 0 {
+		return
+	}
+	now := time.Now()
+	var dirty []*PaperTrade
+	s.poolMu.Lock()
+	for _, tr := range s.poolTrades {
+		if tr.Status != "open" || tr.SL <= 0 {
+			continue // SL is set on the first 1H management bar after entry
+		}
+		p := px[tr.Coin]
+		if p <= 0 {
+			continue
+		}
+		tr.Cur = roundPx(p)
+		tr.PnLPct = round2(pnl("long", tr.Entry, p))
+		if p < tr.SL {
+			outcome := "chandelier"
+			if tr.SL >= tr.Entry {
+				outcome = "lock" // stop已升到進場之上 → 早鎖利
+			}
+			tr.Status = "closed"
+			tr.Outcome = outcome
+			tr.Cur = roundPx(tr.SL)
+			tr.PnLPct = round2(pnl("long", tr.Entry, tr.SL))
+			t := now
+			tr.CloseTime = &t
+			dirty = append(dirty, tr)
+		}
+	}
+	s.poolMu.Unlock()
+	if s.db != nil {
+		for _, tr := range dirty {
+			s.db.upsertTrade("pool", tr)
+		}
+	}
 }
 
 // PoolState returns the scan-pool strategy's simulated open/closed/stats.

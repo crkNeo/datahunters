@@ -234,6 +234,66 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 	}
 }
 
+// convExitLive checks the LIVE price against the fixed TP/SL so 止盈止損 trigger
+// intrabar instead of waiting for the 4H bar close. Settles at the level hit.
+func convExitLive(tr *PaperTrade, p float64) (bool, string, float64) {
+	if tr.Dir == "long" {
+		if p <= tr.SL {
+			return true, "sl", tr.SL
+		}
+		if p >= tr.TP {
+			return true, "tp", tr.TP
+		}
+	} else {
+		if p >= tr.SL {
+			return true, "sl", tr.SL
+		}
+		if p <= tr.TP {
+			return true, "tp", tr.TP
+		}
+	}
+	return false, "", 0
+}
+
+// ConvMarkTick marks open positions to the live WS price and exits any that hit
+// TP/SL immediately. Entries are still evaluated per closed 4H bar in ConvTick;
+// the closed-bar convExit in runConv remains a backstop for when the feed is down.
+func (s *Store) ConvMarkTick() {
+	px := s.livePrices()
+	if len(px) == 0 {
+		return
+	}
+	now := time.Now()
+	var dirty []*PaperTrade
+	s.convMu.Lock()
+	for _, tr := range s.convTrades {
+		if tr.Status != "open" {
+			continue
+		}
+		p := px[tr.Coin]
+		if p <= 0 {
+			continue
+		}
+		tr.Cur = roundPx(p)
+		tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, p))
+		if exit, outcome, lvl := convExitLive(tr, p); exit {
+			tr.Status = "closed"
+			tr.Outcome = outcome
+			tr.Cur = roundPx(lvl)
+			tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, lvl))
+			t := now
+			tr.CloseTime = &t
+			dirty = append(dirty, tr)
+		}
+	}
+	s.convMu.Unlock()
+	if s.db != nil {
+		for _, tr := range dirty {
+			s.db.upsertTrade("conv", tr)
+		}
+	}
+}
+
 // convExit checks the just-closed bar against the fixed TP/SL (same-bar both → SL).
 func convExit(bar exchange.Candle, tr *PaperTrade) (bool, string, float64) {
 	if tr.Dir == "long" {
