@@ -349,6 +349,21 @@ func (s *Store) livePrices() map[string]float64 {
 	return px
 }
 
+// markLiveOpen refreshes each open trade's 現價 / 未實現損益 to the live WS price.
+// Display-only: TP/SL exits are still evaluated on closed bars in the strategy
+// tick, so it's safe for strategies (conv/pool) that only run per 4H/1H bar —
+// their price would otherwise appear frozen between bars.
+func markLiveOpen(open []*PaperTrade, px map[string]float64) {
+	for _, tr := range open {
+		p := px[tr.Coin]
+		if p <= 0 {
+			continue
+		}
+		tr.Cur = roundPx(p)
+		tr.PnLPct = round2(pnl(tr.Dir, tr.Entry, p))
+	}
+}
+
 // klines1h returns 1h candles for a coin, preferring the live WS feed (last bar
 // = current forming bar, matching REST shape) and falling back to REST only when
 // the feed hasn't got enough history yet. This removes the per-coin kline REST

@@ -205,6 +205,7 @@ func (s *Store) poolTrim() {
 
 // PoolState returns the scan-pool strategy's simulated open/closed/stats.
 func (s *Store) PoolState() PaperState {
+	px := s.livePrices() // read before the lock; open positions get live 現價 (strategy only ticks per 1H bar)
 	s.poolMu.Lock()
 	defer s.poolMu.Unlock()
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
@@ -223,6 +224,7 @@ func (s *Store) PoolState() PaperState {
 			st.Stats.Losses++
 		}
 	}
+	markLiveOpen(st.Open, px) // display-only: live 現價 between 1H bars
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
 	sort.Slice(st.Closed, func(i, j int) bool {
 		return st.Closed[i].CloseTime != nil && st.Closed[j].CloseTime != nil && st.Closed[i].CloseTime.After(*st.Closed[j].CloseTime)

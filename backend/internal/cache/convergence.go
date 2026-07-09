@@ -272,6 +272,7 @@ func (s *Store) convTrim() {
 
 // ConvState returns the strategy's simulated open/closed/stats.
 func (s *Store) ConvState() PaperState {
+	px := s.livePrices() // read before the lock; open positions get live 現價 (strategy only ticks per 4H bar)
 	s.convMu.Lock()
 	defer s.convMu.Unlock()
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
@@ -290,6 +291,7 @@ func (s *Store) ConvState() PaperState {
 			st.Stats.Losses++
 		}
 	}
+	markLiveOpen(st.Open, px) // display-only: live 現價 between 4H bars
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
 	sort.Slice(st.Closed, func(i, j int) bool {
 		return st.Closed[i].CloseTime != nil && st.Closed[j].CloseTime != nil && st.Closed[i].CloseTime.After(*st.Closed[j].CloseTime)
