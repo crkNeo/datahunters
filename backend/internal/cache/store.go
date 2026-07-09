@@ -476,10 +476,16 @@ func (s *Store) UpbitTick() {
 		if n.IsListing() {
 			tag = "🚀 Upbit 上架"
 		}
+		// translate the title to zh-TW once, and reuse it for the board (seed the
+		// cache) so both the push and Telegram messages are in Traditional Chinese.
+		zh := s.upbitW.TranslateKo(n.Title)
+		s.upbitMu.Lock()
+		s.upbitTrans[n.ID] = zh
+		s.upbitMu.Unlock()
 		// Web Push opens our own Upbit board tab (not upbit.com); the Telegram
 		// message still links out to the real notice.
-		s.PushSend(tag, n.Title, "/?tab=upbit")
-		go s.notifier.Send(n.TelegramText())
+		s.PushSend(tag, zh, "/?tab=upbit")
+		go s.notifier.Send(n.TelegramTextZH(zh))
 	}
 	s.updateUpbitBoard(all)
 }

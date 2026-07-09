@@ -47,14 +47,20 @@ func (n Notice) URL() string {
 	return fmt.Sprintf("https://upbit.com/service_center/notice?id=%d", n.ID)
 }
 
-// TelegramText renders the notice as an HTML Telegram message (title escaped).
-func (n Notice) TelegramText() string {
+// TelegramText renders the notice as an HTML Telegram message with its original
+// (Korean) title.
+func (n Notice) TelegramText() string { return n.telegramText(n.Title) }
+
+// TelegramTextZH renders the notice with a pre-translated (zh-TW) title.
+func (n Notice) TelegramTextZH(titleZH string) string { return n.telegramText(titleZH) }
+
+func (n Notice) telegramText(title string) string {
 	tag := "📢 <b>[Upbit公告]</b>"
 	if n.IsListing() {
 		tag = "🚀 <b>[Upbit上架]</b>"
 	}
 	return fmt.Sprintf("%s\n%s\n分類 %s · %s\nhttps://upbit.com/service_center/notice?id=%d",
-		tag, html.EscapeString(n.Title), html.EscapeString(n.Category), n.ListedAt, n.ID)
+		tag, html.EscapeString(title), html.EscapeString(n.Category), n.ListedAt, n.ID)
 }
 
 // Watcher polls the announcement API and reports notices newer than the last
