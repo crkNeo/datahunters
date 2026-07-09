@@ -171,6 +171,10 @@ func (s *Store) ConvTick() {
 		return
 	}
 	s.conv4hBucket = b4
+	if !s.convSeeded { // boot: set the baseline only; don't backfill entries from the pre-startup bar
+		s.convSeeded = true
+		return
+	}
 	for _, coin := range s.emaCoins() {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", "4h", convKlimit)
 		if err != nil || len(cs) < 2 {

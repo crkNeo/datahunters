@@ -1052,11 +1052,13 @@ function loadAll() {
   if (can('admin')) {
     loadUsers()
     loadGambleHedge()
-    if (mainTab.value === 'pool') loadPool()
-    if (mainTab.value === 'conv') loadConv()
-    if (mainTab.value === 'rsifade') loadRsifade()
-    if (mainTab.value === 'bollfade') loadBollfade()
-    if (mainTab.value === 'meanrev') loadMeanrev()
+    // load every strategy each cycle so the nav badges show open counts without
+    // having to open each tab first
+    loadPool()
+    loadConv()
+    loadRsifade()
+    loadBollfade()
+    loadMeanrev()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),

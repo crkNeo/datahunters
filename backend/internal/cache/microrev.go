@@ -39,6 +39,7 @@ type microBook struct {
 	mu     sync.Mutex
 	trades []*PaperTrade
 	bucket int64 // last processed wall-clock bar bucket (single ticker goroutine)
+	seeded bool  // first tick only sets the baseline bucket — no boot-time backfill of entries
 }
 
 // ---- indicator helpers (aligned full-length series, like emaSeries/atrSeries) ----
@@ -210,6 +211,10 @@ func (s *Store) microTick(b *microBook) {
 		return
 	}
 	b.bucket = bkt
+	if !b.seeded { // boot: just set the baseline; only bars that close from now on can open trades
+		b.seeded = true
+		return
+	}
 	now := time.Now().UTC()
 	for _, coin := range s.emaCoins() {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)

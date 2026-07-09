@@ -124,10 +124,12 @@ type Store struct {
 	poolMu     sync.Mutex    // guards the 30幣掃描池 1H strategy (admin, scanpool.go)
 	poolTrades []*PaperTrade // simulated scan-pool trades
 	poolBucket int64         // last processed 1H wall-clock bucket
+	poolSeeded bool          // first tick only sets the baseline — no boot-time backfill of entries
 
 	convMu       sync.Mutex    // guards the 動態ATR均線收斂 4H strategy (admin, convergence.go)
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)
 	conv4hBucket int64         // last processed 4H wall-clock bucket
+	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
 	rsiFadeBook  *microBook // 逆勢超買空 30m (admin, microrev.go)
 	bollFadeBook *microBook // 布林重回 1h (admin, microrev.go)

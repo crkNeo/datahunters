@@ -144,6 +144,10 @@ func (s *Store) PoolTick() {
 		return
 	}
 	s.poolBucket = b1
+	if !s.poolSeeded { // boot: set the baseline only; don't backfill entries from the pre-startup bar
+		s.poolSeeded = true
+		return
+	}
 	for _, coin := range s.poolCoins() {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", "1h", poolKlimit)
 		if err != nil || len(cs) < 2 {
