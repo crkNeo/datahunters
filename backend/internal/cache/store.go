@@ -129,6 +129,10 @@ type Store struct {
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 
+	rsiFadeBook  *microBook // 逆勢超買空 30m (admin, microrev.go)
+	bollFadeBook *microBook // 布林重回 1h (admin, microrev.go)
+	meanRevBook  *microBook // 乖離回歸 1h (admin, microrev.go)
+
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
 	rlDown  map[string]bool // source → currently reported down (alert dedupe)
@@ -189,6 +193,10 @@ func NewStore(coins []string) *Store {
 	// weren't NY-concentrated; skipNY left at its default false).
 	s.paperGambleHedge.adminOnly = true // admin-only tab + admin-only push
 	s.paperGambleHedge.maxSLPct = 12    // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
+	// admin mean-reversion strategies (microrev.go)
+	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, signal: rsiFadeSignal}
+	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, signal: bollFadeSignal}
+	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, signal: meanRevSignal}
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -205,6 +213,9 @@ func NewStore(coins []string) *Store {
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.poolTrades = db.loadTrades("pool")
 		s.convTrades = db.loadTrades("conv")
+		s.rsiFadeBook.trades = db.loadTrades("rsifade")
+		s.bollFadeBook.trades = db.loadTrades("bollfade")
+		s.meanRevBook.trades = db.loadTrades("meanrev")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d gamblehedge=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades),
 			len(s.paperGambleHedge.trades), len(s.paperEMA.trades))

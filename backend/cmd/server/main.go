@@ -190,12 +190,38 @@ func main() {
 		}
 	}()
 
-	// conv/pool 出場改即時價:每 20s 用 WS 現價檢查止盈止損/停損(進場仍為 4H/1H 收 K)。
+	// 出場改即時價:每 20s 用 WS 現價檢查止盈止損/停損(進場仍為各自的收 K)。
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
 			store.PoolMarkTick()
+			store.RSIFadeMarkTick()
+			store.BollFadeMarkTick()
+			store.MeanRevMarkTick()
+		}
+	}()
+
+	// admin mean-reversion strategies (microrev.go), each evaluated per closed bar.
+	go func() {
+		store.RSIFadeTick()
+		ticker := time.NewTicker(1 * time.Minute) // 30m bars → 1min bucket check is plenty
+		for range ticker.C {
+			store.RSIFadeTick()
+		}
+	}()
+	go func() {
+		store.BollFadeTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.BollFadeTick()
+		}
+	}()
+	go func() {
+		store.MeanRevTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.MeanRevTick()
 		}
 	}()
 

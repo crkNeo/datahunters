@@ -537,6 +537,35 @@ async function loadConv() {
 function convOutcome(o) {
   return o === 'tp' ? '止盈 TP' : o === 'sl' ? '止損 SL' : o === 'expired' ? '逾時' : o
 }
+
+// ---- admin: mean-reversion strategies (逆勢超買空 / 布林重回 / 乖離回歸) ----
+const rsifade = ref(null)
+const bollfade = ref(null)
+const meanrev = ref(null)
+async function loadRsifade() {
+  try {
+    const res = await authFetch('/api/admin/rsifade')
+    if (res.ok) rsifade.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+async function loadBollfade() {
+  try {
+    const res = await authFetch('/api/admin/bollfade')
+    if (res.ok) bollfade.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+async function loadMeanrev() {
+  try {
+    const res = await authFetch('/api/admin/meanrev')
+    if (res.ok) meanrev.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 async function loadPaper() {
   try {
     const [p, g, eo] = await Promise.all([
@@ -1025,6 +1054,9 @@ function loadAll() {
     loadGambleHedge()
     if (mainTab.value === 'pool') loadPool()
     if (mainTab.value === 'conv') loadConv()
+    if (mainTab.value === 'rsifade') loadRsifade()
+    if (mainTab.value === 'bollfade') loadBollfade()
+    if (mainTab.value === 'meanrev') loadMeanrev()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
@@ -1092,7 +1124,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv']
+const NAV_TABS = ['paper', 'gamble', 'gamblehedge', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1170,6 +1202,7 @@ const TAB_MIN_ROLE = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', gamblehedge: 'admin', pool: 'admin', conv: 'admin',
+  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin',
 }
 watch(role, () => {
   const need = TAB_MIN_ROLE[mainTab.value]
@@ -1482,6 +1515,15 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'conv' }" @click="mainTab = 'conv'; loadConv()">
             均線收斂<em v-if="conv && conv.open.length" class="navbadge">{{ conv.open.length }}</em>
           </button>
+          <button :class="{ active: mainTab === 'rsifade' }" @click="mainTab = 'rsifade'; loadRsifade()">
+            逆勢超買空<em v-if="rsifade && rsifade.open.length" class="navbadge">{{ rsifade.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'bollfade' }" @click="mainTab = 'bollfade'; loadBollfade()">
+            布林重回<em v-if="bollfade && bollfade.open.length" class="navbadge">{{ bollfade.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
+            乖離回歸<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
+          </button>
         </div>
       </div>
     </nav>
@@ -1552,7 +1594,7 @@ watch(role, () => {
     <!-- 30幣掃描池 1H (admin only) -->
     <section v-else-if="mainTab === 'pool' && can('admin')">
       <div class="mk-head">
-        <h2>30幣掃描池 · 1H<span class="help" tabindex="0">?<span class="help-pop"><b>進場條件</b><br>EMA50 上穿 EMA200 金叉,且收盤 > EMA800(= 4H 的 EMA200)。<br><br><b>出場</b><br>持倉最高收盤 −8×ATR 吊燈停損,或 EMA50 下穿 EMA200(死叉)。<br><b>早鎖利</b>:浮盈達 +2×ATR 後,止損下限上移至 進場+0.5×ATR,之後吊燈續跟蹤。<br><br>掃描池=成交量前 30 檔;做多、每根 1H 收盤評估一次。⚠️ 管理員專屬模擬單,非投資建議。</span></span></h2>
+        <h2>30幣掃描池 · 1H<span class="help" tabindex="0">?<span class="help-pop"><b>進場條件</b><br>EMA50 上穿 EMA200 金叉,且收盤 > EMA800(= 4H 的 EMA200)。<br><br><b>出場</b><br>持倉最高收盤 −8×ATR 吊燈停損,或 EMA50 下穿 EMA200(死叉)。<br><b>早鎖利</b>:浮盈達 +2×ATR 後,止損下限上移至 進場+0.5×ATR,之後吊燈續跟蹤。<br><b>無固定止盈</b>——跟著吊燈移動停損吃趨勢,表格「動態止損」即當前停損位。<br><br>掃描池=成交量前 30 檔;做多。進場每根 1H 收盤評估;停損以即時價執行、死叉以 1H 收盤判定。⚠️ 管理員專屬模擬單,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="pool">進行中 {{ pool.open.length }} · 已結束 {{ pool.stats.closed }}</span>
       </div>
       <div v-if="pool" class="pstats">
@@ -1564,7 +1606,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="pool && pool.open.length">進行中 ({{ pool.open.length }})</h3>
       <table v-if="pool && pool.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">進場時間</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="吊燈/早鎖利動態停損位(隨行情上移)">動態止損</th><th class="r">進場時間</th></tr></thead>
         <tbody>
           <tr v-for="t in pool.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1572,6 +1614,7 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r short">{{ t.sl ? fmtPrice(t.sl) : '—' }}<small v-if="t.sl && t.sl >= t.entry" class="vtag"> 鎖利</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           </tr>
         </tbody>
@@ -1644,6 +1687,147 @@ watch(role, () => {
 
       <p v-if="conv && !conv.open.length && !conv.closed.length" class="loading">尚無訊號——需等 4H 收盤出現橫盤收斂 + 盈虧比達標(首次啟動需抓取歷史 K 線)。</p>
       <p v-else-if="!conv" class="loading">載入中…</p>
+    </section>
+
+    <!-- 逆勢超買空 · 30m (admin only) -->
+    <section v-else-if="mainTab === 'rsifade' && can('admin')">
+      <div class="mk-head">
+        <h2>逆勢超買空 · 30m<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:RSI(3) &gt; 90 且收盤價 &lt; EMA200(空頭中的反彈)→ 收盤<b>放空</b>。<br><b>止損</b> +2.5×ATR,<b>止盈</b> −2.0×ATR。<br>最多持有 16 根(30m),出場後冷卻 4 根。只做空;進場以 30m 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="rsifade">進行中 {{ rsifade.open.length }} · 已結束 {{ rsifade.stats.closed }}</span>
+      </div>
+      <div v-if="rsifade" class="pstats">
+        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ rsifade.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="rsifade.stats.win_rate >= 50 ? 'long' : 'short'">{{ rsifade.stats.win_rate }}%</div></div>
+        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="rsifade.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(rsifade.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="rsifade.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(rsifade.stats.total_pnl) }}</div></div>
+      </div>
+      <h3 class="psub" v-if="rsifade && rsifade.open.length">進行中 ({{ rsifade.open.length }})</h3>
+      <table v-if="rsifade && rsifade.open.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="t in rsifade.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r long">{{ fmtPrice(t.tp) }}</td>
+            <td class="r short">{{ fmtPrice(t.sl) }}</td>
+            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3 class="psub" v-if="rsifade && rsifade.closed.length">已結束 ({{ rsifade.closed.length }})</h3>
+      <table v-if="rsifade && rsifade.closed.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in rsifade.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="rsifade && !rsifade.open.length && !rsifade.closed.length" class="loading">尚無訊號——需等 30m 收盤觸發 RSI(3)&gt;90 空頭反彈(首次啟動需抓取歷史 K 線)。</p>
+      <p v-else-if="!rsifade" class="loading">載入中…</p>
+    </section>
+
+    <!-- 布林重回 · 1h (admin only) -->
+    <section v-else-if="mainTab === 'bollfade' && can('admin')">
+      <div class="mk-head">
+        <h2>布林重回 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:前一根收盤在布林(20, 2σ)通道<b>外</b>、本根收<b>回</b>通道內(過度延伸失敗),且方向與 EMA200 同側(空單需價在 EMA200 下方、多單反之)→ 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>止盈</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="bollfade">進行中 {{ bollfade.open.length }} · 已結束 {{ bollfade.stats.closed }}</span>
+      </div>
+      <div v-if="bollfade" class="pstats">
+        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ bollfade.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bollfade.stats.win_rate >= 50 ? 'long' : 'short'">{{ bollfade.stats.win_rate }}%</div></div>
+        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="bollfade.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bollfade.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="bollfade.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bollfade.stats.total_pnl) }}</div></div>
+      </div>
+      <h3 class="psub" v-if="bollfade && bollfade.open.length">進行中 ({{ bollfade.open.length }})</h3>
+      <table v-if="bollfade && bollfade.open.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="t in bollfade.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r long">{{ fmtPrice(t.tp) }}</td>
+            <td class="r short">{{ fmtPrice(t.sl) }}</td>
+            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3 class="psub" v-if="bollfade && bollfade.closed.length">已結束 ({{ bollfade.closed.length }})</h3>
+      <table v-if="bollfade && bollfade.closed.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in bollfade.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="bollfade && !bollfade.open.length && !bollfade.closed.length" class="loading">尚無訊號——需等 1H 收盤出現布林通道重回 + 盈虧比達標(首次啟動需抓取歷史 K 線)。</p>
+      <p v-else-if="!bollfade" class="loading">載入中…</p>
+    </section>
+
+    <!-- 乖離回歸 · 1h (admin only) -->
+    <section v-else-if="mainTab === 'meanrev' && can('admin')">
+      <div class="mk-head">
+        <h2>乖離回歸 · 1h<span class="help" tabindex="0">?<span class="help-pop"><b>進場</b>:收盤價偏離 EMA20 超過 2.0×ATR,且與 EMA200 趨勢同側(價在 EMA200 上方只接多、下方只接空)→ 朝 EMA20 回歸。<br><b>止損</b> 3.0×ATR,<b>止盈</b>=EMA20。<br>多空雙向,最多 24 根,冷卻 4 根;進場以 1h 收盤判定,止盈止損以即時價執行。<br><br>管理員專屬模擬單,⚠️ 非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="meanrev">進行中 {{ meanrev.open.length }} · 已結束 {{ meanrev.stats.closed }}</span>
+      </div>
+      <div v-if="meanrev" class="pstats">
+        <div class="pstat"><div class="stat-k">已結束</div><div class="stat-v">{{ meanrev.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="meanrev.stats.win_rate >= 50 ? 'long' : 'short'">{{ meanrev.stats.win_rate }}%</div></div>
+        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="meanrev.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(meanrev.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="meanrev.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(meanrev.stats.total_pnl) }}</div></div>
+      </div>
+      <h3 class="psub" v-if="meanrev && meanrev.open.length">進行中 ({{ meanrev.open.length }})</h3>
+      <table v-if="meanrev && meanrev.open.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="t in meanrev.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r long">{{ fmtPrice(t.tp) }}</td>
+            <td class="r short">{{ fmtPrice(t.sl) }}</td>
+            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3 class="psub" v-if="meanrev && meanrev.closed.length">已結束 ({{ meanrev.closed.length }})</h3>
+      <table v-if="meanrev && meanrev.closed.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in meanrev.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td><span class="otag" :class="t.outcome === 'tp' ? 'tp' : t.outcome === 'sl' ? 'sl' : 'expired'">{{ convOutcome(t.outcome) }}</span></td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="meanrev && !meanrev.open.length && !meanrev.closed.length" class="loading">尚無訊號——需等 1H 收盤出現乖離 2×ATR 訊號(首次啟動需抓取歷史 K 線)。</p>
+      <p v-else-if="!meanrev" class="loading">載入中…</p>
     </section>
 
     <!-- 後台管理 (admin only) -->
