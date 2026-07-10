@@ -15,6 +15,7 @@ import (
 	"datahunter/internal/gdelt"
 	"datahunter/internal/notify"
 	"datahunter/internal/push"
+	"datahunter/internal/robinhood"
 	"datahunter/internal/unlock"
 	"datahunter/internal/upbit"
 )
@@ -149,6 +150,12 @@ type Store struct {
 	unlockBoard []unlock.Row
 	unlockTime  time.Time
 
+	rhW     *robinhood.Watcher // Robinhood 上架 watcher (currency-pair diff, no key)
+	rhMu    sync.RWMutex       // guards the Robinhood board
+	rhBoard []RHCoin
+	rhNew   map[string]int64 // code → first-seen ms (recent-listing badge)
+	rhTime  time.Time
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -177,6 +184,8 @@ func NewStore(coins []string) *Store {
 		srState:           map[string]string{},
 		gdeltW:            gdelt.NewWatcher(),
 		unlockW:           unlock.NewWatcher(),
+		rhW:               robinhood.NewWatcher(),
+		rhNew:             map[string]int64{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},

@@ -94,7 +94,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit)) // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))   // GDELT market headlines (zh-TW)
 	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding)) // OKX funding-rate board
-	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))   // DefiLlama token-unlock board
+	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))       // DefiLlama token-unlock board
+	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))     // login 公告彈窗 (members)
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
@@ -519,6 +520,11 @@ func (s *Server) handleFunding(w http.ResponseWriter, r *http.Request) {
 // handleUnlock serves the DefiLlama token-unlock board.
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Unlocks())
+}
+
+// handleRobinhood serves the Robinhood 上架 board.
+func (s *Server) handleRobinhood(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.RobinhoodBoard())
 }
 
 // handleEvents serves the full high-impact US economic calendar.

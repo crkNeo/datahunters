@@ -880,6 +880,18 @@ async function loadUnlock() {
     /* secondary */
   }
 }
+// Robinhood 上架 (public)
+const robinhood = ref(null)
+async function loadRobinhood() {
+  try {
+    const res = await authFetch('/api/robinhood')
+    if (res.ok) robinhood.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const robinhoodNew = computed(() => (robinhood.value ? robinhood.value.coins.filter((c) => c.new).length : 0))
+
 const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
 const unlockRows = computed(() => {
   if (!unlock.value) return []
@@ -1143,6 +1155,7 @@ function loadAll() {
   loadNews()
   loadFunding()
   loadUnlock()
+  loadRobinhood()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1230,7 +1243,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
+const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1584,6 +1597,9 @@ watch(role, () => {
           </button>
           <button :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'; loadFunding()">資金費率</button>
           <button :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'; loadUnlock()">代幣解鎖</button>
+          <button :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
+            Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em>
+          </button>
           <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
@@ -2474,6 +2490,22 @@ watch(role, () => {
       <p v-else class="loading">載入代幣解鎖中…</p>
     </section>
 
+    <!-- Robinhood 上架 (currency-pair diff) -->
+    <section v-else-if="mainTab === 'robinhood'">
+      <div class="mk-head">
+        <h2>Robinhood 上架<span class="help" tabindex="0">?<span class="help-pop">監控 Robinhood 支援的加密幣清單,偵測到<b>新增可交易</b>的幣就即時推播(TG + 軟體)。Robinhood 上架常帶動幣價。清單即為目前可在 Robinhood 交易的幣;<b class="new-dot">新</b> 標記為近期新增。⚠️ 來源為 Robinhood 公開端點,僅供參考、非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="robinhood && robinhood.updated_at">來源 Robinhood · {{ robinhood.coins.length }} 檔可交易 · {{ fundClock(new Date(robinhood.updated_at).getTime()) }} 更新</span>
+      </div>
+      <div v-if="robinhood && robinhood.coins.length" class="rh-grid">
+        <div v-for="c in robinhood.coins" :key="c.code" class="rh-card" :class="{ isnew: c.new }">
+          <div class="rh-code">{{ c.code }}<span v-if="c.new" class="rh-new">新</span></div>
+          <div class="rh-name">{{ c.name }}</div>
+          <div class="rh-sym">{{ c.symbol }}</div>
+        </div>
+      </div>
+      <p v-else class="loading">載入 Robinhood 上架清單中…(首個週期後建立基準)</p>
+    </section>
+
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
       <!-- 內頁 -->
@@ -2896,6 +2928,13 @@ body::before {
 .mk-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 .mk-head h2 { font-size: 16px; margin: 0; }
 .mk-count { font-size: 12px; color: #8b909a; }
+.rh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.rh-card { background: #14161c; border: 1px solid #23262d; border-radius: 10px; padding: 10px 12px; }
+.rh-card.isnew { border-color: #d8ad48; background: #1a1710; }
+.rh-code { font-weight: 700; color: #e8e9ec; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.rh-new, .new-dot { background: #d8ad48; color: #14161c; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
+.rh-name { font-size: 12px; color: #9aa0a8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rh-sym { font-size: 11px; color: #6b7078; margin-top: 2px; }
 .mk-actions { display: flex; align-items: center; gap: 10px; }
 .clearbtn { background: transparent; border: 1px solid #4a2c2c; color: #c56a6a; font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: .15s; }
 .clearbtn:hover { border-color: #e05555; color: #e05555; background: rgba(224, 85, 85, 0.08); }

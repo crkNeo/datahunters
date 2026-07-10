@@ -141,6 +141,16 @@ func main() {
 		}
 	}()
 
+	// Robinhood 上架 watcher: diff the tradable crypto list → push new listings.
+	// First call seeds the baseline; undocumented endpoint so poll modestly.
+	go func() {
+		store.RobinhoodTick()
+		ticker := time.NewTicker(90 * time.Second)
+		for range ticker.C {
+			store.RobinhoodTick()
+		}
+	}()
+
 	// 支撐壓力 monitor (VIP): BTC/ETH/SOL/BNB support & resistance, breach alerts per
 	// closed 1h bar. Runs off the in-memory WS klines (no REST); first tick seeds only.
 	go func() {
