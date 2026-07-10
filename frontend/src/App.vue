@@ -892,6 +892,22 @@ async function loadRobinhood() {
 }
 const robinhoodNew = computed(() => (robinhood.value ? robinhood.value.coins.filter((c) => c.new).length : 0))
 
+// 大盤 AI 分析 (public, hourly)
+const marketAI = ref(null)
+async function loadMarketAI() {
+  try {
+    const res = await authFetch('/api/market-ai')
+    if (res.ok) marketAI.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const maiBody = computed(() => {
+  if (!marketAI.value || !marketAI.value.text) return ''
+  const i = marketAI.value.text.indexOf('\n')
+  return i > 0 ? marketAI.value.text.slice(i + 1).trim() : marketAI.value.text
+})
+
 const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
 const unlockRows = computed(() => {
   if (!unlock.value) return []
@@ -1156,6 +1172,7 @@ function loadAll() {
   loadFunding()
   loadUnlock()
   loadRobinhood()
+  loadMarketAI()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1502,6 +1519,16 @@ watch(role, () => {
   </div>
 
   <div class="wrap">
+    <!-- 整點大盤分析 (live message, above the recs) -->
+    <div v-if="marketAI && marketAI.text" class="mai-live">
+      <div class="mai-live-top">
+        <span class="mai-live-title"><span class="mai-dot"></span>整點大盤分析</span>
+        <span class="mai-live-time" v-if="marketAI.updated_at">{{ fundClock(new Date(marketAI.updated_at).getTime()) }} 更新 · 每小時更新</span>
+      </div>
+      <div class="mai-live-summary">{{ marketAI.summary }}</div>
+      <div class="mai-live-body">{{ maiBody }}</div>
+    </div>
+
     <!-- three cards -->
     <div class="cards" v-if="home">
       <!-- 做多推薦 -->
@@ -2935,6 +2962,14 @@ body::before {
 .rh-new, .new-dot { background: #d8ad48; color: #14161c; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
 .rh-name { font-size: 12px; color: #9aa0a8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rh-sym { font-size: 11px; color: #6b7078; margin-top: 2px; }
+.mai-live { background: #14161c; border: 1px solid #3a3320; border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; }
+.mai-live-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.mai-live-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }
+.mai-dot { width: 8px; height: 8px; border-radius: 50%; background: #2ec26b; box-shadow: 0 0 0 0 rgba(46,194,107,.6); animation: maipulse 1.8s infinite; }
+@keyframes maipulse { 0% { box-shadow: 0 0 0 0 rgba(46,194,107,.5); } 70% { box-shadow: 0 0 0 6px rgba(46,194,107,0); } 100% { box-shadow: 0 0 0 0 rgba(46,194,107,0); } }
+.mai-live-time { font-size: 11px; color: #8b909a; }
+.mai-live-summary { font-size: 15px; font-weight: 600; color: #e8e9ec; line-height: 1.5; margin-bottom: 6px; }
+.mai-live-body { font-size: 13px; color: #b9bdc4; line-height: 1.85; white-space: pre-wrap; word-break: break-word; }
 .mk-actions { display: flex; align-items: center; gap: 10px; }
 .clearbtn { background: transparent; border: 1px solid #4a2c2c; color: #c56a6a; font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: .15s; }
 .clearbtn:hover { border-color: #e05555; color: #e05555; background: rgba(224, 85, 85, 0.08); }

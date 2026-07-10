@@ -14,6 +14,7 @@ import (
 	"datahunter/internal/exchange"
 	"datahunter/internal/gdelt"
 	"datahunter/internal/notify"
+	"datahunter/internal/marketai"
 	"datahunter/internal/push"
 	"datahunter/internal/robinhood"
 	"datahunter/internal/unlock"
@@ -156,6 +157,14 @@ type Store struct {
 	rhNew   map[string]int64 // code → first-seen ms (recent-listing badge)
 	rhTime  time.Time
 
+	maiW       *marketai.Client // 大盤 AI 分析 (free keyless Pollinations)
+	maiMu      sync.RWMutex     // guards the market-AI commentary
+	maiText    string           // latest full zh-TW analysis
+	maiSummary string           // first line (push title / one-liner)
+	maiTime    time.Time
+	maiBucket  int64 // last processed hour bucket (once-per-hour gate)
+	maiSeeded  bool  // first analysis shows but doesn't push
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -186,6 +195,7 @@ func NewStore(coins []string) *Store {
 		unlockW:           unlock.NewWatcher(),
 		rhW:               robinhood.NewWatcher(),
 		rhNew:             map[string]int64{},
+		maiW:              marketai.NewClient(),
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},

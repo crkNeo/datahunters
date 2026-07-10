@@ -263,6 +263,16 @@ func main() {
 		}
 	}()
 
+	// 大盤 AI 分析:每整點用免費(免 key)AI 產一段大盤動態評論。MarketAITick 內部
+	// 自我閘門到每小時一次;60s 輪詢確保整點後一分鐘內觸發。
+	go func() {
+		store.MarketAITick() // first run seeds (shows, no push)
+		ticker := time.NewTicker(60 * time.Second)
+		for range ticker.C {
+			store.MarketAITick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.
