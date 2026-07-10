@@ -111,6 +111,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
 	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose)) // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/gamble-a", s.gate(A, s.handleGambleA)) // 超新星·A 緊止損 (admin A/B)
+	mux.HandleFunc("/api/admin/gamble-b", s.gate(A, s.handleGambleB)) // 超新星·B 位置閘門 (admin A/B)
 	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))         // 30幣掃描池 1H (admin-only)
 	mux.HandleFunc("/api/admin/conv", s.gate(A, s.handleConv))               // 動態ATR均線收斂 4H (admin-only)
 	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))         // 逆勢超買空 30m (admin-only)
@@ -370,13 +372,19 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Gamble())
 }
 
+// handleGambleA serves the admin A/B 超新星·A(緊止損)tracker.
+func (s *Server) handleGambleA(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.GambleA()) }
+
+// handleGambleB serves the admin A/B 超新星·B(位置閘門)tracker.
+func (s *Server) handleGambleB(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.GambleB()) }
+
 // handleExport streams a strategy book's full trade history as CSV (admin only).
-// ?book=main|gamble|emaonly. A UTF-8 BOM is emitted so Excel opens the
-// Chinese/number columns correctly.
+// ?book=main|gamble|gambleA|gambleB|emaonly. A UTF-8 BOM is emitted so Excel opens
+// the Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch book {
-	case "main", "gamble", "emaonly":
+	case "main", "gamble", "gambleA", "gambleB", "emaonly":
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return

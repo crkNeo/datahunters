@@ -456,12 +456,17 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
 		s.convMu.Unlock()
-	case "main", "gamble", "emaonly":
+	case "main", "gamble", "gambleA", "gambleB", "emaonly":
 		s.paperMu.Lock()
 		b := s.paperMain
-		if book == "gamble" {
+		switch book {
+		case "gamble":
 			b = s.paperGamble
-		} else if book == "emaonly" {
+		case "gambleA":
+			b = s.paperGambleA
+		case "gambleB":
+			b = s.paperGambleB
+		case "emaonly":
 			b = s.paperEMA
 		}
 		b.trades = keepIf(b.trades, closedOnly)
@@ -511,6 +516,8 @@ func (s *Store) retrofitMultiTP() {
 	s.paperMu.Lock()
 	fill("main", s.paperMain.plan, s.paperMain.trades)
 	fill("gamble", s.paperGamble.plan, s.paperGamble.trades)
+	fill("gambleA", s.paperGambleA.plan, s.paperGambleA.trades)
+	fill("gambleB", s.paperGambleB.plan, s.paperGambleB.trades)
 	fill("emaonly", s.paperEMA.plan, s.paperEMA.trades)
 	s.paperMu.Unlock()
 	s.convMu.Lock()

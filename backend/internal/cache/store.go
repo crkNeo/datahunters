@@ -59,6 +59,8 @@ type Store struct {
 	paperMu          sync.Mutex // guards the paper-trading books
 	paperMain        *paperBook // disciplined: high bar, fresh-cross only
 	paperGamble      *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
+	paperGambleA     *paperBook // admin A/B: 超新星 + 收緊止損濾網 (maxSLPct=8)
+	paperGambleB     *paperBook // admin A/B: 超新星 + 進場位置閘門 (posGate=0.9)
 	paperEMA         *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
@@ -159,7 +161,9 @@ func NewStore(coins []string) *Store {
 		ex:                exchange.NewClient(),
 		coins:             coins,
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),         // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
+		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),  // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
+		paperGambleA:      newBook("gambleA", 50, false, 1*time.Hour, 0), // admin A/B: 收緊止損
+		paperGambleB:      newBook("gambleB", 50, false, 1*time.Hour, 0), // admin A/B: 位置閘門
 		paperEMA:          newBook("emaonly", 0, false, 0, 0),                // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
@@ -196,6 +200,11 @@ func NewStore(coins []string) *Store {
 	s.paperGamble.maxSLPct = 12 // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
 	s.paperMain.plan = tpMomentum
 	s.paperEMA.plan = tpMomentum
+	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
+	// candidate fix so it can be compared against the base 超新星.
+	s.paperGambleA.plan, s.paperGambleA.adminOnly, s.paperGambleA.maxSLPct = tpMomentum, true, 8 // A: 收緊止損濾網 12→8
+	s.paperGambleB.plan, s.paperGambleB.adminOnly, s.paperGambleB.maxSLPct = tpMomentum, true, 12
+	s.paperGambleB.posGate = 0.9 // B: 進場位置閘門(多單>0.9 / 空單<0.1 不追)
 	// admin mean-reversion strategies (microrev.go)
 	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, signal: rsiFadeSignal}
 	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: bollFadeSignal}
@@ -212,6 +221,8 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
+		s.paperGambleA.trades = db.loadTrades("gambleA")
+		s.paperGambleB.trades = db.loadTrades("gambleB")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.poolTrades = db.loadTrades("pool")
 		s.convTrades = db.loadTrades("conv")

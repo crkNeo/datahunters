@@ -25,6 +25,7 @@ type RadarItem struct {
 	Trigger  float64 `json:"trigger"`   // momentum entry (breakout/breakdown level)
 	TP       float64 `json:"tp"`        // take-profit (1.382 fib extension)
 	SL       float64 `json:"sl"`        // stop-loss (swing extreme)
+	Pos      float64 `json:"pos"`       // price position in the 12h range (0=low, 1=high)
 }
 
 // RadarData is the breakout-radar payload: potential pumps and dumps.
@@ -187,13 +188,13 @@ func (s *Store) computeRadar() RadarData {
 			if math.Abs(oiAccum) < 1 {
 				pump = cvd >= 0
 			}
-			entry, trigger, tp, sl := entryLevels(kl, pump)
+			entry, trigger, tp, sl, pos := entryLevels(kl, pump)
 			out[i] = res{
 				item: RadarItem{
 					Coin: c.coin, Price: c.price, Chg24: round2(c.chg), Vol24: c.vol,
 					VolSpike: round2(volSpike), OIChg: round2(oiAccum), CVD: round2(cvd),
 					Accel: round2(accel), Score: score, Entry: entry, Trigger: trigger,
-					TP: tp, SL: sl,
+					TP: tp, SL: sl, Pos: round2(pos),
 				},
 				pump: pump, ok: true,
 			}
@@ -269,7 +270,9 @@ const tpMult, slMult = 0.618, 0.5
 // entryLevels derives entry, trigger and TP/SL from the recent ~12h swing.
 // Entry is at market (the radar targets the early stage); TP/SL are set relative
 // to the current price by tpMult/slMult × the swing range.
-func entryLevels(kl []exchange.Candle, pump bool) (entry, trigger, tp, sl float64) {
+// pos is where the current price sits in the 12h range (0=low, 1=high) — used by
+// the 位置閘門 to avoid chasing exhaustion (a long near the top / short near bottom).
+func entryLevels(kl []exchange.Candle, pump bool) (entry, trigger, tp, sl, pos float64) {
 	n := len(kl)
 	w := 12
 	if n < w {
@@ -286,10 +289,14 @@ func entryLevels(kl []exchange.Candle, pump bool) (entry, trigger, tp, sl float6
 	}
 	rng := hi - lo
 	cur := kl[n-1].Close
-	if pump {
-		return hi - 0.382*rng, hi * 1.003, cur + tpMult*rng, cur - slMult*rng
+	pos = 0.5
+	if rng > 0 {
+		pos = (cur - lo) / rng
 	}
-	return lo + 0.382*rng, lo * 0.997, cur - tpMult*rng, cur + slMult*rng
+	if pump {
+		return hi - 0.382*rng, hi * 1.003, cur + tpMult*rng, cur - slMult*rng, pos
+	}
+	return lo + 0.382*rng, lo * 0.997, cur - tpMult*rng, cur + slMult*rng, pos
 }
 
 func clamp(x, lo, hi float64) float64 {

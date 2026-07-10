@@ -142,6 +142,7 @@ type paperBook struct {
 	requireEMA   bool    // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
 	adminOnly    bool    // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
 	maxSLPct     float64 // >0: skip entries whose SL distance exceeds this % (caps far-SL / liquidation risk)
+	posGate      float64 // >0: skip chasing exhaustion — long if range-pos > gate, short if < 1-gate
 	plan         *tpPlan // >nil: 分批止盈 (multi take-profit) instead of a single TP
 	trades       []*PaperTrade
 	armed        map[string]bool
@@ -192,6 +193,8 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
+	s.tickBook(s.paperGambleA, radar, px, pumpSc, dumpSc, now)
+	s.tickBook(s.paperGambleB, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -212,6 +215,8 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
+		collect("gambleA", s.paperGambleA)
+		collect("gambleB", s.paperGambleB)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -376,6 +381,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 					continue
 				}
 			}
+			if b.posGate > 0 { // 不追竭盡:多單已在 12h 區間高位、空單已在低位 → 立即反轉衝止損的來源
+				if (dir == "long" && it.Pos > b.posGate) || (dir == "short" && it.Pos < 1-b.posGate) {
+					continue
+				}
+			}
 			tr := &PaperTrade{
 				ID:   fmt.Sprintf("%s|%s|%s|%d", b.name, it.Coin, dir, now.UnixMilli()),
 				Coin: it.Coin, Dir: dir, Score: it.Score, Entry: roundPx(p), TP: roundPx(it.TP), SL: roundPx(it.SL),
@@ -410,6 +420,10 @@ func bookLabel(name string) string {
 	switch name {
 	case "gamble":
 		return "超新星"
+	case "gambleA":
+		return "超新星·A 緊止損"
+	case "gambleB":
+		return "超新星·B 位置閘"
 	case "emaonly":
 		return "銀河"
 	case "trail":
@@ -461,7 +475,7 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "pool", "rsifade", "bollfade", "meanrev":
+	case "gamble", "gambleA", "gambleB", "emaonly", "conv", "pool", "rsifade", "bollfade", "meanrev":
 		return name
 	}
 	return "paper" // main
@@ -633,8 +647,10 @@ func (b *paperBook) state() PaperState {
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
-func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
+func (s *Store) Paper() PaperState   { return s.serve(s.paperMain, 55) }
+func (s *Store) Gamble() PaperState  { return s.serve(s.paperGamble, 50) }
+func (s *Store) GambleA() PaperState { return s.serve(s.paperGambleA, 50) } // admin A/B: 緊止損
+func (s *Store) GambleB() PaperState { return s.serve(s.paperGambleB, 50) } // admin A/B: 位置閘門
 
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
@@ -652,6 +668,10 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
+	case "gambleA":
+		b = s.paperGambleA
+	case "gambleB":
+		b = s.paperGambleB
 	case "emaonly":
 		b = s.paperEMA
 	default:

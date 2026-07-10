@@ -635,7 +635,7 @@ async function clearStrat(book, loader, closedOnly) {
   if (res.ok && loader) loader()
 }
 // current book name for the shared strategy section (星軌/超新星/銀河)
-const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }[mainTab.value]))
+const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', gambleA: 'gambleA', gambleB: 'gambleB', emaonly: 'emaonly' }[mainTab.value]))
 // the three mean-reversion tabs share one layout; meta drives the unified section.
 const microMeta = {
   rsifade: {
@@ -665,8 +665,21 @@ async function loadPaper() {
     /* paper is secondary */
   }
 }
+const gambleA = ref(null)
+const gambleB = ref(null)
+async function loadGambleAB() {
+  try {
+    const [a, b] = await Promise.all([authFetch('/api/admin/gamble-a'), authFetch('/api/admin/gamble-b')])
+    if (a.ok) gambleA.value = await a.json()
+    if (b.ok) gambleB.value = await b.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 const book = computed(() =>
   mainTab.value === 'gamble' ? gamble.value
+    : mainTab.value === 'gambleA' ? gambleA.value
+    : mainTab.value === 'gambleB' ? gambleB.value
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
@@ -691,7 +704,7 @@ async function manualExit(t) {
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
-  const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
+  const map = { paper: 'main', gamble: 'gamble', gambleA: 'gambleA', gambleB: 'gambleB', emaonly: 'emaonly' }
   const bookName = map[mainTab.value]
   if (!bookName) return
   try {
@@ -1144,6 +1157,7 @@ function loadAll() {
     loadUsers()
     // load every strategy each cycle so the nav badges show open counts without
     // having to open each tab first
+    loadGambleAB()
     loadPool()
     loadConv()
     loadRsifade()
@@ -1216,7 +1230,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
+const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1294,7 +1308,7 @@ const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
-  admin: 'admin', pool: 'admin', conv: 'admin',
+  admin: 'admin', pool: 'admin', conv: 'admin', gambleA: 'admin', gambleB: 'admin',
   rsifade: 'admin', bollfade: 'admin', meanrev: 'admin',
 }
 watch(role, () => {
@@ -1608,6 +1622,12 @@ watch(role, () => {
         <div class="navbtns">
           <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor)">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'gambleA' }" @click="mainTab = 'gambleA'; loadGambleAB()">
+            超新星·A緊損<em v-if="gambleA && gambleA.open.length" class="navbadge">{{ gambleA.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'gambleB' }" @click="mainTab = 'gambleB'; loadGambleAB()">
+            超新星·B位置<em v-if="gambleB && gambleB.open.length" class="navbadge">{{ gambleB.open.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'pool' }" @click="mainTab = 'pool'; loadPool()">
             30幣掃描池<em v-if="pool && pool.open.length" class="navbadge">{{ pool.open.length }}</em>
@@ -2214,9 +2234,9 @@ watch(role, () => {
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gambleA' || mainTab === 'gambleB' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gambleA' ? '超新星 · A(緊止損 8%)' : mainTab === 'gambleB' ? '超新星 · B(位置閘門 0.9)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gambleA'">管理員 A/B 觀察:與超新星<b>同進場、同分批止盈</b>,唯一差別是<b>止損濾網收緊到 8%</b>(超新星本體為 12%)——止損距離 &gt;8% 的高波動幣不進場,用來測試「砍掉寬止損大虧單」是否更好。⚠️ 僅供觀察。</template><template v-else-if="mainTab === 'gambleB'">管理員 A/B 觀察:與超新星<b>同進場、同分批止盈</b>,唯一差別是加了<b>進場位置閘門</b>——多單若價格已站在 12h 區間 <b>&gt;0.9</b>(追頂)、空單 &lt;0.1(追底)就不進場,用來測試「不追竭盡是否減少直接衝止損」。⚠️ 僅供觀察。</template><template v-else-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
         <button v-if="can('admin')" class="clearbtn" @click="clearStrat(curPaperBook, loadPaper, true)">清已結束</button>
@@ -2250,7 +2270,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab === 'paper' || mainTab === 'gamble'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -2258,7 +2278,7 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td v-if="mainTab === 'paper' || mainTab === 'gamble'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
+            <td v-if="mainTab !== 'emaonly'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
             <td v-if="bookF && bookF.stats.multi_tp" class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ''">
               <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩{{ Math.round((1 - (t.filled || 0)) * 100) }}%</span></template>
               <span v-else class="tsmall">單一</span>
