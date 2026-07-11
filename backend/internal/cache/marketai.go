@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -40,10 +41,12 @@ func (s *Store) MarketAITick() {
 	label := "大盤AI分析(" + s.maiW.Provider() + ")"
 	text, err := s.maiW.Analyze(maiSystem, "目前大盤數據:\n"+snap+"\n\n請分析目前大盤動態。")
 	if err != nil {
+		log.Printf("market-AI: analysis FAILED via %s: %v", s.maiW.Provider(), err)
 		s.apiFail(label, err.Error())
 		return
 	}
 	s.apiOK(label)
+	log.Printf("market-AI: analysis updated via %s (%d chars)", s.maiW.Provider(), len(text))
 	summary := text
 	if i := strings.IndexByte(text, '\n'); i > 0 {
 		summary = strings.TrimSpace(text[:i])

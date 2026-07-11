@@ -267,6 +267,10 @@ func main() {
 	// 小時一次;60s 輪詢確保整點後一分鐘內觸發。
 	log.Printf("market-AI provider: %s (set GEMINI_API_KEY in .env to use Gemini)", store.MarketAIProvider())
 	go func() {
+		// run once shortly after boot — waiting for prices/feed/SR to prime so the
+		// first analysis has real data (and the card appears without waiting an hour).
+		time.Sleep(15 * time.Second)
+		log.Printf("market-AI: running first analysis…")
 		store.MarketAITick() // first run seeds (shows, no push)
 		ticker := time.NewTicker(60 * time.Second)
 		for range ticker.C {
