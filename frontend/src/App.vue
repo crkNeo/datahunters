@@ -1265,6 +1265,30 @@ function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
 let onDocClick = null
+// keep an opened help bubble inside the viewport (mobile PWA: it can otherwise
+// overflow off the right edge or bottom). Shift left / flip up as needed.
+function positionHelpPop(help) {
+  const pop = help.querySelector('.help-pop')
+  if (!pop) return
+  pop.style.left = '0'
+  pop.style.right = 'auto'
+  pop.style.top = '24px'
+  pop.style.bottom = 'auto'
+  requestAnimationFrame(() => {
+    const m = 8
+    const vw = window.innerWidth, vh = window.innerHeight
+    const icon = help.getBoundingClientRect()
+    let pr = pop.getBoundingClientRect()
+    if (pr.right > vw - m) pop.style.left = -(pr.right - (vw - m)) + 'px' // overflow right → shift left
+    pr = pop.getBoundingClientRect()
+    if (pr.left < m) pop.style.left = (parseFloat(pop.style.left || '0') + (m - pr.left)) + 'px' // overflow left → nudge right
+    if (icon.bottom + pr.height > vh - m && icon.top - pr.height > m) { // overflow bottom → flip above
+      pop.style.top = 'auto'
+      pop.style.bottom = '24px'
+    }
+  })
+}
+
 let hiddenAt = 0
 onMounted(async () => {
   // help popovers: click the ? to toggle, click anywhere else (or another ?) to
@@ -1273,7 +1297,10 @@ onMounted(async () => {
     if (e.target.closest('.help-pop')) return // tap inside the tooltip → keep open
     const help = e.target.closest('.help')
     document.querySelectorAll('.help.open').forEach((el) => { if (el !== help) el.classList.remove('open') })
-    if (help) help.classList.toggle('open')
+    if (help) {
+      help.classList.toggle('open')
+      if (help.classList.contains('open')) positionHelpPop(help) // keep the bubble on-screen
+    }
   }
   document.addEventListener('click', onDocClick)
   loadConfig()
