@@ -263,8 +263,9 @@ func main() {
 		}
 	}()
 
-	// 大盤 AI 分析:每整點用免費(免 key)AI 產一段大盤動態評論。MarketAITick 內部
-	// 自我閘門到每小時一次;60s 輪詢確保整點後一分鐘內觸發。
+	// 大盤 AI 分析:每整點用 AI 產一段大盤動態評論。MarketAITick 內部自我閘門到每
+	// 小時一次;60s 輪詢確保整點後一分鐘內觸發。
+	log.Printf("market-AI provider: %s (set GEMINI_API_KEY in .env to use Gemini)", store.MarketAIProvider())
 	go func() {
 		store.MarketAITick() // first run seeds (shows, no push)
 		ticker := time.NewTicker(60 * time.Second)

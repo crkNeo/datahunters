@@ -62,6 +62,15 @@ func (s *Store) MarketAITick() {
 	}
 }
 
+// MarketAIProvider names the active AI backend (Gemini if a key is set, else
+// Pollinations) — logged at startup so a missing key is obvious.
+func (s *Store) MarketAIProvider() string {
+	if s.maiW == nil {
+		return "off"
+	}
+	return s.maiW.Provider()
+}
+
 // MarketAI returns the latest commentary.
 func (s *Store) MarketAI() MarketAIData {
 	s.maiMu.RLock()
