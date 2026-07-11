@@ -7,6 +7,7 @@ package marketai
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,12 +18,17 @@ import (
 
 // Client talks to whichever free AI backend is configured.
 type Client struct {
-	http      *http.Client
-	geminiKey string
+	http        *http.Client
+	geminiKey   string
+	geminiModel string
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: 30 * time.Second}, geminiKey: os.Getenv("GEMINI_API_KEY")}
+	model := os.Getenv("GEMINI_MODEL")
+	if model == "" {
+		model = "gemini-2.0-flash"
+	}
+	return &Client{http: &http.Client{Timeout: 30 * time.Second}, geminiKey: os.Getenv("GEMINI_API_KEY"), geminiModel: model}
 }
 
 // Provider names the active backend (for status labels).
@@ -41,14 +47,20 @@ func (c *Client) Analyze(system, user string) (string, error) {
 	return c.pollinations(system, user)
 }
 
-// gemini calls Google's free-tier Gemini Flash.
+// gemini calls Google's free-tier Gemini Flash. safetySettings are relaxed so
+// financial commentary isn't blocked as "dangerous content".
 func (c *Client) gemini(system, user string) (string, error) {
+	relax := func(cat string) map[string]string { return map[string]string{"category": cat, "threshold": "BLOCK_NONE"} }
 	payload, _ := json.Marshal(map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": system}}},
 		"contents":           []map[string]any{{"parts": []map[string]string{{"text": user}}}},
 		"generationConfig":   map[string]any{"temperature": 0.5},
+		"safetySettings": []map[string]string{
+			relax("HARM_CATEGORY_HARASSMENT"), relax("HARM_CATEGORY_HATE_SPEECH"),
+			relax("HARM_CATEGORY_SEXUALLY_EXPLICIT"), relax("HARM_CATEGORY_DANGEROUS_CONTENT"),
+		},
 	})
-	u := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + c.geminiKey
+	u := "https://generativelanguage.googleapis.com/v1beta/models/" + c.geminiModel + ":generateContent?key=" + c.geminiKey
 	req, err := http.NewRequest("POST", u, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
@@ -60,8 +72,8 @@ func (c *Client) gemini(system, user string) (string, error) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", errBad
+	if resp.StatusCode != http.StatusOK { // surface the real error (invalid key / model / quota…)
+		return "", fmt.Errorf("gemini(%s) HTTP %d: %s", c.geminiModel, resp.StatusCode, snippet(body))
 	}
 	var out struct {
 		Candidates []struct {
@@ -72,10 +84,22 @@ func (c *Client) gemini(system, user string) (string, error) {
 			} `json:"content"`
 		} `json:"candidates"`
 	}
-	if json.Unmarshal(body, &out) != nil || len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
-		return "", errBad
+	if json.Unmarshal(body, &out) != nil {
+		return "", fmt.Errorf("gemini parse err: %s", snippet(body))
+	}
+	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("gemini no content (safety/empty): %s", snippet(body))
 	}
 	return strings.TrimSpace(out.Candidates[0].Content.Parts[0].Text), nil
+}
+
+// snippet returns a trimmed, length-capped view of a response body for error logs.
+func snippet(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 240 {
+		s = s[:240]
+	}
+	return s
 }
 
 // pollinations calls the keyless legacy GET endpoint (the POST /openai one is
@@ -95,17 +119,12 @@ func (c *Client) pollinations(system, user string) (string, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", errBad
+		return "", fmt.Errorf("pollinations HTTP %d: %s", resp.StatusCode, snippet(body))
 	}
 	text := strings.TrimSpace(string(body))
 	if text == "" || strings.HasPrefix(text, "{\"error") {
-		return "", errBad // JSON error envelope, not a completion
+		return "", fmt.Errorf("pollinations bad body: %s", snippet(body))
 	}
 	return text, nil
 }
 
-type aiErr string
-
-func (e aiErr) Error() string { return string(e) }
-
-const errBad = aiErr("marketai: bad/empty AI response")
