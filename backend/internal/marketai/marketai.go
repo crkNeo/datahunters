@@ -47,9 +47,38 @@ func (c *Client) Analyze(system, user string) (string, error) {
 	return c.pollinations(system, user)
 }
 
-// gemini calls Google's free-tier Gemini Flash. safetySettings are relaxed so
-// financial commentary isn't blocked as "dangerous content".
+// gemini tries the configured model, then falls back through other free-tier Flash
+// models on a per-model failure (404 not-found / 429 quota) — different models have
+// separate quota buckets. Stops early only on an auth error (400/403 = key problem).
+// The first model that works is remembered for subsequent calls.
 func (c *Client) gemini(system, user string) (string, error) {
+	tried := map[string]bool{}
+	var lastErr error
+	for _, m := range c.geminiCandidates() {
+		if m == "" || tried[m] {
+			continue
+		}
+		tried[m] = true
+		text, status, err := c.geminiOnce(m, system, user)
+		if err == nil {
+			c.geminiModel = m // stick with the working model
+			return text, nil
+		}
+		lastErr = err
+		if status == 400 || status == 403 { // invalid key / permission → no model will help
+			break
+		}
+	}
+	return "", lastErr
+}
+
+func (c *Client) geminiCandidates() []string {
+	return []string{c.geminiModel, "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"}
+}
+
+// geminiOnce makes one generateContent call. safetySettings are relaxed so
+// financial commentary isn't blocked as "dangerous content".
+func (c *Client) geminiOnce(model, system, user string) (string, int, error) {
 	relax := func(cat string) map[string]string { return map[string]string{"category": cat, "threshold": "BLOCK_NONE"} }
 	payload, _ := json.Marshal(map[string]any{
 		"system_instruction": map[string]any{"parts": []map[string]string{{"text": system}}},
@@ -60,20 +89,20 @@ func (c *Client) gemini(system, user string) (string, error) {
 			relax("HARM_CATEGORY_SEXUALLY_EXPLICIT"), relax("HARM_CATEGORY_DANGEROUS_CONTENT"),
 		},
 	})
-	u := "https://generativelanguage.googleapis.com/v1beta/models/" + c.geminiModel + ":generateContent?key=" + c.geminiKey
+	u := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + c.geminiKey
 	req, err := http.NewRequest("POST", u, bytes.NewReader(payload))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK { // surface the real error (invalid key / model / quota…)
-		return "", fmt.Errorf("gemini(%s) HTTP %d: %s", c.geminiModel, resp.StatusCode, snippet(body))
+		return "", resp.StatusCode, fmt.Errorf("gemini(%s) HTTP %d: %s", model, resp.StatusCode, snippet(body))
 	}
 	var out struct {
 		Candidates []struct {
@@ -85,12 +114,12 @@ func (c *Client) gemini(system, user string) (string, error) {
 		} `json:"candidates"`
 	}
 	if json.Unmarshal(body, &out) != nil {
-		return "", fmt.Errorf("gemini parse err: %s", snippet(body))
+		return "", 200, fmt.Errorf("gemini parse err: %s", snippet(body))
 	}
 	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("gemini no content (safety/empty): %s", snippet(body))
+		return "", 200, fmt.Errorf("gemini no content (safety/empty): %s", snippet(body))
 	}
-	return strings.TrimSpace(out.Candidates[0].Content.Parts[0].Text), nil
+	return strings.TrimSpace(out.Candidates[0].Content.Parts[0].Text), 200, nil
 }
 
 // snippet returns a trimmed, length-capped view of a response body for error logs.
