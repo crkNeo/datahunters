@@ -162,8 +162,9 @@ type Store struct {
 	maiText    string           // latest full zh-TW analysis
 	maiSummary string           // first line (push title / one-liner)
 	maiTime    time.Time
-	maiBucket  int64 // last processed hour bucket (once-per-hour gate)
-	maiSeeded  bool  // first analysis shows but doesn't push
+	maiBucket  int64     // last SUCCESSFUL hour bucket (once-per-hour gate)
+	maiRetryAt time.Time // after a failure, don't retry before this (5-min backoff)
+	maiSeeded  bool      // first analysis shows but doesn't push
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 

@@ -29,29 +29,33 @@ func (s *Store) MarketAITick() {
 	if s.maiW == nil {
 		return
 	}
-	h := time.Now().UTC().Unix() / 3600
-	if h == s.maiBucket {
+	now := time.Now()
+	h := now.UTC().Unix() / 3600
+	if h == s.maiBucket { // already succeeded this hour
 		return
 	}
-	s.maiBucket = h
-	seeded := s.maiSeeded
-	s.maiSeeded = true
+	if now.Before(s.maiRetryAt) { // backing off after a recent failure
+		return
+	}
 
 	snap := s.marketSnapshot()
 	label := "大盤AI分析(" + s.maiW.Provider() + ")"
 	text, err := s.maiW.Analyze(maiSystem, "目前大盤數據:\n"+snap+"\n\n請分析目前大盤動態。")
 	if err != nil {
-		log.Printf("market-AI: analysis FAILED via %s: %v", s.maiW.Provider(), err)
+		s.maiRetryAt = now.Add(5 * time.Minute) // don't consume the hour; retry in 5 min
+		log.Printf("market-AI: analysis FAILED via %s: %v (retry in 5m)", s.maiW.Provider(), err)
 		s.apiFail(label, err.Error())
 		return
 	}
 	s.apiOK(label)
+	s.maiBucket = h // success → done for this hour
+	seeded := s.maiSeeded
+	s.maiSeeded = true
 	log.Printf("market-AI: analysis updated via %s (%d chars)", s.maiW.Provider(), len(text))
 	summary := text
 	if i := strings.IndexByte(text, '\n'); i > 0 {
 		summary = strings.TrimSpace(text[:i])
 	}
-	now := time.Now()
 	s.maiMu.Lock()
 	s.maiText, s.maiSummary, s.maiTime = text, summary, now
 	s.maiMu.Unlock()
