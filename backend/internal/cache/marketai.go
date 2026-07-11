@@ -37,12 +37,13 @@ func (s *Store) MarketAITick() {
 	s.maiSeeded = true
 
 	snap := s.marketSnapshot()
+	label := "大盤AI分析(" + s.maiW.Provider() + ")"
 	text, err := s.maiW.Analyze(maiSystem, "目前大盤數據:\n"+snap+"\n\n請分析目前大盤動態。")
 	if err != nil {
-		s.apiFail("大盤AI分析(Pollinations)", err.Error())
+		s.apiFail(label, err.Error())
 		return
 	}
-	s.apiOK("大盤AI分析(Pollinations)")
+	s.apiOK(label)
 	summary := text
 	if i := strings.IndexByte(text, '\n'); i > 0 {
 		summary = strings.TrimSpace(text[:i])
