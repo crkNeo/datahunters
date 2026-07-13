@@ -97,6 +97,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))       // DefiLlama token-unlock board
 	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))  // 大盤 AI 分析(每整點)
+	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))     // 板塊強弱/輪動(每整點)
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))     // login 公告彈窗 (members)
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
@@ -531,6 +532,11 @@ func (s *Server) handleRobinhood(w http.ResponseWriter, r *http.Request) {
 // handleMarketAI serves the hourly 大盤 AI 分析.
 func (s *Server) handleMarketAI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.MarketAI())
+}
+
+// handleSectors serves the hourly 板塊強弱/輪動 board.
+func (s *Server) handleSectors(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SectorBoard())
 }
 
 // handleEvents serves the full high-impact US economic calendar.

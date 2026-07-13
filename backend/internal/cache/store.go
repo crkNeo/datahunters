@@ -166,6 +166,14 @@ type Store struct {
 	maiRetryAt time.Time // after a failure, don't retry before this (5-min backoff)
 	maiSeeded  bool      // first analysis shows but doesn't push
 
+	sectorMu     sync.RWMutex       // guards the 板塊強弱 board (hourly)
+	sectorBoard  []SectorRow        // ranked sectors (strongest first)
+	sectorPrev   map[string]float64 // sector → last-hour VsBTC (for the rotation Δ)
+	sectorBtcChg float64
+	sectorTime   time.Time
+	sectorBucket int64 // last processed hour bucket
+	sectorSeeded bool  // first tick seeds the baseline (no rotation push)
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -197,6 +205,7 @@ func NewStore(coins []string) *Store {
 		rhW:               robinhood.NewWatcher(),
 		rhNew:             map[string]int64{},
 		maiW:              marketai.NewClient(),
+		sectorPrev:        map[string]float64{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},

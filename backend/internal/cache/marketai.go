@@ -157,6 +157,21 @@ func (s *Store) marketSnapshot() string {
 		b.WriteString("\n")
 	}
 
+	if sb := s.SectorBoard(); len(sb.Rows) >= 2 {
+		r := sb.Rows
+		fmt.Fprintf(&b, "板塊強弱(24h,相對BTC):領頭 %s %+.1f%%、%s %+.1f%%;落後 %s %+.1f%%\n",
+			r[0].Sector, r[0].VsBTC, r[1].Sector, r[1].VsBTC, r[len(r)-1].Sector, r[len(r)-1].VsBTC)
+		hot := SectorRow{}
+		for _, s := range r {
+			if s.Delta > hot.Delta {
+				hot = s
+			}
+		}
+		if hot.Delta >= 0.8 {
+			fmt.Fprintf(&b, "本小時資金轉向:%s 板塊轉強(較上小時 +%.1fpp)\n", hot.Sector, hot.Delta)
+		}
+	}
+
 	if news := s.News(); len(news) > 0 {
 		b.WriteString("近期快訊:")
 		for i, n := range news {

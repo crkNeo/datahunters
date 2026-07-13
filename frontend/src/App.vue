@@ -908,6 +908,26 @@ const maiBody = computed(() => {
   return i > 0 ? marketAI.value.text.slice(i + 1).trim() : marketAI.value.text
 })
 
+// 板塊強弱/輪動 (public, hourly)
+const sectors = ref(null)
+async function loadSectors() {
+  try {
+    const res = await authFetch('/api/sectors')
+    if (res.ok) sectors.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const sectorSort = ref('strength') // 'strength' | 'rotation'
+const sectorVw = ref(false) // false=等權 avg, true=量權 vw
+const sectorRows = computed(() => {
+  if (!sectors.value) return []
+  const rows = [...sectors.value.rows]
+  if (sectorSort.value === 'rotation') rows.sort((a, b) => b.delta - a.delta)
+  else rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
+  return rows
+})
+
 const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
 const unlockRows = computed(() => {
   if (!unlock.value) return []
@@ -1173,6 +1193,7 @@ function loadAll() {
   loadUnlock()
   loadRobinhood()
   loadMarketAI()
+  loadSectors()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -1260,7 +1281,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
+const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'pool', 'conv', 'rsifade', 'bollfade', 'meanrev']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1651,6 +1672,7 @@ watch(role, () => {
           </button>
           <button :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'; loadFunding()">資金費率</button>
           <button :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'; loadUnlock()">代幣解鎖</button>
+          <button :class="{ active: mainTab === 'sectors' }" @click="mainTab = 'sectors'; loadSectors()">板塊強弱</button>
           <button :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
             Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em>
           </button>
@@ -2558,6 +2580,34 @@ watch(role, () => {
         </div>
       </div>
       <p v-else class="loading">載入 Robinhood 上架清單中…(首個週期後建立基準)</p>
+    </section>
+
+    <!-- 板塊強弱/輪動 (hourly) -->
+    <section v-else-if="mainTab === 'sectors'">
+      <div class="mk-head">
+        <h2>板塊強弱<span class="help" tabindex="0">?<span class="help-pop">把全市場 24h 漲跌依板塊聚合,排出強弱。<b>相對BTC</b>=板塊平均 − BTC 24h(&gt;0 = 跑贏大盤、資金流入)。<b>本小時輪動</b>=相對BTC 較上小時的變化(▲ 資金轉入、▼ 轉出)。<b>上漲比例</b>=板塊內上漲的檔數占比(避免被單一暴漲幣騙)。每整點更新。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="sectors && sectors.updated_at">BTC 24h {{ fmtPct(sectors.btc_chg) }} · {{ sectorRows.length }} 板塊 · {{ fundClock(new Date(sectors.updated_at).getTime()) }} 更新</span>
+      </div>
+      <div class="timefilter" v-if="sectors && sectors.rows.length">
+        <span class="tf-label">排序</span>
+        <button :class="{ on: sectorSort === 'strength' }" @click="sectorSort = 'strength'">強弱</button>
+        <button :class="{ on: sectorSort === 'rotation' }" @click="sectorSort = 'rotation'">本小時輪動</button>
+        <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = !sectorVw" title="等權=每檔一票;量權=大市值主導">{{ sectorVw ? '量權' : '等權' }}</button>
+      </div>
+      <table v-if="sectorRows.length" class="grid">
+        <thead><tr><th>板塊</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
+        <tbody>
+          <tr v-for="r in sectorRows" :key="r.sector">
+            <td class="coin">{{ r.sector }}</td>
+            <td class="r" :class="(sectorVw ? r.vw_chg : r.avg_chg) >= 0 ? 'long' : 'short'"><b>{{ fmtPct(sectorVw ? r.vw_chg : r.avg_chg) }}</b></td>
+            <td class="r" :class="r.vs_btc >= 0 ? 'long' : 'short'">{{ fmtPct(r.vs_btc) }}</td>
+            <td class="r tsmall">{{ r.breadth }}%</td>
+            <td class="r" :class="r.delta > 0 ? 'long' : r.delta < 0 ? 'short' : ''">{{ r.delta > 0 ? '▲' : r.delta < 0 ? '▼' : '' }}{{ r.delta >= 0 ? '+' : '' }}{{ r.delta }}</td>
+            <td class="r tsmall">{{ r.count }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="loading">計算板塊強弱中…(每整點更新;首個整點後建立)</p>
     </section>
 
     <!-- 文章專欄 (Feature 3) -->
