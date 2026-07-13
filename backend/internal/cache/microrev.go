@@ -35,6 +35,7 @@ type microBook struct {
 	cooldown int     // bars to wait after a close before re-entering the same coin
 	keep     int     // closed-trade cap
 	plan     *tpPlan // 分批止盈 config (nil = single TP)
+	maxSLPct float64 // skip entries whose SL distance exceeds this % of entry (0 = no filter)
 	signal   func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
 
 	mu     sync.Mutex
@@ -274,7 +275,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		}
 		dirty = open
 	} else if s.StrategyEnabled(b.name) && !microCooling(b, coin, last.Ts, barMs) {
-		if dir, entry, sl, tp, ok := b.signal(cs); ok {
+		if dir, entry, sl, tp, ok := b.signal(cs); ok && microSLOK(b, entry, sl) {
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:     coin,
@@ -296,6 +297,17 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	if dirty != nil && s.db != nil {
 		s.db.upsertTrade(b.name, dirty)
 	}
+}
+
+// microSLOK reports whether the entry's stop distance is within the book's
+// maxSLPct filter. Backtest (jmch_posts.csv) showed a handful of wide-stop trades
+// caused the bulk of the losses; capping SL distance at entry removes them without
+// touching the trend of small TP1-then-breakeven wins. 0 = no filter.
+func microSLOK(b *microBook, entry, sl float64) bool {
+	if b.maxSLPct <= 0 || entry <= 0 {
+		return true
+	}
+	return math.Abs(entry-sl)/entry*100 <= b.maxSLPct
 }
 
 // microCooling reports whether coin is still in its post-exit cooldown window.

@@ -24,6 +24,15 @@ type tpPlan struct {
 var (
 	// mean-reversion: reversion fades fast → front-load size + place partials nearer.
 	tpMeanRev = &tpPlan{a: 0.30, b: 0.60, w1: 0.50, w2: 0.30, w3: 0.20, beBuf: 0.0005, minSplitPct: 0.008}
+	// mean-reversion, extra front-loaded (bollfade/meanrev): these targets are the
+	// mean itself (EMA20 / 布林中軌) so there's no trend tail to ride — banking more
+	// at TP1 beats holding. jmch_posts.csv sweep: 50/30/20→60/25/15 lifted both books'
+	// net/trade monotonically. K-line replay then showed TP1 placement a=0.30→0.45
+	// lifts net/trade further (meanrev +0.68→+1.17%, bollfade +0.78→+1.12%) with ~0
+	// win→SL flips: the 30–45% band is empty (reversions overshoot past it or fail
+	// before 30%). Raising b or loosening the post-TP2 stop both tested worse (extra
+	// TP3s don't pay for the give-back), so only a moved.
+	tpMeanRevFront = &tpPlan{a: 0.45, b: 0.60, w1: 0.60, w2: 0.25, w3: 0.15, beBuf: 0.0005, minSplitPct: 0.008}
 	// momentum / disciplined (also 超新星): TP1/TP2 at 40%/70% of the entry→TP3
 	// distance, size 40/30/30. Fraction placement adapts to each book's target.
 	tpMomentum = &tpPlan{a: 0.40, b: 0.70, w1: 0.40, w2: 0.30, w3: 0.30, beBuf: 0.0005, minSplitPct: 0.008}

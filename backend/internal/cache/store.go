@@ -239,9 +239,9 @@ func NewStore(coins []string) *Store {
 	s.paperGambleB.plan, s.paperGambleB.adminOnly, s.paperGambleB.maxSLPct = tpMomentum, true, 12
 	s.paperGambleB.posGate = 0.9 // B: 進場位置閘門(多單>0.9 / 空單<0.1 不追)
 	// admin mean-reversion strategies (microrev.go)
-	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, signal: rsiFadeSignal}
-	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: bollFadeSignal}
-	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRev, signal: meanRevSignal}
+	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, maxSLPct: 10, signal: rsiFadeSignal}
+	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: bollFadeSignal}
+	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
