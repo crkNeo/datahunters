@@ -174,6 +174,9 @@ type Store struct {
 	sectorBucket int64 // last processed hour bucket
 	sectorSeeded bool  // first tick seeds the baseline (no rotation push)
 
+	stratMu  sync.RWMutex    // guards the per-strategy on/off switches (admin)
+	stratOff map[string]bool // strategy name → disabled (won't open new trades)
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -206,6 +209,7 @@ func NewStore(coins []string) *Store {
 		rhNew:             map[string]int64{},
 		maiW:              marketai.NewClient(),
 		sectorPrev:        map[string]float64{},
+		stratOff:          map[string]bool{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},
@@ -262,6 +266,7 @@ func NewStore(coins []string) *Store {
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}
 	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
+	s.loadStratOff()    // restore per-strategy on/off switches
 	return s
 }
 

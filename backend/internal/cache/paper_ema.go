@@ -294,6 +294,9 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 
 	// entries: both flags just became true (rising edge) on the last closed bar
 	for _, coin := range s.emaCoins() {
+		if !s.StrategyEnabled("emaonly") {
+			break // switched off: skip opening (signals are still consumed below)
+		}
 		if open >= paperMaxOpen {
 			break
 		}

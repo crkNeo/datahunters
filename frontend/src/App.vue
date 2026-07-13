@@ -584,15 +584,41 @@ function convOutcome(o) {
     : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
     : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
     : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
-    : o === 'expired' ? '逾時' : o
+    : o === 'momdead' ? '動能衰弱' : o === 'expired' ? '逾時' : o
 }
 // otag colour class for an outcome (reuses existing tp/sl/reversed/expired styles)
 function outcomeCls(o) {
   if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
   if (o === 'tp1sl') return 'reversed'
   if (o === 'sl') return 'sl'
-  if (o === 'trail' || o === 'reversed' || o === 'hedge') return 'reversed'
+  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'momdead') return 'reversed'
   return 'expired'
+}
+// admin: force-close one open trade in any strategy (recorded as 動能衰弱)
+async function manualExitStrat(book, id, reload) {
+  if (!confirm('確定手動出場此單?將以現價結算並標記「動能衰弱」。')) return
+  const res = await authFetch('/api/admin/manual-exit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book, id }),
+  })
+  if (!res.ok) { showToast((await res.text()).trim() || '出場失敗', 'err'); return }
+  showToast('已手動出場(動能衰弱)', 'ok')
+  if (reload) reload()
+}
+// admin: strategy on/off switches
+const stratStates = ref([])
+async function loadStratStates() {
+  try {
+    const res = await authFetch('/api/admin/strat-states')
+    if (res.ok) stratStates.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+async function toggleStrat(st) {
+  const res = await authFetch('/api/admin/strat-toggle', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: st.name, on: !st.enabled }),
+  })
+  if (res.ok) { st.enabled = !st.enabled; adminMsg.value = '✓ ' + st.label + (st.enabled ? ' 已開啟' : ' 已關閉(不再開新單)') }
 }
 function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 
@@ -928,9 +954,15 @@ const sectorRows = computed(() => {
   else rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
   return rows
 })
-// deterministic one-line summary (no AI): leaders / laggards / this-hour rotation
-const sectorLead = computed(() => (sectors.value?.rows || []).slice(0, 2).map((x) => x.sector).join('、'))
-const sectorLag = computed(() => { const r = sectors.value?.rows || []; return r.length ? r[r.length - 1].sector : '' })
+// deterministic one-line summary (no AI): leaders / laggards / this-hour rotation.
+// leaders/laggards follow the 等權/量權 toggle so the summary matches the table.
+const sectorByStrength = computed(() => {
+  const rows = [...(sectors.value?.rows || [])]
+  rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
+  return rows
+})
+const sectorLead = computed(() => sectorByStrength.value.slice(0, 2).map((x) => x.sector).join('、'))
+const sectorLag = computed(() => { const r = sectorByStrength.value; return r.length ? r[r.length - 1].sector : '' })
 const sectorHot = computed(() => {
   let best = null
   for (const x of sectors.value?.rows || []) if (x.delta >= 0.8 && x.vs_btc > 0 && (!best || x.delta > best.delta)) best = x
@@ -1721,7 +1753,7 @@ watch(role, () => {
       <div class="navrow" v-if="can('admin')">
         <span class="navgroup">管理</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor)">
+          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor); loadStratStates()">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
           <button :class="{ active: mainTab === 'gambleA' }" @click="mainTab = 'gambleA'; loadGambleAB()">
@@ -1827,7 +1859,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="pool && pool.open.length">進行中 ({{ pool.open.length }})</h3>
       <table v-if="pool && pool.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="吊燈/早鎖利動態停損位(隨行情上移)">動態止損</th><th class="r">進場時間</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r" title="吊燈/早鎖利動態停損位(隨行情上移)">動態止損</th><th class="r">進場時間</th><th class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in pool.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1837,6 +1869,7 @@ watch(role, () => {
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r short">{{ t.sl ? fmtPrice(t.sl) : '—' }}<small v-if="t.sl && t.sl >= t.entry" class="vtag"> 鎖利</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+            <td class="r"><button class="exitbtn" @click.stop="manualExitStrat('pool', t.id, loadPool)">手動出場</button></td>
           </tr>
         </tbody>
       </table>
@@ -1881,7 +1914,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="conv && conv.open.length">進行中 ({{ conv.open.length }})</h3>
       <table v-if="conv && conv.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th><th class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in conv.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1895,6 +1928,7 @@ watch(role, () => {
             </td>
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+            <td class="r"><button class="exitbtn" @click.stop="manualExitStrat('conv', t.id, loadConv)">手動出場</button></td>
           </tr>
         </tbody>
       </table>
@@ -1942,7 +1976,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="microState && microState.open.length">進行中 ({{ microState.open.length }})</h3>
       <table v-if="microState && microState.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th><th class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in microState.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -1958,6 +1992,7 @@ watch(role, () => {
             </td>
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+            <td class="r"><button class="exitbtn" @click.stop="manualExitStrat(mainTab, t.id, micro.load)">手動出場</button></td>
           </tr>
         </tbody>
       </table>
@@ -2077,6 +2112,21 @@ watch(role, () => {
           </select>
           <button class="loginbtn" @click="createUser">新增</button>
         </div>
+      </section>
+
+      <!-- 策略開關 -->
+      <section class="card adminbox">
+        <h3 class="psub">策略開關 <button class="minibtn" @click="loadStratStates">刷新</button></h3>
+        <div class="strat-toggles">
+          <div v-for="st in stratStates" :key="st.name" class="strat-row">
+            <span class="strat-name">{{ st.label }}</span>
+            <button class="toggle" :class="{ on: st.enabled }" @click="toggleStrat(st)">
+              <span class="toggle-knob"></span>
+            </button>
+            <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
+          </div>
+        </div>
+        <p class="loginhint">關閉 = 該策略<b>不再開新單</b>;進行中的單<b>不會被平掉</b>(照常跑到止盈止損)。設定會保存,重啟後仍生效。</p>
       </section>
 
       <!-- 站台設定:logo / 社群 / QR -->
@@ -2371,7 +2421,7 @@ watch(role, () => {
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="mainTab === 'emaonly' && can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -2389,7 +2439,7 @@ watch(role, () => {
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
-            <td v-if="mainTab === 'emaonly' && can('admin')" class="r"><button class="exitbtn" @click.stop="manualExit(t)">手動出場</button></td>
+            <td v-if="can('admin')" class="r"><button class="exitbtn" @click.stop="mainTab === 'emaonly' ? manualExit(t) : manualExitStrat(curPaperBook, t.id, loadPaper)">手動出場</button></td>
           </tr>
         </tbody>
       </table>
@@ -3066,6 +3116,14 @@ body::before {
 .sec-chip { display: inline-block; font-size: 11.5px; padding: 2px 7px; margin: 2px 4px 2px 0; border-radius: 5px; }
 .sec-chip.up { background: #133027; color: #5fd39a; }
 .sec-chip.down { background: #2f1a1a; color: #e0857f; }
+.strat-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 14px; margin: 4px 0 6px; }
+.strat-row { display: flex; align-items: center; gap: 9px; }
+.strat-name { flex: 1; font-size: 13px; color: #cdd0d6; }
+.strat-status { font-size: 11px; width: 28px; }
+.toggle { width: 40px; height: 22px; border-radius: 11px; background: #3a3d45; border: none; padding: 0; position: relative; cursor: pointer; transition: background .15s; }
+.toggle.on { background: #2ea86a; }
+.toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
+.toggle.on .toggle-knob { left: 20px; }
 .mai-live { background: #14161c; border: 1px solid #3a3320; border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; }
 .mai-live-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .mai-live-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }

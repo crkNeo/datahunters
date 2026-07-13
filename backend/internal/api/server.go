@@ -113,7 +113,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))           // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
 	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
-	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose)) // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))         // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/manual-exit", s.gate(A, s.handleManualExit))     // 各策略手動出場(動能衰弱)
+	mux.HandleFunc("/api/admin/strat-states", s.gate(A, s.handleStratStates))   // 策略開關狀態
+	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))   // 開/關某策略進場
 	mux.HandleFunc("/api/admin/gamble-a", s.gate(A, s.handleGambleA)) // 超新星·A 緊止損 (admin A/B)
 	mux.HandleFunc("/api/admin/gamble-b", s.gate(A, s.handleGambleB)) // 超新星·B 位置閘門 (admin A/B)
 	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))         // 30幣掃描池 1H (admin-only)
@@ -478,6 +481,48 @@ func (s *Server) handleEMAClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "找不到此進行中的部位(可能已平倉)", http.StatusNotFound)
 		return
 	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleManualExit (admin): POST {book, id} force-closes an open trade at market,
+// recorded as 動能衰弱. Covers every strategy except 銀河 (which uses ema-close).
+func (s *Server) handleManualExit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct{ Book, ID string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Book == "" || in.ID == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.ManualExit(in.Book, in.ID) {
+		http.Error(w, "找不到此進行中的部位(可能已平倉)", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleStratStates (admin): the on/off state of every strategy.
+func (s *Server) handleStratStates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.StrategyStates())
+}
+
+// handleStratToggle (admin): POST {name, on} enables/disables a strategy's entries.
+func (s *Server) handleStratToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Name string
+		On   bool
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	s.store.SetStrategyEnabled(in.Name, in.On)
 	writeJSON(w, map[string]any{"ok": true})
 }
 

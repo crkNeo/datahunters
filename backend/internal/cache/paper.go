@@ -332,6 +332,9 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 	}
 
 	consider := func(items []RadarItem, dir string) {
+		if !s.StrategyEnabled(b.name) {
+			return // strategy switched off by admin: manage open trades but open none
+		}
 		if b.skipNY && isNYSession(now) {
 			return // don't open new positions during the NY session
 		}
@@ -508,6 +511,8 @@ func outcomeCN(o string) string {
 		return "逾時平倉"
 	case "hedge":
 		return "套保出場"
+	case "momdead":
+		return "動能衰弱"
 	}
 	return o
 }

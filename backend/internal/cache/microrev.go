@@ -273,7 +273,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
-	} else if !microCooling(b, coin, last.Ts, barMs) {
+	} else if s.StrategyEnabled(b.name) && !microCooling(b, coin, last.Ts, barMs) {
 		if dir, entry, sl, tp, ok := b.signal(cs); ok {
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),

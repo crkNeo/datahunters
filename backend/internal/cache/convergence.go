@@ -230,7 +230,7 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
-	} else if dir, entry, sl, tp, ok := convSignal(cs); ok {
+	} else if dir, entry, sl, tp, ok := convSignal(cs); ok && s.StrategyEnabled("conv") {
 		tr := &PaperTrade{
 			ID:       fmt.Sprintf("conv|%s|%d", coin, now.UnixMilli()),
 			Coin:     coin,

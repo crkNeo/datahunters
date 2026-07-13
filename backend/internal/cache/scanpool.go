@@ -187,7 +187,7 @@ func (s *Store) runPool(coin string, cs []exchange.Candle, now time.Time) {
 			open.CloseTime = &t
 		}
 		dirty = open
-	} else if poolEnter(cs) {
+	} else if poolEnter(cs) && s.StrategyEnabled("pool") {
 		tr := &PaperTrade{
 			ID:       fmt.Sprintf("pool|%s|%d", coin, now.UnixMilli()),
 			Coin:     coin,
