@@ -920,12 +920,21 @@ async function loadSectors() {
 }
 const sectorSort = ref('strength') // 'strength' | 'rotation'
 const sectorVw = ref(false) // false=等權 avg, true=量權 vw
+const sectorOpen = ref('') // which sector row is expanded (drill-down)
 const sectorRows = computed(() => {
   if (!sectors.value) return []
   const rows = [...sectors.value.rows]
   if (sectorSort.value === 'rotation') rows.sort((a, b) => b.delta - a.delta)
   else rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
   return rows
+})
+// deterministic one-line summary (no AI): leaders / laggards / this-hour rotation
+const sectorLead = computed(() => (sectors.value?.rows || []).slice(0, 2).map((x) => x.sector).join('、'))
+const sectorLag = computed(() => { const r = sectors.value?.rows || []; return r.length ? r[r.length - 1].sector : '' })
+const sectorHot = computed(() => {
+  let best = null
+  for (const x of sectors.value?.rows || []) if (x.delta >= 0.8 && x.vs_btc > 0 && (!best || x.delta > best.delta)) best = x
+  return best ? `${best.sector}(▲+${best.delta})` : ''
 })
 
 const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
@@ -2585,26 +2594,38 @@ watch(role, () => {
     <!-- 板塊強弱/輪動 (hourly) -->
     <section v-else-if="mainTab === 'sectors'">
       <div class="mk-head">
-        <h2>板塊強弱<span class="help" tabindex="0">?<span class="help-pop">把全市場 24h 漲跌依板塊聚合,排出強弱。<b>相對BTC</b>=板塊平均 − BTC 24h(&gt;0 = 跑贏大盤、資金流入)。<b>本小時輪動</b>=相對BTC 較上小時的變化(▲ 資金轉入、▼ 轉出)。<b>上漲比例</b>=板塊內上漲的檔數占比(避免被單一暴漲幣騙)。每整點更新。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <h2>板塊強弱<span class="help" tabindex="0">?<span class="help-pop">把全市場 24h 漲跌依板塊聚合,排出強弱。<b>相對BTC</b>=板塊平均 − BTC 24h(&gt;0 = 跑贏大盤、資金流入)。<b>本小時輪動</b>=相對BTC 較上小時的變化(▲ 資金轉入、▼ 轉出)。<b>上漲比例</b>=板塊內上漲檔數占比。<br><b>等權</b>=板塊內每檔幣一票(小幣大漲也算);<b>量權</b>=用成交量加權(大市值/主流幣主導)。<br>點板塊可展開看是哪幾檔在拉。每整點更新。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="sectors && sectors.updated_at">BTC 24h {{ fmtPct(sectors.btc_chg) }} · {{ sectorRows.length }} 板塊 · {{ fundClock(new Date(sectors.updated_at).getTime()) }} 更新</span>
+      </div>
+      <div v-if="sectorRows.length" class="sec-summary">
+        🏆 領頭 <b class="long">{{ sectorLead }}</b> · 🐢 落後 <b class="short">{{ sectorLag }}</b><template v-if="sectorHot"> · 🔥 本小時轉強 <b class="long">{{ sectorHot }}</b></template>
       </div>
       <div class="timefilter" v-if="sectors && sectors.rows.length">
         <span class="tf-label">排序</span>
         <button :class="{ on: sectorSort === 'strength' }" @click="sectorSort = 'strength'">強弱</button>
         <button :class="{ on: sectorSort === 'rotation' }" @click="sectorSort = 'rotation'">本小時輪動</button>
-        <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = !sectorVw" title="等權=每檔一票;量權=大市值主導">{{ sectorVw ? '量權' : '等權' }}</button>
+        <button class="tf-sort" :class="{ on: !sectorVw }" @click="sectorVw = false" title="板塊內每檔幣一票(小幣大漲也算)">等權</button>
+        <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = true" title="用成交量加權(大市值主導)">量權</button>
       </div>
       <table v-if="sectorRows.length" class="grid">
         <thead><tr><th>板塊</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
         <tbody>
-          <tr v-for="r in sectorRows" :key="r.sector">
-            <td class="coin">{{ r.sector }}</td>
-            <td class="r" :class="(sectorVw ? r.vw_chg : r.avg_chg) >= 0 ? 'long' : 'short'"><b>{{ fmtPct(sectorVw ? r.vw_chg : r.avg_chg) }}</b></td>
-            <td class="r" :class="r.vs_btc >= 0 ? 'long' : 'short'">{{ fmtPct(r.vs_btc) }}</td>
-            <td class="r tsmall">{{ r.breadth }}%</td>
-            <td class="r" :class="r.delta > 0 ? 'long' : r.delta < 0 ? 'short' : ''">{{ r.delta > 0 ? '▲' : r.delta < 0 ? '▼' : '' }}{{ r.delta >= 0 ? '+' : '' }}{{ r.delta }}</td>
-            <td class="r tsmall">{{ r.count }}</td>
-          </tr>
+          <template v-for="r in sectorRows" :key="r.sector">
+            <tr class="clickable" @click="sectorOpen = sectorOpen === r.sector ? '' : r.sector">
+              <td class="coin">{{ sectorOpen === r.sector ? '▾' : '▸' }} {{ r.sector }}</td>
+              <td class="r" :class="(sectorVw ? r.vw_chg : r.avg_chg) >= 0 ? 'long' : 'short'"><b>{{ fmtPct(sectorVw ? r.vw_chg : r.avg_chg) }}</b></td>
+              <td class="r" :class="r.vs_btc >= 0 ? 'long' : 'short'">{{ fmtPct(r.vs_btc) }}</td>
+              <td class="r tsmall">{{ r.breadth }}%</td>
+              <td class="r" :class="r.delta > 0 ? 'long' : r.delta < 0 ? 'short' : ''">{{ r.delta > 0 ? '▲' : r.delta < 0 ? '▼' : '' }}{{ r.delta >= 0 ? '+' : '' }}{{ r.delta }}</td>
+              <td class="r tsmall">{{ r.count }}</td>
+            </tr>
+            <tr v-if="sectorOpen === r.sector" class="sec-detail">
+              <td colspan="6">
+                <span class="sec-detail-lbl">板塊成員(24h 由強到弱):</span>
+                <span v-for="c in r.coins" :key="c.coin" class="sec-chip" :class="c.chg >= 0 ? 'up' : 'down'">{{ c.coin }} {{ fmtPct(c.chg) }}</span>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <p v-else class="loading">計算板塊強弱中…(每整點更新;首個整點後建立)</p>
@@ -3039,6 +3060,12 @@ body::before {
 .rh-new, .new-dot { background: #d8ad48; color: #14161c; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
 .rh-name { font-size: 12px; color: #9aa0a8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rh-sym { font-size: 11px; color: #6b7078; margin-top: 2px; }
+.sec-summary { background: #14161c; border: 1px solid #23262d; border-radius: 10px; padding: 9px 13px; margin-bottom: 10px; font-size: 13px; color: #c9cdd4; line-height: 1.6; }
+.sec-detail td { background: #101218; padding: 8px 12px 10px; }
+.sec-detail-lbl { font-size: 11px; color: #8b909a; margin-right: 8px; }
+.sec-chip { display: inline-block; font-size: 11.5px; padding: 2px 7px; margin: 2px 4px 2px 0; border-radius: 5px; }
+.sec-chip.up { background: #133027; color: #5fd39a; }
+.sec-chip.down { background: #2f1a1a; color: #e0857f; }
 .mai-live { background: #14161c; border: 1px solid #3a3320; border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; }
 .mai-live-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .mai-live-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }

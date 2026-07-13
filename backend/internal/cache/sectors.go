@@ -13,15 +13,22 @@ import (
 
 const sectorRotatePush = 1.5 // Δ(vs-BTC) ≥ this pp AND vsBTC>0 → 「板塊轉強」push
 
+// SectorCoin is one member coin of a sector (for the drill-down).
+type SectorCoin struct {
+	Coin string  `json:"coin"`
+	Chg  float64 `json:"chg"` // 24h %
+}
+
 // SectorRow is one sector's aggregated strength.
 type SectorRow struct {
-	Sector  string  `json:"sector"`
-	AvgChg  float64 `json:"avg_chg"`  // equal-weight mean 24h %
-	VwChg   float64 `json:"vw_chg"`   // volume-weighted 24h %
-	Breadth float64 `json:"breadth"`  // % of members up (24h)
-	VsBTC   float64 `json:"vs_btc"`   // avgChg − BTC 24h%  (relative strength)
-	Delta   float64 `json:"delta"`    // vsBTC change vs last hour (rotation: + heating, − cooling)
-	Count   int     `json:"count"`
+	Sector  string       `json:"sector"`
+	AvgChg  float64      `json:"avg_chg"`  // equal-weight mean 24h %
+	VwChg   float64      `json:"vw_chg"`   // volume-weighted 24h %
+	Breadth float64      `json:"breadth"`  // % of members up (24h)
+	VsBTC   float64      `json:"vs_btc"`   // avgChg − BTC 24h%  (relative strength)
+	Delta   float64      `json:"delta"`    // vsBTC change vs last hour (rotation: + heating, − cooling)
+	Count   int          `json:"count"`
+	Coins   []SectorCoin `json:"coins"` // members, strongest 24h first (drill-down)
 }
 
 // SectorData is the 板塊強弱 tab payload.
@@ -51,6 +58,7 @@ func (s *Store) SectorTick() {
 	type acc struct {
 		sum, up, volSum, volChgSum float64
 		n                          int
+		coins                      []SectorCoin
 	}
 	m := map[string]*acc{}
 	var btcChg float64
@@ -58,7 +66,8 @@ func (s *Store) SectorTick() {
 		if t.Symbol == "BTCUSDT" {
 			btcChg = t.ChgPct
 		}
-		sec, ok := coinSector[coinOf(t.Symbol)]
+		coin := coinOf(t.Symbol)
+		sec, ok := coinSector[coin]
 		if !ok {
 			continue // not in the sector map → 其他, skip
 		}
@@ -74,6 +83,7 @@ func (s *Store) SectorTick() {
 		}
 		a.volSum += t.QuoteVol
 		a.volChgSum += t.ChgPct * t.QuoteVol
+		a.coins = append(a.coins, SectorCoin{Coin: coin, Chg: round2(t.ChgPct)})
 	}
 
 	rows := make([]SectorRow, 0, len(m))
@@ -92,10 +102,11 @@ func (s *Store) SectorTick() {
 		if p, ok := s.sectorPrev[sec]; ok {
 			delta = vsBTC - p
 		}
+		sort.Slice(a.coins, func(i, j int) bool { return a.coins[i].Chg > a.coins[j].Chg }) // strongest first
 		rows = append(rows, SectorRow{
 			Sector: sec, AvgChg: round2(avg), VwChg: round2(vw),
 			Breadth: round2(a.up / float64(a.n) * 100), VsBTC: round2(vsBTC),
-			Delta: round2(delta), Count: a.n,
+			Delta: round2(delta), Count: a.n, Coins: a.coins,
 		})
 		prev[sec] = vsBTC
 	}
