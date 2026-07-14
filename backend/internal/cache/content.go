@@ -132,7 +132,11 @@ func (db *DB) addSub(endpoint, username, sub string) {
 }
 
 func (db *DB) allSubs() []string {
-	rows, err := db.sql.Query(`SELECT sub FROM push_subs`)
+	// Active users only. A banned/pending account keeps its push_subs row (ban flips
+	// status, it doesn't delete), so filter here to match the live web gate — else a
+	// 停用 user keeps receiving broadcasts despite being locked out of the app.
+	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
+	  JOIN users u ON u.username = p.username WHERE u.status = 'active'`)
 	if err != nil {
 		return nil
 	}
@@ -157,7 +161,7 @@ func (db *DB) clearSubs() { db.sql.Exec(`DELETE FROM push_subs`) }
 // targeted admin-only alerts (e.g. a new registration to review).
 func (db *DB) adminSubs() []string {
 	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
-	  JOIN users u ON u.username = p.username WHERE u.role = 'admin'`)
+	  JOIN users u ON u.username = p.username WHERE u.role = 'admin' AND u.status = 'active'`)
 	if err != nil {
 		return nil
 	}
@@ -175,7 +179,7 @@ func (db *DB) adminSubs() []string {
 // subsByRole returns push subscription rows for users of exactly the given role.
 func (db *DB) subsByRole(role string) []string {
 	rows, err := db.sql.Query(`SELECT p.sub FROM push_subs p
-	  JOIN users u ON u.username = p.username WHERE u.role = ?`, role)
+	  JOIN users u ON u.username = p.username WHERE u.role = ? AND u.status = 'active'`, role)
 	if err != nil {
 		return nil
 	}
