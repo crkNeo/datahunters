@@ -26,7 +26,10 @@ type Client struct {
 func NewClient() *Client {
 	model := os.Getenv("GEMINI_MODEL")
 	if model == "" {
-		model = "gemini-2.0-flash"
+		// flash-lite-latest → Gemini 3.1 Flash Lite: 500 RPD free vs 20 RPD on the
+		// 2.x/3.x Flash tiers. The hourly market-AI job (24 calls/day) blows past a
+		// 20-RPD cap and 429s mid-day, so we default to the high-daily-quota model.
+		model = "gemini-flash-lite-latest"
 	}
 	return &Client{http: &http.Client{Timeout: 30 * time.Second}, geminiKey: os.Getenv("GEMINI_API_KEY"), geminiModel: model}
 }
@@ -73,7 +76,9 @@ func (c *Client) gemini(system, user string) (string, error) {
 }
 
 func (c *Client) geminiCandidates() []string {
-	return []string{c.geminiModel, "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"}
+	// High-daily-quota (500 RPD) flash-lite aliases first, then the 20-RPD Flash
+	// tiers as last-resort. Unknown ids just 404 and fall through harmlessly.
+	return []string{c.geminiModel, "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest"}
 }
 
 // geminiOnce makes one generateContent call. safetySettings are relaxed so
