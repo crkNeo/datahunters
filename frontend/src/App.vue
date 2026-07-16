@@ -934,6 +934,318 @@ const maiBody = computed(() => {
   return i > 0 ? marketAI.value.text.slice(i + 1).trim() : marketAI.value.text
 })
 
+// ---- 戰場: BTC 多空交戰 (public, 首頁大盤分析上方) ----
+// 資料全部由「瀏覽器直連」Binance 公開 WS/REST(免 key;WS 不受 CORS 限制)。
+// 我們的後端只提供城牆位置 /api/btc-sr — 所以看的人再多也不會打爆自己的伺服器,
+// 流量算在每個訪客自己的 IP 額度上。
+//
+// 座標系: X 軸 = 價格。戰線=現價;右=壓力(空方要塞,賣單在上)、左=支撐(多方要塞,買單在下)。
+// 綠兵(主動買)往右衝要攻破壓力,紅兵(主動賣)往左衝要攻破支撐。
+const bfOpen = ref(true) // 收合(省電)
+const bfCanvas = ref(null)
+const bfSR = ref(null)
+const bfLive = ref({ price: 0, longPct: 50, oi: 0, liqLong: 0, liqShort: 0, buy: 0, sell: 0, conn: false })
+let bfWS = null, bfRAF = null, bfFarTimer = null, bfStatTimer = null, bfRetry = 0
+let bfSoldiers = [], bfBlasts = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
+let bfPrice = 0, bfLastT = 0, bfLastTrade = 0
+
+async function loadBtcSR() {
+  try {
+    const res = await authFetch('/api/btc-sr')
+    if (res.ok) bfSR.value = await res.json()
+  } catch (e) { /* 城牆缺席不影響戰場其他部分 */ }
+}
+
+// 遠方城牆: depth20 只涵蓋現價附近很窄一帶,摸不到 SR 位置的大牆 → 每 20s 補一張深快照。
+async function bfLoadFar() {
+  try {
+    const r = await fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000')
+    if (!r.ok) return
+    const d = await r.json()
+    bfFar = { bids: d.bids.map((x) => [+x[0], +x[1]]), asks: d.asks.map((x) => [+x[0], +x[1]]) }
+  } catch (e) { /* CORS/限流 → 就只用近端 depth20,畫面仍可運作 */ }
+}
+
+// 兵力對比(多空帳戶比)+ 部隊規模(OI)
+async function bfLoadStats() {
+  try {
+    const [lsr, oir] = await Promise.all([
+      fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1'),
+      fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT'),
+    ])
+    if (lsr.ok) {
+      const a = await lsr.json()
+      if (a && a[0]) bfLive.value.longPct = +a[0].longAccount * 100
+    }
+    if (oir.ok) {
+      const o = await oir.json()
+      if (o && o.openInterest) bfLive.value.oi = +o.openInterest
+    }
+  } catch (e) { /* 非關鍵 */ }
+}
+
+function bfConnect() {
+  if (bfWS) return
+  const streams = ['btcusdt@aggTrade', 'btcusdt@forceOrder', 'btcusdt@depth20@100ms', 'btcusdt@markPrice@1s']
+  try {
+    bfWS = new WebSocket('wss://fstream.binance.com/stream?streams=' + streams.join('/'))
+  } catch (e) { return }
+  bfWS.onopen = () => { bfRetry = 0; bfLive.value.conn = true }
+  bfWS.onclose = () => {
+    bfLive.value.conn = false
+    bfWS = null
+    if (!bfOpen.value) return
+    bfRetry = Math.min(bfRetry + 1, 6)
+    setTimeout(bfConnect, 1000 * bfRetry) // 退避重連
+  }
+  bfWS.onerror = () => { try { bfWS && bfWS.close() } catch (e) {} }
+  bfWS.onmessage = (ev) => {
+    let m
+    try { m = JSON.parse(ev.data) } catch (e) { return }
+    const d = m.data
+    if (!d) return
+    if (d.e === 'aggTrade') bfOnTrade(+d.p, +d.q, d.m)
+    else if (d.e === 'forceOrder' && d.o) bfOnLiq(+d.o.ap || +d.o.p, +d.o.q, d.o.S)
+    else if (d.e === 'depthUpdate') {
+      if (d.b) bfNear.bids = d.b.map((x) => [+x[0], +x[1]])
+      if (d.a) bfNear.asks = d.a.map((x) => [+x[0], +x[1]])
+      // 戰線備援:aggTrade 若沒進來(冷門時段,或個別串流被網路/防火牆擋掉),
+      // 用最佳買賣中價當現價,免得整個戰場卡在「連線中…」。
+      const bb = bfNear.bids[0], ba = bfNear.asks[0]
+      if (bb && ba && Date.now() - bfLastTrade > 2000) {
+        bfPrice = (bb[0] + ba[0]) / 2
+        bfLive.value.price = bfPrice
+      }
+    } else if (d.e === 'markPriceUpdate') {
+      if (!bfPrice) { bfPrice = +d.p; bfLive.value.price = bfPrice }
+    }
+  }
+}
+function bfDisconnect() {
+  if (bfWS) { try { bfWS.onclose = null; bfWS.close() } catch (e) {} bfWS = null }
+  bfLive.value.conn = false
+}
+
+// 一筆主動成交 → 一個士兵。m=isBuyerMaker: true 代表主動方是「賣家」(紅兵)。
+// 高波動時每秒可達上百筆 → 小單聚合、總量設上限,免得中低階手機發燙掉幀。
+function bfOnTrade(px, qty, buyerMaker) {
+  bfPrice = px
+  bfLive.value.price = px
+  bfLastTrade = Date.now()
+  const bull = !buyerMaker
+  if (bull) bfLive.value.buy += qty
+  else bfLive.value.sell += qty
+  if (qty < 0.005) return // 塵埃單不生兵
+  if (bfSoldiers.length > 260) return // 上限保護
+  const size = Math.min(3.2, 0.9 + Math.sqrt(qty) * 2.2)
+  bfSoldiers.push({ px, bull, size, t: 0, life: 60 + Math.random() * 40, off: (Math.random() - 0.5) * 0.8 })
+}
+function bfOnLiq(px, qty, side) {
+  // side=SELL → 多單被清算(強制賣出);BUY → 空單被清算
+  const long = side === 'SELL'
+  const usd = px * qty
+  if (long) bfLive.value.liqLong += usd
+  else bfLive.value.liqShort += usd
+  bfBlasts.push({ px, long, r: 0, max: Math.min(46, 10 + Math.sqrt(usd) / 22), t: 0 })
+}
+
+// 價格→畫布 X。視窗自動涵蓋兩座要塞,並讓現價大致置中。
+function bfRange() {
+  const p = bfPrice || bfLive.value.price
+  if (!p) return [0, 1]
+  let d = p * 0.004
+  const sr = bfSR.value
+  if (sr) {
+    if (sr.sup_ok && sr.support > 0) d = Math.max(d, (p - sr.support) * 1.25)
+    if (sr.res_ok && sr.resistance > 0) d = Math.max(d, (sr.resistance - p) * 1.25)
+  }
+  d = Math.max(d, p * 0.0025)
+  return [p - d, p + d]
+}
+
+function bfDraw() {
+  const cv = bfCanvas.value
+  if (!cv) return
+  const ctx = cv.getContext('2d')
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  const W = cv.clientWidth, H = cv.clientHeight
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, W, H)
+  const p = bfPrice || bfLive.value.price
+  if (!p) { ctx.fillStyle = '#8b909a'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('連線中…', W / 2, H / 2); return }
+
+  const [lo, hi] = bfRange()
+  const X = (px) => ((px - lo) / (hi - lo)) * W
+  const horizon = H * 0.30 // 地平線:上方是天空,下方是等距地面
+  const groundH = H - horizon
+  // 透視:越靠近觀察者(y 越大)橫向越寬。t=0 在地平線、t=1 在最前緣。
+  const persp = (t) => 0.42 + 0.58 * t
+  const proj = (px, t) => {
+    const cx = W / 2
+    return [cx + (X(px) - cx) * persp(t), horizon + groundH * t]
+  }
+
+  // 天空(依多空優勢染色)
+  const dom = Math.max(-1, Math.min(1, (bfLive.value.buy - bfLive.value.sell) / ((bfLive.value.buy + bfLive.value.sell) || 1)))
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon)
+  sky.addColorStop(0, dom > 0 ? `rgba(46,194,107,${0.05 + dom * 0.14})` : `rgba(226,74,74,${0.05 - dom * 0.14})`)
+  sky.addColorStop(1, 'rgba(20,22,28,0)')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, horizon)
+
+  // 地面(左半多方領土偏綠、右半空方偏紅)
+  const fx = X(p)
+  for (const [x0, x1, col] of [[0, fx, 'rgba(46,194,107,0.10)'], [fx, W, 'rgba(226,74,74,0.10)']]) {
+    ctx.beginPath()
+    const cx = W / 2
+    const pa = (x) => cx + (x - cx) * persp(0), pb = (x) => cx + (x - cx) * persp(1)
+    ctx.moveTo(pa(x0), horizon); ctx.lineTo(pa(x1), horizon); ctx.lineTo(pb(x1), H); ctx.lineTo(pb(x0), H)
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
+  }
+  // 地面縱深格線
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)'; ctx.lineWidth = 1
+  for (let i = 1; i < 6; i++) {
+    const t = i / 6, y = horizon + groundH * t
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
+  }
+
+  // 訂單簿地形:近端 depth20 + 遠端快照合併,分箱後畫成起伏(多方買牆在左、空方賣牆在右)
+  const bins = 84
+  const bid = new Array(bins).fill(0), ask = new Array(bins).fill(0)
+  const put = (arr, lv) => {
+    for (const [q, v] of lv) {
+      if (q < lo || q > hi) continue
+      const i = Math.min(bins - 1, Math.max(0, Math.floor(((q - lo) / (hi - lo)) * bins)))
+      arr[i] += v
+    }
+  }
+  put(bid, bfFar.bids); put(bid, bfNear.bids); put(ask, bfFar.asks); put(ask, bfNear.asks)
+  const peak = Math.max(1e-9, ...bid, ...ask)
+  const terrain = (arr, col) => {
+    ctx.beginPath()
+    let started = false
+    for (let i = 0; i < bins; i++) {
+      const px = lo + ((i + 0.5) / bins) * (hi - lo)
+      const h = (arr[i] / peak) * groundH * 0.5
+      const [sx, sy] = proj(px, 0.62)
+      if (!started) { ctx.moveTo(sx, sy); started = true }
+      ctx.lineTo(sx, sy - h)
+    }
+    for (let i = bins - 1; i >= 0; i--) {
+      const px = lo + ((i + 0.5) / bins) * (hi - lo)
+      const [sx, sy] = proj(px, 0.62)
+      ctx.lineTo(sx, sy)
+    }
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
+  }
+  terrain(bid, 'rgba(46,194,107,0.30)')
+  terrain(ask, 'rgba(226,74,74,0.30)')
+
+  // 要塞(SR 城牆):厚度 ∝ 觸及次數;被攻破則轉暗+裂紋
+  const sr = bfSR.value
+  const fort = (price, touches, bullSide, broken) => {
+    if (!price || price < lo || price > hi) return
+    const th = Math.min(15, 4 + touches * 2.2)
+    const col = broken ? 'rgba(120,120,130,0.55)' : bullSide ? 'rgba(46,194,107,0.85)' : 'rgba(226,74,74,0.85)'
+    const [bx, by] = proj(price, 0.72)
+    const wallH = groundH * 0.42
+    // 牆體(等距梯形)
+    const [tx] = proj(price, 0.58)
+    ctx.beginPath()
+    ctx.moveTo(bx - th, by); ctx.lineTo(bx + th, by)
+    ctx.lineTo(tx + th * 0.8, by - wallH); ctx.lineTo(tx - th * 0.8, by - wallH)
+    ctx.closePath()
+    ctx.fillStyle = col; ctx.fill()
+    // 城垛
+    ctx.fillStyle = broken ? 'rgba(150,150,160,0.7)' : bullSide ? '#3ddb84' : '#ff6b6b'
+    for (let i = -1; i <= 1; i++) ctx.fillRect(tx + i * th * 0.55 - 2, by - wallH - 5, 4, 6)
+    if (broken) { // 裂紋
+      ctx.strokeStyle = 'rgba(255,190,80,0.9)'; ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 4, by - wallH * 0.5); ctx.lineTo(bx - 3, by - wallH); ctx.stroke()
+    }
+    ctx.fillStyle = broken ? '#c9a227' : '#c9ced8'
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText((broken ? '⚔ 已攻破 ' : '') + '×' + touches, bx, by - wallH - 10)
+  }
+  if (sr) {
+    if (sr.sup_ok) fort(sr.support, sr.sup_touches, true, sr.status === 'break_down')
+    if (sr.res_ok) fort(sr.resistance, sr.res_touches, false, sr.status === 'break_up')
+  }
+
+  // 士兵:從自己陣營邊緣衝向戰線
+  const now = performance.now()
+  const dt = bfLastT ? Math.min(64, now - bfLastT) : 16
+  bfLastT = now
+  const step = dt / 16
+  bfSoldiers = bfSoldiers.filter((s) => {
+    s.t += step
+    if (s.t > s.life) return false
+    const prog = Math.min(1, s.t / s.life)
+    const from = s.bull ? lo : hi
+    const cur = from + (s.px - from) * prog // 由邊緣推進到成交價(戰線)
+    const t = 0.80 + s.off * 0.16
+    const [x, y] = proj(cur, t)
+    ctx.fillStyle = s.bull ? `rgba(61,219,132,${1 - prog * 0.35})` : `rgba(255,107,107,${1 - prog * 0.35})`
+    ctx.fillRect(x - s.size / 2, y - s.size * 2.2, s.size, s.size * 2.2)
+    if (prog > 0.93) { // 抵達戰線 → 撞擊閃光
+      ctx.fillStyle = s.bull ? 'rgba(61,219,132,0.5)' : 'rgba(255,107,107,0.5)'
+      ctx.beginPath(); ctx.arc(x, y - 2, 3.5, 0, 7); ctx.fill()
+    }
+    return true
+  })
+
+  // 清算爆炸
+  bfBlasts = bfBlasts.filter((b) => {
+    b.t += step; b.r += (b.max - b.r) * 0.12 * step
+    const a = Math.max(0, 1 - b.t / 42)
+    if (a <= 0) return false
+    const [x, y] = proj(b.px, 0.78)
+    const g = ctx.createRadialGradient(x, y - 6, 0, x, y - 6, Math.max(1, b.r))
+    g.addColorStop(0, b.long ? `rgba(255,120,60,${a})` : `rgba(120,220,255,${a})`)
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.arc(x, y - 6, Math.max(1, b.r), 0, 7); ctx.fill()
+    return true
+  })
+  if (bfBlasts.length > 40) bfBlasts = bfBlasts.slice(-40)
+
+  // 戰線(現價)
+  const [lx0] = proj(p, 0), [lx1] = proj(p, 1)
+  ctx.strokeStyle = 'rgba(216,173,72,0.95)'; ctx.lineWidth = 2
+  ctx.beginPath(); ctx.moveTo(lx0, horizon); ctx.lineTo(lx1, H); ctx.stroke()
+  ctx.fillStyle = '#d8ad48'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'
+  ctx.fillText('$' + p.toLocaleString(undefined, { maximumFractionDigits: 0 }), lx0, horizon - 6)
+}
+
+function bfLoop() { bfDraw(); bfRAF = requestAnimationFrame(bfLoop) }
+function bfStart() {
+  if (bfRAF) return
+  bfConnect()
+  bfLoadFar(); bfLoadStats(); loadBtcSR()
+  bfFarTimer = setInterval(bfLoadFar, 20000)
+  bfStatTimer = setInterval(() => { bfLoadStats(); loadBtcSR() }, 60000)
+  bfLastT = 0
+  bfRAF = requestAnimationFrame(bfLoop)
+}
+function bfStop() {
+  if (bfRAF) { cancelAnimationFrame(bfRAF); bfRAF = null }
+  clearInterval(bfFarTimer); clearInterval(bfStatTimer)
+  bfDisconnect()
+  bfSoldiers = []; bfBlasts = []
+}
+function bfToggle() { bfOpen.value = !bfOpen.value; bfOpen.value ? bfStart() : bfStop() }
+const bfPressure = computed(() => {
+  const b = bfLive.value.buy, s = bfLive.value.sell
+  return b + s > 0 ? (b / (b + s)) * 100 : 50
+})
+function bfUsd(v) {
+  if (!v) return '0'
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K'
+  return v.toFixed(0)
+}
+
 // 板塊強弱/輪動 (public, hourly)
 const sectors = ref(null)
 async function loadSectors() {
@@ -1378,6 +1690,7 @@ onMounted(async () => {
   if (qtab) gotoTab(qtab)
   if (qart) openArticleById(qart)
   if (qtab || qart) history.replaceState({}, '', location.pathname)
+  if (bfOpen.value) bfStart() // 戰場:開 WS + 動畫迴圈
   // register service worker for PWA + push
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
@@ -1402,9 +1715,10 @@ onMounted(async () => {
   // On return to the foreground, re-sync immediately; after a long background,
   // reload to rebuild a clean state instead of risking the blank-resume screen.
   onVisibility = () => {
-    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return }
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); bfStop(); return } // 背景不燒電/不佔連線
     if (hiddenAt && Date.now() - hiddenAt > 30 * 60 * 1000) { location.reload(); return }
     tick()
+    if (bfOpen.value) bfStart()
   }
   document.addEventListener('visibilitychange', onVisibility)
   // restored from the back/forward cache → reload to get a clean, current page
@@ -1413,6 +1727,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   clearInterval(timer)
+  bfStop()
   if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
   if (onPageShow) window.removeEventListener('pageshow', onPageShow)
   if (onDocClick) document.removeEventListener('click', onDocClick)
@@ -1608,6 +1923,40 @@ watch(role, () => {
   </div>
 
   <div class="wrap">
+    <!-- 戰場: BTC 多空交戰 (即時,瀏覽器直連交易所) -->
+    <div class="bf">
+      <div class="bf-top">
+        <span class="bf-title">
+          <span class="bf-dot" :class="{ off: !bfLive.conn }"></span>BTC 多空交戰
+          <span class="help" tabindex="0">?<span class="help-pop">
+            戰場即時反映真實買賣:<b>X 軸就是價格</b>。中央金線是<b>現價戰線</b>;
+            右邊紅色要塞是<b>壓力位</b>(空方堡壘)、左邊綠色要塞是<b>支撐位</b>(多方堡壘),
+            <b>牆的厚度 = 該價位被測試過幾次</b>,被跌破/突破時會裂開並標記「已攻破」。
+            地形起伏是<b>訂單簿掛單量</b>;綠兵向右衝=主動買、紅兵向左衝=主動賣;
+            爆炸是<b>強制平倉(清算)</b>。<br><br>
+            ⚠️ 這是盤面視覺化,僅供參考,不構成投資建議。
+          </span></span>
+        </span>
+        <button class="bf-fold" @click="bfToggle">{{ bfOpen ? '收合' : '展開' }}</button>
+      </div>
+      <template v-if="bfOpen">
+        <canvas ref="bfCanvas" class="bf-cv"></canvas>
+        <div class="bf-bar" :title="'主動買 ' + bfPressure.toFixed(0) + '%'">
+          <div class="bf-bar-fill" :style="{ width: bfPressure + '%' }"></div>
+          <span class="bf-bar-l">主動買 {{ bfPressure.toFixed(0) }}%</span>
+          <span class="bf-bar-r">{{ (100 - bfPressure).toFixed(0) }}% 主動賣</span>
+        </div>
+        <div class="bf-stats">
+          <span><i class="bf-k">多方帳戶</i>{{ bfLive.longPct.toFixed(0) }}%</span>
+          <span><i class="bf-k">未平倉</i>{{ bfUsd(bfLive.oi) }} BTC</span>
+          <span><i class="bf-k bull">多單陣亡</i>${{ bfUsd(bfLive.liqLong) }}</span>
+          <span><i class="bf-k bear">空單陣亡</i>${{ bfUsd(bfLive.liqShort) }}</span>
+          <span v-if="bfSR && bfSR.sup_ok"><i class="bf-k">支撐城牆</i>${{ Math.round(bfSR.support).toLocaleString() }}</span>
+          <span v-if="bfSR && bfSR.res_ok"><i class="bf-k">壓力城牆</i>${{ Math.round(bfSR.resistance).toLocaleString() }}</span>
+        </div>
+      </template>
+    </div>
+
     <!-- 整點大盤分析 (live message, above the recs) -->
     <div v-if="marketAI && marketAI.text" class="mai-live">
       <div class="mai-live-top">
@@ -3124,6 +3473,24 @@ body::before {
 .toggle.on { background: #2ea86a; }
 .toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
 .toggle.on .toggle-knob { left: 20px; }
+/* 戰場 (BTC 多空交戰) */
+.bf { background: #14161c; border: 1px solid #23262f; border-radius: 12px; padding: 11px 12px 12px; margin-bottom: 14px; }
+.bf-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.bf-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }
+.bf-dot { width: 8px; height: 8px; border-radius: 50%; background: #2ec26b; animation: maipulse 1.8s infinite; }
+.bf-dot.off { background: #6b7280; animation: none; }
+.bf-fold { background: #1b1e26; border: 1px solid #2b2f3a; color: #b9bdc4; border-radius: 7px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.bf-cv { display: block; width: 100%; height: 260px; border-radius: 9px; background: linear-gradient(#0d0f14, #101319); }
+.bf-bar { position: relative; height: 20px; background: rgba(226,74,74,0.25); border-radius: 6px; margin-top: 9px; overflow: hidden; }
+.bf-bar-fill { height: 100%; background: rgba(46,194,107,0.42); transition: width .5s ease; }
+.bf-bar-l, .bf-bar-r { position: absolute; top: 0; line-height: 20px; font-size: 11px; font-weight: 600; color: #e8e9ec; }
+.bf-bar-l { left: 8px; } .bf-bar-r { right: 8px; }
+.bf-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 9px; font-size: 12px; color: #e8e9ec; }
+.bf-stats span { display: inline-flex; align-items: baseline; gap: 5px; }
+.bf-k { font-style: normal; font-size: 11px; color: #8b909a; }
+.bf-k.bull { color: #3ddb84; } .bf-k.bear { color: #ff6b6b; }
+@media (max-width: 560px) { .bf-cv { height: 200px; } .bf-stats { font-size: 11px; gap: 5px 10px; } }
+
 .mai-live { background: #14161c; border: 1px solid #3a3320; border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; }
 .mai-live-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .mai-live-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }

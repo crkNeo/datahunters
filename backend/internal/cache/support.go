@@ -235,6 +235,22 @@ func srStatus(info SRLevel, price float64) string {
 	return "range"
 }
 
+// BTCSR returns BTC's support/resistance only, freshened with the live price.
+// Public: it feeds the 戰場 (BTC battlefield) walls on the home page. The full
+// multi-coin board + breach alerts stay VIP (SR / handleSR).
+func (s *Store) BTCSR() SRLevel {
+	px := s.livePrices()
+	s.srMu.Lock()
+	defer s.srMu.Unlock()
+	info := s.srInfo["BTC"]
+	info.Coin = "BTC"
+	if p := px["BTC"]; p > 0 {
+		info.Price = p
+		info.Status = srStatus(info, p)
+	}
+	return info
+}
+
 // SR returns the current support/resistance levels (only coins that have at least
 // one qualifying level), freshened with the live price, sorted by coin. VIP page.
 func (s *Store) SR() SRData {

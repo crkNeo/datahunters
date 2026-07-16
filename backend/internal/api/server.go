@@ -98,6 +98,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))  // 大盤 AI 分析(每整點)
 	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))     // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))        // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
 	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))     // login 公告彈窗 (members)
 	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
@@ -540,6 +541,10 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
 }
+
+// handleBTCSR serves BTC's support/resistance only — the public 戰場 draws its
+// fortress walls from it. The full multi-coin monitor stays VIP (handleSR).
+func (s *Server) handleBTCSR(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.BTCSR()) }
 
 // handleSR serves the VIP 支撐壓力 monitor: mainstream coins' current support &
 // resistance levels and breach status (no trades).
