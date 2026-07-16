@@ -1035,10 +1035,15 @@ function bfOnTrade(px, qty, buyerMaker) {
   const bull = !buyerMaker
   if (bull) bfLive.value.buy += qty
   else bfLive.value.sell += qty
-  if (qty < 0.005) return // 塵埃單不生兵
-  if (bfSoldiers.length > 260) return // 上限保護
-  const size = Math.min(3.2, 0.9 + Math.sqrt(qty) * 2.2)
-  bfSoldiers.push({ px, bull, size, t: 0, life: 60 + Math.random() * 40, off: (Math.random() - 0.5) * 0.8 })
+  if (qty < 0.004) return // 塵埃單不生兵
+  if (bfSoldiers.length > 200) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
+  const wdt = Math.min(6, 2.2 + Math.sqrt(qty) * 2.6)
+  bfSoldiers.push({
+    bull, w: wdt, h: wdt * 2.1,
+    tank: qty >= 1.5, // 大單 → 坦克
+    t: 0, life: 44 + Math.random() * 26,
+    lane: Math.random(), // 0..1 縱深車道
+  })
 }
 function bfOnLiq(px, qty, side) {
   // side=SELL → 多單被清算(強制賣出);BUY → 空單被清算
@@ -1046,21 +1051,45 @@ function bfOnLiq(px, qty, side) {
   const usd = px * qty
   if (long) bfLive.value.liqLong += usd
   else bfLive.value.liqShort += usd
-  bfBlasts.push({ px, long, r: 0, max: Math.min(46, 10 + Math.sqrt(usd) / 22), t: 0 })
+  // 爆炸打在戰線附近(帶點隨機偏移),不是絕對價格位置
+  bfBlasts.push({ long, off: (Math.random() - 0.5) * 0.1, r: 0, max: Math.min(52, 12 + Math.sqrt(usd) / 20), t: 0 })
 }
 
-// 價格→畫布 X。視窗自動涵蓋兩座要塞,並讓現價大致置中。
-function bfRange() {
+// 戰場座標系。⚠️ X 軸「不是」絕對價格 — 那是第一版的致命錯誤:SR 城牆常離現價
+// ±1%,但訂單簿與成交都擠在 ±0.01% 內,尺度差近百倍 → 畫面 95% 是空的、城牆還會
+// 疊在戰線上。改成「價格在 支撐↔壓力 之間的相對位置」:城牆固定釘在畫面兩側,
+// 戰線在中間移動。畫面永遠是滿的,而且戰線位置直接回答「離攻破還有多遠」。
+const BF_SUPX = 0.14, BF_RESX = 0.86 // 兩座城牆的戰場座標 (0..1)
+
+function bfWalls() {
   const p = bfPrice || bfLive.value.price
-  if (!p) return [0, 1]
-  let d = p * 0.004
   const sr = bfSR.value
-  if (sr) {
-    if (sr.sup_ok && sr.support > 0) d = Math.max(d, (p - sr.support) * 1.25)
-    if (sr.res_ok && sr.resistance > 0) d = Math.max(d, (sr.resistance - p) * 1.25)
-  }
-  d = Math.max(d, p * 0.0025)
-  return [p - d, p + d]
+  let sup = sr && sr.sup_ok ? sr.support : 0
+  let res = sr && sr.res_ok ? sr.resistance : 0
+  const supReal = sup > 0, resReal = res > 0
+  if (!supReal) sup = p * 0.9965 // 沒有實測城牆時用假想防線,畫面才不會退化
+  if (!resReal) res = p * 1.0035
+  if (res <= sup) return { sup: p * 0.9965, res: p * 1.0035, supReal: false, resReal: false }
+  return { sup, res, supReal, resReal }
+}
+// 戰線 0..1(0=支撐牆、1=壓力牆);已攻破時允許溢出一小段以示突破
+function bfFrontU() {
+  const p = bfPrice || bfLive.value.price
+  const w = bfWalls()
+  if (!p) return 0.5
+  const n = (p - w.sup) / (w.res - w.sup)
+  return Math.max(-0.1, Math.min(1.1, BF_SUPX + n * (BF_RESX - BF_SUPX)))
+}
+// 城牆後方的「後備軍」= 該側掛單量(訂單簿 = 靜止的防禦工事)
+function bfReserves() {
+  const p = bfPrice || bfLive.value.price
+  const w = bfWalls()
+  let bid = 0, ask = 0
+  for (const [q, v] of bfFar.bids) if (q >= w.sup && q <= p) bid += v
+  for (const [q, v] of bfFar.asks) if (q <= w.res && q >= p) ask += v
+  if (!bid) for (const [, v] of bfNear.bids) bid += v
+  if (!ask) for (const [, v] of bfNear.asks) ask += v
+  return { bid, ask }
 }
 
 function bfDraw() {
@@ -1069,155 +1098,137 @@ function bfDraw() {
   const ctx = cv.getContext('2d')
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   const W = cv.clientWidth, H = cv.clientHeight
+  if (!W || !H) return
   if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
   const p = bfPrice || bfLive.value.price
   if (!p) { ctx.fillStyle = '#8b909a'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('連線中…', W / 2, H / 2); return }
 
-  const [lo, hi] = bfRange()
-  const X = (px) => ((px - lo) / (hi - lo)) * W
-  const horizon = H * 0.30 // 地平線:上方是天空,下方是等距地面
+  const horizon = H * 0.26
   const groundH = H - horizon
-  // 透視:越靠近觀察者(y 越大)橫向越寬。t=0 在地平線、t=1 在最前緣。
-  const persp = (t) => 0.42 + 0.58 * t
-  const proj = (px, t) => {
-    const cx = W / 2
-    return [cx + (X(px) - cx) * persp(t), horizon + groundH * t]
-  }
+  // 等距投影:u = 戰場橫向座標 (0..1),t = 縱深 (0=地平線, 1=最前緣)
+  const PX = (u, t) => W / 2 + (u - 0.5) * W * (0.5 + 0.5 * t)
+  const PY = (t) => horizon + groundH * t
 
-  // 天空(依多空優勢染色)
-  const dom = Math.max(-1, Math.min(1, (bfLive.value.buy - bfLive.value.sell) / ((bfLive.value.buy + bfLive.value.sell) || 1)))
-  const sky = ctx.createLinearGradient(0, 0, 0, horizon)
-  sky.addColorStop(0, dom > 0 ? `rgba(46,194,107,${0.05 + dom * 0.14})` : `rgba(226,74,74,${0.05 - dom * 0.14})`)
-  sky.addColorStop(1, 'rgba(20,22,28,0)')
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, W, horizon)
-
-  // 地面(左半多方領土偏綠、右半空方偏紅)
-  const fx = X(p)
-  for (const [x0, x1, col] of [[0, fx, 'rgba(46,194,107,0.10)'], [fx, W, 'rgba(226,74,74,0.10)']]) {
-    ctx.beginPath()
-    const cx = W / 2
-    const pa = (x) => cx + (x - cx) * persp(0), pb = (x) => cx + (x - cx) * persp(1)
-    ctx.moveTo(pa(x0), horizon); ctx.lineTo(pa(x1), horizon); ctx.lineTo(pb(x1), H); ctx.lineTo(pb(x0), H)
-    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
-  }
-  // 地面縱深格線
-  ctx.strokeStyle = 'rgba(255,255,255,0.045)'; ctx.lineWidth = 1
-  for (let i = 1; i < 6; i++) {
-    const t = i / 6, y = horizon + groundH * t
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
-  }
-
-  // 訂單簿地形:近端 depth20 + 遠端快照合併,分箱後畫成起伏(多方買牆在左、空方賣牆在右)
-  const bins = 84
-  const bid = new Array(bins).fill(0), ask = new Array(bins).fill(0)
-  const put = (arr, lv) => {
-    for (const [q, v] of lv) {
-      if (q < lo || q > hi) continue
-      const i = Math.min(bins - 1, Math.max(0, Math.floor(((q - lo) / (hi - lo)) * bins)))
-      arr[i] += v
-    }
-  }
-  put(bid, bfFar.bids); put(bid, bfNear.bids); put(ask, bfFar.asks); put(ask, bfNear.asks)
-  const peak = Math.max(1e-9, ...bid, ...ask)
-  const terrain = (arr, col) => {
-    ctx.beginPath()
-    let started = false
-    for (let i = 0; i < bins; i++) {
-      const px = lo + ((i + 0.5) / bins) * (hi - lo)
-      const h = (arr[i] / peak) * groundH * 0.5
-      const [sx, sy] = proj(px, 0.62)
-      if (!started) { ctx.moveTo(sx, sy); started = true }
-      ctx.lineTo(sx, sy - h)
-    }
-    for (let i = bins - 1; i >= 0; i--) {
-      const px = lo + ((i + 0.5) / bins) * (hi - lo)
-      const [sx, sy] = proj(px, 0.62)
-      ctx.lineTo(sx, sy)
-    }
-    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
-  }
-  terrain(bid, 'rgba(46,194,107,0.30)')
-  terrain(ask, 'rgba(226,74,74,0.30)')
-
-  // 要塞(SR 城牆):厚度 ∝ 觸及次數;被攻破則轉暗+裂紋
-  const sr = bfSR.value
-  const fort = (price, touches, bullSide, broken) => {
-    if (!price || price < lo || price > hi) return
-    const th = Math.min(15, 4 + touches * 2.2)
-    const col = broken ? 'rgba(120,120,130,0.55)' : bullSide ? 'rgba(46,194,107,0.85)' : 'rgba(226,74,74,0.85)'
-    const [bx, by] = proj(price, 0.72)
-    const wallH = groundH * 0.42
-    // 牆體(等距梯形)
-    const [tx] = proj(price, 0.58)
-    ctx.beginPath()
-    ctx.moveTo(bx - th, by); ctx.lineTo(bx + th, by)
-    ctx.lineTo(tx + th * 0.8, by - wallH); ctx.lineTo(tx - th * 0.8, by - wallH)
-    ctx.closePath()
-    ctx.fillStyle = col; ctx.fill()
-    // 城垛
-    ctx.fillStyle = broken ? 'rgba(150,150,160,0.7)' : bullSide ? '#3ddb84' : '#ff6b6b'
-    for (let i = -1; i <= 1; i++) ctx.fillRect(tx + i * th * 0.55 - 2, by - wallH - 5, 4, 6)
-    if (broken) { // 裂紋
-      ctx.strokeStyle = 'rgba(255,190,80,0.9)'; ctx.lineWidth = 2
-      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 4, by - wallH * 0.5); ctx.lineTo(bx - 3, by - wallH); ctx.stroke()
-    }
-    ctx.fillStyle = broken ? '#c9a227' : '#c9ced8'
-    ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
-    ctx.fillText((broken ? '⚔ 已攻破 ' : '') + '×' + touches, bx, by - wallH - 10)
-  }
-  if (sr) {
-    if (sr.sup_ok) fort(sr.support, sr.sup_touches, true, sr.status === 'break_down')
-    if (sr.res_ok) fort(sr.resistance, sr.res_touches, false, sr.status === 'break_up')
-  }
-
-  // 士兵:從自己陣營邊緣衝向戰線
+  const w = bfWalls()
+  const fu = bfFrontU()
   const now = performance.now()
   const dt = bfLastT ? Math.min(64, now - bfLastT) : 16
   bfLastT = now
   const step = dt / 16
+
+  // ---- 天空:依主動買賣優勢染色 ----
+  const tot = bfLive.value.buy + bfLive.value.sell
+  const dom = tot > 0 ? (bfLive.value.buy - bfLive.value.sell) / tot : 0
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon)
+  sky.addColorStop(0, dom >= 0 ? `rgba(46,194,107,${0.06 + dom * 0.2})` : `rgba(226,74,74,${0.06 - dom * 0.2})`)
+  sky.addColorStop(1, 'rgba(13,15,20,0)')
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon)
+
+  // ---- 地面梯形:戰線左邊多方領土、右邊空方領土 ----
+  const band = (u0, u1, col) => {
+    ctx.beginPath()
+    ctx.moveTo(PX(u0, 0), PY(0)); ctx.lineTo(PX(u1, 0), PY(0))
+    ctx.lineTo(PX(u1, 1), PY(1)); ctx.lineTo(PX(u0, 1), PY(1))
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
+  }
+  band(-0.15, fu, 'rgba(35,120,70,0.5)')
+  band(fu, 1.15, 'rgba(150,50,50,0.5)')
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1
+  for (let i = 1; i < 5; i++) { const y = PY(i / 5); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke() }
+
+  // ---- 城堡 ----
+  const rsv = bfReserves()
+  const rsvMax = Math.max(rsv.bid, rsv.ask, 1e-9)
+  const castle = (u, touches, bull, broken, real, price, reserve) => {
+    const t = 0.66
+    const x = PX(u, t), y = PY(t)
+    const th = Math.min(30, 12 + touches * 3.4) // 牆厚 ∝ 觸及次數
+    const hgt = groundH * 0.46
+    const body = broken ? '#5b6068' : bull ? '#1f7a45' : '#8f2f2f'
+    const face = broken ? '#767c86' : bull ? '#2ec26b' : '#d94a4a'
+    if (!real) ctx.globalAlpha = 0.45 // 假想防線 → 半透明
+    ctx.fillStyle = body
+    ctx.fillRect(x - th, y - hgt, th * 2, hgt)
+    ctx.fillStyle = face
+    ctx.fillRect(x - th, y - hgt, th * 2, 5)
+    for (let i = -2; i <= 2; i++) ctx.fillRect(x + i * th * 0.42 - 3, y - hgt - 7, 6, 8) // 城垛
+    if (broken) {
+      ctx.strokeStyle = '#ffbe50'; ctx.lineWidth = 2.5 // 裂縫
+      ctx.beginPath(); ctx.moveTo(x - 2, y); ctx.lineTo(x + 6, y - hgt * 0.45); ctx.lineTo(x - 5, y - hgt * 0.75); ctx.lineTo(x + 3, y - hgt); ctx.stroke()
+    } else { // 旗幟
+      ctx.strokeStyle = face; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(x, y - hgt - 7); ctx.lineTo(x, y - hgt - 20); ctx.stroke()
+      ctx.fillStyle = face; ctx.beginPath()
+      ctx.moveTo(x, y - hgt - 20); ctx.lineTo(x + (bull ? 12 : -12), y - hgt - 16); ctx.lineTo(x, y - hgt - 12)
+      ctx.closePath(); ctx.fill()
+    }
+    // 後備軍(掛單量)條:城牆的「血量」
+    const bw = th * 2, bh = 4
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x - th, y + 4, bw, bh)
+    ctx.fillStyle = face; ctx.fillRect(x - th, y + 4, bw * Math.min(1, reserve / rsvMax), bh)
+    ctx.globalAlpha = 1
+    ctx.textAlign = 'center'
+    ctx.fillStyle = broken ? '#ffbe50' : '#e8e9ec'
+    ctx.font = 'bold 11px sans-serif'
+    ctx.fillText(broken ? '⚔ 已攻破' : '×' + touches + ' 城牆', x, y - hgt - 26)
+    ctx.fillStyle = '#8b909a'; ctx.font = '10px sans-serif'
+    ctx.fillText('$' + Math.round(price).toLocaleString(), x, y + 18)
+  }
+  const sr = bfSR.value
+  castle(BF_SUPX, sr && sr.sup_ok ? sr.sup_touches : 0, true, !!(sr && sr.status === 'break_down'), w.supReal, w.sup, rsv.bid)
+  castle(BF_RESX, sr && sr.res_ok ? sr.res_touches : 0, false, !!(sr && sr.status === 'break_up'), w.resReal, w.res, rsv.ask)
+
+  // ---- 士兵:從自家城堡衝向戰線 ----
   bfSoldiers = bfSoldiers.filter((s) => {
     s.t += step
     if (s.t > s.life) return false
     const prog = Math.min(1, s.t / s.life)
-    const from = s.bull ? lo : hi
-    const cur = from + (s.px - from) * prog // 由邊緣推進到成交價(戰線)
-    const t = 0.80 + s.off * 0.16
-    const [x, y] = proj(cur, t)
-    ctx.fillStyle = s.bull ? `rgba(61,219,132,${1 - prog * 0.35})` : `rgba(255,107,107,${1 - prog * 0.35})`
-    ctx.fillRect(x - s.size / 2, y - s.size * 2.2, s.size, s.size * 2.2)
-    if (prog > 0.93) { // 抵達戰線 → 撞擊閃光
-      ctx.fillStyle = s.bull ? 'rgba(61,219,132,0.5)' : 'rgba(255,107,107,0.5)'
-      ctx.beginPath(); ctx.arc(x, y - 2, 3.5, 0, 7); ctx.fill()
+    const from = s.bull ? BF_SUPX : BF_RESX
+    const u = from + (fu - from) * prog
+    const t = 0.72 + s.lane * 0.22
+    const x = PX(u, t), y = PY(t)
+    const a = prog > 0.9 ? 1 - (prog - 0.9) * 10 : 1
+    ctx.globalAlpha = Math.max(0, a)
+    ctx.fillStyle = s.bull ? '#3ddb84' : '#ff6b6b'
+    if (s.tank) { // 大單 → 坦克
+      const tw = s.w * 2.6
+      ctx.fillRect(x - tw / 2, y - s.h * 0.9, tw, s.h * 0.9)
+      ctx.fillRect(x + (s.bull ? tw / 2 : -tw / 2 - tw * 0.5), y - s.h * 0.75, tw * 0.5, 2.5) // 砲管
+    } else {
+      ctx.fillRect(x - s.w / 2, y - s.h, s.w, s.h) // 身體
+      ctx.beginPath(); ctx.arc(x, y - s.h - s.w * 0.42, s.w * 0.42, 0, 7); ctx.fill() // 頭
     }
+    ctx.globalAlpha = 1
     return true
   })
 
-  // 清算爆炸
+  // ---- 清算爆炸(打在戰線上) ----
   bfBlasts = bfBlasts.filter((b) => {
-    b.t += step; b.r += (b.max - b.r) * 0.12 * step
-    const a = Math.max(0, 1 - b.t / 42)
+    b.t += step; b.r += (b.max - b.r) * 0.16 * step
+    const a = Math.max(0, 1 - b.t / 40)
     if (a <= 0) return false
-    const [x, y] = proj(b.px, 0.78)
-    const g = ctx.createRadialGradient(x, y - 6, 0, x, y - 6, Math.max(1, b.r))
-    g.addColorStop(0, b.long ? `rgba(255,120,60,${a})` : `rgba(120,220,255,${a})`)
+    const x = PX(fu + b.off, 0.8), y = PY(0.8)
+    const g = ctx.createRadialGradient(x, y - 8, 0, x, y - 8, Math.max(1, b.r))
+    g.addColorStop(0, `rgba(255,255,220,${a})`)
+    g.addColorStop(0.4, b.long ? `rgba(255,120,40,${a * 0.9})` : `rgba(90,200,255,${a * 0.9})`)
     g.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = g
-    ctx.beginPath(); ctx.arc(x, y - 6, Math.max(1, b.r), 0, 7); ctx.fill()
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y - 8, Math.max(1, b.r), 0, 7); ctx.fill()
     return true
   })
-  if (bfBlasts.length > 40) bfBlasts = bfBlasts.slice(-40)
+  if (bfBlasts.length > 30) bfBlasts = bfBlasts.slice(-30)
 
-  // 戰線(現價)
-  const [lx0] = proj(p, 0), [lx1] = proj(p, 1)
-  ctx.strokeStyle = 'rgba(216,173,72,0.95)'; ctx.lineWidth = 2
-  ctx.beginPath(); ctx.moveTo(lx0, horizon); ctx.lineTo(lx1, H); ctx.stroke()
-  ctx.fillStyle = '#d8ad48'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'
-  ctx.fillText('$' + p.toLocaleString(undefined, { maximumFractionDigits: 0 }), lx0, horizon - 6)
+  // ---- 戰線(現價) ----
+  const x0 = PX(fu, 0), x1 = PX(fu, 1)
+  const grad = ctx.createLinearGradient(x0, horizon, x1, H)
+  grad.addColorStop(0, 'rgba(216,173,72,0.35)')
+  grad.addColorStop(1, 'rgba(216,173,72,1)')
+  ctx.strokeStyle = grad; ctx.lineWidth = 3
+  ctx.beginPath(); ctx.moveTo(x0, horizon); ctx.lineTo(x1, H); ctx.stroke()
+  ctx.fillStyle = '#d8ad48'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'
+  ctx.fillText('$' + p.toLocaleString(undefined, { maximumFractionDigits: 0 }), Math.max(34, Math.min(W - 34, x0)), horizon - 8)
 }
-
 function bfLoop() { bfDraw(); bfRAF = requestAnimationFrame(bfLoop) }
 function bfStart() {
   if (bfRAF) return
