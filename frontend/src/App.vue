@@ -948,6 +948,10 @@ const bfLive = ref({ price: 0, longPct: 50, oi: 0, liqLong: 0, liqShort: 0, buy:
 let bfWS = null, bfRAF = null, bfFarTimer = null, bfStatTimer = null, bfRetry = 0
 let bfSoldiers = [], bfBlasts = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
 let bfPrice = 0, bfLastT = 0, bfLastTrade = 0
+// aggTrade 串流在部分網路環境收不到(實測:depth20 正常、aggTrade 一筆都沒有,
+// 但 REST /aggTrades 正常)。沒有成交就沒有士兵 → 戰場只剩城堡。
+// 對策:看門狗偵測 WS 沒送成交就自動改用 REST 輪詢補上,WS 恢復就停掉輪詢。
+let bfWsTradeAt = 0, bfPoll = null, bfDog = null, bfLastAggId = 0, bfQueue = []
 
 async function loadBtcSR() {
   try {
@@ -1004,7 +1008,7 @@ function bfConnect() {
     try { m = JSON.parse(ev.data) } catch (e) { return }
     const d = m.data
     if (!d) return
-    if (d.e === 'aggTrade') bfOnTrade(+d.p, +d.q, d.m)
+    if (d.e === 'aggTrade') { bfWsTradeAt = Date.now(); bfOnTrade(+d.p, +d.q, d.m) }
     else if (d.e === 'forceOrder' && d.o) bfOnLiq(+d.o.ap || +d.o.p, +d.o.q, d.o.S)
     else if (d.e === 'depthUpdate') {
       if (d.b) bfNear.bids = d.b.map((x) => [+x[0], +x[1]])
@@ -1035,13 +1039,15 @@ function bfOnTrade(px, qty, buyerMaker) {
   const bull = !buyerMaker
   if (bull) bfLive.value.buy += qty
   else bfLive.value.sell += qty
-  if (qty < 0.004) return // 塵埃單不生兵
-  if (bfSoldiers.length > 200) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
-  const wdt = Math.min(6, 2.2 + Math.sqrt(qty) * 2.6)
+  // 門檻實測校準:BTC 多數成交量都很小,原本 0.004(≈$260)會砍掉約 3/4 的兵,
+  // 戰場看起來空無一人;坦克門檻 1.5 BTC(≈$97k)更是幾乎不會觸發。
+  if (qty < 0.0008) return // 只濾真正的塵埃
+  if (bfSoldiers.length > 220) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
+  const wdt = Math.min(7, 2.4 + Math.sqrt(qty) * 3.4)
   bfSoldiers.push({
     bull, w: wdt, h: wdt * 2.1,
-    tank: qty >= 1.5, // 大單 → 坦克
-    t: 0, life: 44 + Math.random() * 26,
+    tank: qty >= 0.4, // 大單(≈$26k+)→ 坦克
+    t: 0, life: 52 + Math.random() * 34,
     lane: Math.random(), // 0..1 縱深車道
   })
 }
@@ -1053,6 +1059,30 @@ function bfOnLiq(px, qty, side) {
   else bfLive.value.liqShort += usd
   // 爆炸打在戰線附近(帶點隨機偏移),不是絕對價格位置
   bfBlasts.push({ long, off: (Math.random() - 0.5) * 0.1, r: 0, max: Math.min(52, 12 + Math.sqrt(usd) / 20), t: 0 })
+}
+
+// REST 成交備援:WS 的 aggTrade 沒供應時改用輪詢。以 aggTrade id (a) 去重,
+// 新成交丟進佇列由畫格慢慢放兵,避免每 2 秒一次爆量湧現的脈衝感。
+async function bfPollTrades() {
+  try {
+    const r = await fetch('https://fapi.binance.com/fapi/v1/aggTrades?symbol=BTCUSDT&limit=100')
+    if (!r.ok) return
+    const arr = await r.json()
+    if (!Array.isArray(arr) || !arr.length) return
+    const seed = bfLastAggId === 0
+    for (const t of arr) {
+      if (t.a <= bfLastAggId) continue
+      bfLastAggId = t.a
+      if (!seed) bfQueue.push([+t.p, +t.q, t.m])
+    }
+    if (seed) for (const t of arr.slice(-12)) bfQueue.push([+t.p, +t.q, t.m]) // 首輪只放最後幾筆,不要一口氣倒 100 個兵
+    if (bfQueue.length > 300) bfQueue = bfQueue.slice(-300)
+  } catch (e) { /* 限流/離線 → 下一輪再試 */ }
+}
+function bfWatchdog() {
+  const wsAlive = Date.now() - bfWsTradeAt < 6000
+  if (!wsAlive && !bfPoll) { bfPoll = setInterval(bfPollTrades, 2000); bfPollTrades() }
+  else if (wsAlive && bfPoll) { clearInterval(bfPoll); bfPoll = null } // WS 恢復 → 收掉輪詢
 }
 
 // 戰場座標系。⚠️ X 軸「不是」絕對價格 — 那是第一版的致命錯誤:SR 城牆常離現價
@@ -1117,6 +1147,8 @@ function bfDraw() {
   const dt = bfLastT ? Math.min(64, now - bfLastT) : 16
   bfLastT = now
   const step = dt / 16
+  // REST 備援的成交佇列 → 每格放少量兵,避免每輪輪詢一次的脈衝感
+  for (let i = 0; i < 3 && bfQueue.length; i++) { const q = bfQueue.shift(); bfOnTrade(q[0], q[1], q[2]) }
 
   // ---- 天空:依主動買賣優勢染色 ----
   const tot = bfLive.value.buy + bfLive.value.sell
@@ -1236,14 +1268,17 @@ function bfStart() {
   bfLoadFar(); bfLoadStats(); loadBtcSR()
   bfFarTimer = setInterval(bfLoadFar, 20000)
   bfStatTimer = setInterval(() => { bfLoadStats(); loadBtcSR() }, 60000)
+  bfDog = setInterval(bfWatchdog, 3000) // WS 沒送成交 → 自動切 REST 輪詢
+  setTimeout(bfWatchdog, 4000)          // 開場先給 WS 一點時間
   bfLastT = 0
   bfRAF = requestAnimationFrame(bfLoop)
 }
 function bfStop() {
   if (bfRAF) { cancelAnimationFrame(bfRAF); bfRAF = null }
-  clearInterval(bfFarTimer); clearInterval(bfStatTimer)
+  clearInterval(bfFarTimer); clearInterval(bfStatTimer); clearInterval(bfDog)
+  clearInterval(bfPoll); bfPoll = null
   bfDisconnect()
-  bfSoldiers = []; bfBlasts = []
+  bfSoldiers = []; bfBlasts = []; bfQueue = []
 }
 function bfToggle() { bfOpen.value = !bfOpen.value; bfOpen.value ? bfStart() : bfStop() }
 const bfPressure = computed(() => {
