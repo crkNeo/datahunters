@@ -946,7 +946,44 @@ const bfCanvas = ref(null)
 const bfSR = ref(null)
 const bfLive = ref({ price: 0, longPct: 50, oi: 0, liqLong: 0, liqShort: 0, buy: 0, sell: 0, conn: false })
 let bfWS = null, bfRAF = null, bfFarTimer = null, bfStatTimer = null, bfRetry = 0
-let bfSoldiers = [], bfBlasts = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
+let bfSoldiers = [], bfBlasts = [], bfSparks = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
+// 士兵/坦克 icon:離屏預渲染一次,之後只 drawImage。220 個單位若每格重畫路徑會拖垮手機。
+let bfSprites = null
+function bfMakeSprites() {
+  const mk = (w, h, fn) => {
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    fn(c.getContext('2d'))
+    return c
+  }
+  // 一律畫成「面向右」,畫的時候用 scale(-1,1) 翻給空方用
+  const soldier = (col, dark) => mk(18, 25, (c) => {
+    c.fillStyle = dark
+    c.fillRect(5, 18, 3, 7); c.fillRect(10, 18, 3, 7)      // 腿
+    c.fillStyle = col
+    c.fillRect(5, 9, 8, 10)                                 // 軀幹
+    c.beginPath(); c.arc(9, 6.2, 3.2, 0, 7); c.fill()       // 頭
+    c.fillStyle = dark
+    c.beginPath(); c.arc(9, 5.6, 4.5, Math.PI, 0); c.fill() // 鋼盔
+    c.fillRect(11, 10.6, 7, 1.8)                            // 步槍
+    c.fillStyle = col
+    c.fillRect(9, 10, 4, 2.6)                               // 持槍手臂
+  })
+  const tank = (col, dark) => mk(34, 19, (c) => {
+    c.fillStyle = dark
+    c.fillRect(2, 11, 25, 6)                                // 履帶
+    c.fillStyle = 'rgba(0,0,0,0.35)'
+    for (let i = 0; i < 5; i++) { c.beginPath(); c.arc(5 + i * 5, 14, 1.6, 0, 7); c.fill() } // 輪
+    c.fillStyle = col
+    c.fillRect(4, 6, 22, 5.5)                               // 車體
+    c.fillRect(11, 2, 10, 5)                                // 砲塔
+    c.fillRect(20, 3.4, 13, 2.2)                            // 砲管
+  })
+  bfSprites = {
+    bull: soldier('#3ddb84', '#1a7a45'), bear: soldier('#ff6b6b', '#8f2f2f'),
+    bullTank: tank('#3ddb84', '#126034'), bearTank: tank('#ff6b6b', '#6f2424'),
+  }
+}
 let bfPrice = 0, bfLastT = 0, bfLastTrade = 0
 // aggTrade 串流在部分網路環境收不到(實測:depth20 正常、aggTrade 一筆都沒有,
 // 但 REST /aggTrades 正常)。沒有成交就沒有士兵 → 戰場只剩城堡。
@@ -1043,11 +1080,18 @@ function bfOnTrade(px, qty, buyerMaker) {
   // 戰場看起來空無一人;坦克門檻 1.5 BTC(≈$97k)更是幾乎不會觸發。
   if (qty < 0.0008) return // 只濾真正的塵埃
   if (bfSoldiers.length > 220) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
-  const wdt = Math.min(7, 2.4 + Math.sqrt(qty) * 3.4)
+  const tank = qty >= 0.4 // 大單(≈$26k+)→ 坦克
   bfSoldiers.push({
-    bull, w: wdt, h: wdt * 2.1,
-    tank: qty >= 0.4, // 大單(≈$26k+)→ 坦克
-    t: 0, life: 52 + Math.random() * 34,
+    bull, tank,
+    scale: tank ? Math.min(1.5, 0.85 + Math.sqrt(qty) * 0.5) : Math.min(1.15, 0.6 + Math.sqrt(qty) * 2.4),
+    u: bull ? BF_SUPX : BF_RESX, // 從自家城堡出發
+    state: 'march',
+    spd: (0.0055 + Math.random() * 0.004) * (tank ? 0.65 : 1), // 坦克較慢
+    // 交戰壽命:實測 26–60 幀(約 0.5s)太短,肉搏帶堆不起來就死光了。
+    // 拉長後穩態約 50–70 兵膠著在戰線上,才有交戰感(上限 220 仍是效能保險絲)。
+    hp: tank ? 130 + Math.random() * 110 : 55 + Math.random() * 85,
+    ph: Math.random() * 6.28, // 刺擊動畫相位
+    lunge: 0,
     lane: Math.random(), // 0..1 縱深車道
   })
 }
@@ -1212,29 +1256,62 @@ function bfDraw() {
   castle(BF_SUPX, sr && sr.sup_ok ? sr.sup_touches : 0, true, !!(sr && sr.status === 'break_down'), w.supReal, w.sup, rsv.bid)
   castle(BF_RESX, sr && sr.res_ok ? sr.res_touches : 0, false, !!(sr && sr.status === 'break_up'), w.resReal, w.res, rsv.ask)
 
-  // ---- 士兵:從自家城堡衝向戰線 ----
+  // ---- 士兵:行軍 → 抵達戰線 → 停下對砍 → 陣亡 ----
+  // 兩軍都停在戰線上肉搏,所以中間會自然堆出一條交戰帶(這才是「多空交戰」)。
+  if (!bfSprites) bfMakeSprites()
+  bfSoldiers.sort((a, b) => a.lane - b.lane) // 遠的先畫,近的疊在上面
   bfSoldiers = bfSoldiers.filter((s) => {
-    s.t += step
-    if (s.t > s.life) return false
-    const prog = Math.min(1, s.t / s.life)
-    const from = s.bull ? BF_SUPX : BF_RESX
-    const u = from + (fu - from) * prog
-    const t = 0.72 + s.lane * 0.22
-    const x = PX(u, t), y = PY(t)
-    const a = prog > 0.9 ? 1 - (prog - 0.9) * 10 : 1
-    ctx.globalAlpha = Math.max(0, a)
-    ctx.fillStyle = s.bull ? '#3ddb84' : '#ff6b6b'
-    if (s.tank) { // 大單 → 坦克
-      const tw = s.w * 2.6
-      ctx.fillRect(x - tw / 2, y - s.h * 0.9, tw, s.h * 0.9)
-      ctx.fillRect(x + (s.bull ? tw / 2 : -tw / 2 - tw * 0.5), y - s.h * 0.75, tw * 0.5, 2.5) // 砲管
+    const dir = s.bull ? 1 : -1
+    if (s.state === 'march') {
+      s.u += dir * s.spd * step
+      // 觸及戰線 → 進入交戰(留一點點間隙,兩軍才會面對面而不是重疊)
+      if ((s.bull && s.u >= fu - 0.012) || (!s.bull && s.u <= fu + 0.012)) {
+        s.state = 'fight'
+        s.u = fu - dir * (0.012 + Math.random() * 0.02)
+      }
     } else {
-      ctx.fillRect(x - s.w / 2, y - s.h, s.w, s.h) // 身體
-      ctx.beginPath(); ctx.arc(x, y - s.h - s.w * 0.42, s.w * 0.42, 0, 7); ctx.fill() // 頭
+      s.hp -= step
+      if (s.hp <= 0) { // 陣亡
+        bfSparks.push({ u: s.u, lane: s.lane, t: 0, life: 14, bull: s.bull, death: true })
+        return false
+      }
+      s.u += (fu - dir * 0.016 - s.u) * 0.05 * step // 戰線移動時交戰帶跟著推移
+      s.ph += 0.34 * step
+      s.lunge = Math.sin(s.ph) * 0.005 * dir // 刺擊
+      if (Math.random() < 0.05 * step) { // 兵器碰撞火花
+        bfSparks.push({ u: s.u + dir * 0.008, lane: s.lane, t: 0, life: 8, bull: s.bull })
+      }
     }
-    ctx.globalAlpha = 1
+    const t = 0.70 + s.lane * 0.26
+    const x = PX(s.u + s.lunge, t), y = PY(t)
+    const sp = s.tank ? (s.bull ? bfSprites.bullTank : bfSprites.bearTank) : (s.bull ? bfSprites.bull : bfSprites.bear)
+    const k = s.scale * (0.75 + t * 0.55) // 近大遠小
+    const w = sp.width * k, h = sp.height * k
+    ctx.save()
+    ctx.translate(x, y)
+    if (!s.bull) ctx.scale(-1, 1) // sprite 一律面向右 → 空方翻面
+    ctx.drawImage(sp, -w / 2, -h, w, h)
+    ctx.restore()
     return true
   })
+
+  // ---- 交戰火花 / 陣亡 ----
+  bfSparks = bfSparks.filter((k) => {
+    k.t += step
+    if (k.t > k.life) return false
+    const t = 0.70 + k.lane * 0.26
+    const x = PX(k.u, t), y = PY(t)
+    const a = 1 - k.t / k.life
+    if (k.death) {
+      ctx.fillStyle = k.bull ? `rgba(61,219,132,${a * 0.7})` : `rgba(255,107,107,${a * 0.7})`
+      ctx.beginPath(); ctx.arc(x, y - 4, 5 * (1 + k.t / k.life), 0, 7); ctx.fill()
+    } else {
+      ctx.fillStyle = `rgba(255,235,150,${a})`
+      ctx.fillRect(x - 1.5, y - 9 - k.t * 0.3, 3, 3)
+    }
+    return true
+  })
+  if (bfSparks.length > 140) bfSparks = bfSparks.slice(-140)
 
   // ---- 清算爆炸(打在戰線上) ----
   bfBlasts = bfBlasts.filter((b) => {
@@ -1278,7 +1355,7 @@ function bfStop() {
   clearInterval(bfFarTimer); clearInterval(bfStatTimer); clearInterval(bfDog)
   clearInterval(bfPoll); bfPoll = null
   bfDisconnect()
-  bfSoldiers = []; bfBlasts = []; bfQueue = []
+  bfSoldiers = []; bfBlasts = []; bfSparks = []; bfQueue = []
 }
 function bfToggle() { bfOpen.value = !bfOpen.value; bfOpen.value ? bfStart() : bfStop() }
 const bfPressure = computed(() => {
