@@ -120,8 +120,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))   // 開/關某策略進場
 	mux.HandleFunc("/api/admin/gamble-a", s.gate(A, s.handleGambleA)) // 超新星·A 緊止損 (admin A/B)
 	mux.HandleFunc("/api/admin/gamble-b", s.gate(A, s.handleGambleB)) // 超新星·B 位置閘門 (admin A/B)
-	mux.HandleFunc("/api/admin/pool", s.gate(A, s.handlePool))         // 30幣掃描池 1H (admin-only)
-	mux.HandleFunc("/api/admin/conv", s.gate(A, s.handleConv))               // 動態ATR均線收斂 4H (admin-only)
+	mux.HandleFunc("/api/conv", s.gate(V, s.handleConv)) // 冥王星 (動態ATR均線收斂 4H, VIP)
 	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))         // 逆勢超買空 30m (admin-only)
 	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))       // 布林重回 1h (admin-only)
 	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))         // 乖離回歸 1h (admin-only)
@@ -425,12 +424,7 @@ func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// handlePool serves the admin-only 30幣掃描池 1H strategy tracker.
-func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PoolState())
-}
-
-// handleConv serves the admin-only 動態ATR均線收斂 4H strategy tracker.
+// handleConv serves the 冥王星 (動態ATR均線收斂 4H) strategy tracker. VIP.
 func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
 }

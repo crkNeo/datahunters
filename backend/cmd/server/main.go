@@ -181,17 +181,7 @@ func main() {
 		}
 	}()
 
-	// 30幣掃描池 1H strategy (admin): evaluated once per closed 1H bar; REST-fetches
-	// long history only on bar close (throttled internally).
-	go func() {
-		store.PoolTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.PoolTick()
-		}
-	}()
-
-	// 動態ATR均線收斂 4H strategy (admin): evaluated once per closed 4H bar.
+	// 冥王星 (動態ATR均線收斂) 4H strategy: evaluated once per closed 4H bar.
 	go func() {
 		store.ConvTick()
 		ticker := time.NewTicker(2 * time.Minute)
@@ -205,7 +195,6 @@ func main() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
-			store.PoolMarkTick()
 			store.RSIFadeMarkTick()
 			store.BollFadeMarkTick()
 			store.MeanRevMarkTick()

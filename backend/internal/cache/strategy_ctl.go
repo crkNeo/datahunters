@@ -11,7 +11,7 @@ import (
 //   2. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "gambleA", "gambleB", "emaonly", "conv", "pool", "rsifade", "bollfade", "meanrev"}
+var allStrategies = []string{"main", "gamble", "gambleA", "gambleB", "emaonly", "conv", "rsifade", "bollfade", "meanrev"}
 
 // StrategyState is one strategy's on/off row for the admin UI.
 type StrategyState struct {
@@ -125,10 +125,6 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)
 		s.convMu.Unlock()
-	case "pool":
-		s.poolMu.Lock()
-		done = closeIn(s.poolTrades)
-		s.poolMu.Unlock()
 	default:
 		return false
 	}

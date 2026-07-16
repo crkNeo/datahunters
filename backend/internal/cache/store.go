@@ -13,8 +13,8 @@ import (
 	"datahunter/internal/auth"
 	"datahunter/internal/exchange"
 	"datahunter/internal/gdelt"
-	"datahunter/internal/notify"
 	"datahunter/internal/marketai"
+	"datahunter/internal/notify"
 	"datahunter/internal/push"
 	"datahunter/internal/robinhood"
 	"datahunter/internal/unlock"
@@ -58,12 +58,12 @@ type Store struct {
 	symTypes map[string]string
 	symTime  time.Time
 
-	paperMu          sync.Mutex // guards the paper-trading books
-	paperMain        *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble      *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
-	paperGambleA     *paperBook // admin A/B: 超新星 + 收緊止損濾網 (maxSLPct=8)
-	paperGambleB     *paperBook // admin A/B: 超新星 + 進場位置閘門 (posGate=0.9)
-	paperEMA         *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+	paperMu      sync.Mutex // guards the paper-trading books
+	paperMain    *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble  *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
+	paperGambleA *paperBook // admin A/B: 超新星 + 收緊止損濾網 (maxSLPct=8)
+	paperGambleB *paperBook // admin A/B: 超新星 + 進場位置閘門 (posGate=0.9)
+	paperEMA     *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
 	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
@@ -124,12 +124,7 @@ type Store struct {
 	gdeltSeeded bool              // first tick only seeds (no push burst of history on boot)
 	etfSeen     map[string]string // asset → last reported ETF-flow date (dedupe: once/day)
 
-	poolMu     sync.Mutex    // guards the 30幣掃描池 1H strategy (admin, scanpool.go)
-	poolTrades []*PaperTrade // simulated scan-pool trades
-	poolBucket int64         // last processed 1H wall-clock bucket
-	poolSeeded bool          // first tick only sets the baseline — no boot-time backfill of entries
-
-	convMu       sync.Mutex    // guards the 動態ATR均線收斂 4H strategy (admin, convergence.go)
+	convMu       sync.Mutex    // guards the 冥王星 (動態ATR均線收斂 4H) strategy (VIP, convergence.go)
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
@@ -188,11 +183,11 @@ func NewStore(coins []string) *Store {
 		details:           map[string]CoinDetail{},
 		ex:                exchange.NewClient(),
 		coins:             coins,
-		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),         // disciplined, fixed TP/SL
+		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),     // disciplined, fixed TP/SL
 		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),  // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
 		paperGambleA:      newBook("gambleA", 50, false, 1*time.Hour, 0), // admin A/B: 收緊止損
 		paperGambleB:      newBook("gambleB", 50, false, 1*time.Hour, 0), // admin A/B: 位置閘門
-		paperEMA:          newBook("emaonly", 0, false, 0, 0),                // standalone EMA cross (no time cooldown; signal-hour dedup)
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),            // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
@@ -257,7 +252,6 @@ func NewStore(coins []string) *Store {
 		s.paperGambleA.trades = db.loadTrades("gambleA")
 		s.paperGambleB.trades = db.loadTrades("gambleB")
 		s.paperEMA.trades = db.loadTrades("emaonly")
-		s.poolTrades = db.loadTrades("pool")
 		s.convTrades = db.loadTrades("conv")
 		s.rsiFadeBook.trades = db.loadTrades("rsifade")
 		s.bollFadeBook.trades = db.loadTrades("bollfade")

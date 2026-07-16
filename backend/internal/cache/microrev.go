@@ -11,7 +11,7 @@ import (
 )
 
 // microrev.go: three admin-only mean-reversion strategies, evaluated once per
-// closed bar over the 銀河 (emaCoins) universe — same shape as scanpool/convergence.
+// closed bar over the 銀河 (emaCoins) universe — same shape as convergence.go.
 //
 //	1. 逆勢超買空 (rsifade)  30m 只做空:RSI(3)>90 且收盤 < EMA200(空頭反彈)→ 放空。
 //	                        止損 +2.5 ATR,目標 −2.0 ATR,最多 16 根,冷卻 4 根。
@@ -460,10 +460,6 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.meanRevBook.mu.Lock()
 		s.meanRevBook.trades = keepIf(s.meanRevBook.trades, closedOnly)
 		s.meanRevBook.mu.Unlock()
-	case "pool":
-		s.poolMu.Lock()
-		s.poolTrades = keepIf(s.poolTrades, closedOnly)
-		s.poolMu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)

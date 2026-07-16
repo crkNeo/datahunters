@@ -432,15 +432,13 @@ func bookLabel(name string) string {
 	case "trail":
 		return "移動止損"
 	case "conv":
-		return "均線收斂"
+		return "冥王星"
 	case "rsifade":
 		return "逆勢超買空"
 	case "bollfade":
 		return "布林重回"
 	case "meanrev":
 		return "乖離回歸"
-	case "pool":
-		return "掃描池"
 	}
 	return "星軌"
 }
@@ -478,7 +476,7 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "gambleA", "gambleB", "emaonly", "conv", "pool", "rsifade", "bollfade", "meanrev":
+	case "gamble", "gambleA", "gambleB", "emaonly", "conv", "rsifade", "bollfade", "meanrev":
 		return name
 	}
 	return "paper" // main
@@ -554,7 +552,6 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), tr.Score, fmtPx(tr.Entry),
 		fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
 }
-
 
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	if b.adminOnly {

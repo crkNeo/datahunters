@@ -9,7 +9,7 @@ import (
 	"datahunter/internal/exchange"
 )
 
-// convergence.go: the "動態 ATR 4H 均線收斂" strategy (admin, display-only, long+short).
+// convergence.go: the "冥王星" (動態 ATR 4H 均線收斂) strategy (VIP, display-only, long+short).
 //
 //	進場: 4H 價格在 EMA200 同側,連續 ~4 根橫盤(區間 <= convConsoATR×ATR),且該 4 根
 //	      靠 EMA200 的極值離 EMA200 不超過 1.5×ATR(動態空間限制,取代固定 3%)。
@@ -19,7 +19,7 @@ import (
 //	出場: 收盤 K 觸及 TP / SL(同根同觸算 SL),或超過 convExpiryBars 根市價結算。
 //
 // 4H, evaluated once per closed bar. Universe = 銀河 (emaCoins). Uses atrSeries /
-// emaSeries from the cache package (scanpool.go / paper_ema.go).
+// emaSeries from the cache package (indicators.go / paper_ema.go).
 
 const (
 	convKlimit      = 260
@@ -163,7 +163,7 @@ func convSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok boo
 	return
 }
 
-// ConvTick evaluates the strategy once per newly closed 4H bar over 銀河 coins.
+// ConvTick evaluates 冥王星 once per newly closed 4H bar over 銀河 coins.
 func (s *Store) ConvTick() {
 	now := time.Now().UTC()
 	b4 := now.Unix() / (4 * 3600)
@@ -276,8 +276,9 @@ func (s *Store) ConvMarkTick() {
 		if closed := stepTP(tr, p, tpMomentum, now); closed || tr.Legs != before {
 			dirty = append(dirty, tr) // persist on any leg change or final close
 		}
-		if tr.Legs > before { // a TP just filled → 軟體通知 (admin book)
-			s.notifyTPHit("conv", tr, true, tr.Legs)
+		if tr.Legs > before { // a TP just filled → 軟體通知
+			// adminOnly=false: 冥王星移到 VIP 後與 星軌/超新星/銀河 同級,推播對象跟它們一致(全體)。
+			s.notifyTPHit("conv", tr, false, tr.Legs)
 		}
 	}
 	s.convMu.Unlock()
