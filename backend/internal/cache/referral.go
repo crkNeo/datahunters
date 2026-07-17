@@ -296,7 +296,10 @@ func (s *Store) ApproveReward(id int64) bool {
 	return n > 0
 }
 
-// RefAdminRow is one member on the 推廣管理 board.
+// RefAdminRow is one member on the 推廣管理 board. Total/Qualified/Applied describe
+// them AS A REFERRER; RefBy/OK describe them AS A REFERRED account — the 合格 toggle
+// lives on the latter, which is why RefBy has to travel with it (an admin flipping
+// 合格 must see whose count it credits).
 type RefAdminRow struct {
 	Username  string `json:"username"`
 	Code      string `json:"code"`
@@ -304,6 +307,8 @@ type RefAdminRow struct {
 	Total     int    `json:"total"`
 	Qualified int    `json:"qualified"`
 	Applied   int    `json:"applied"`
+	RefBy     string `json:"ref_by"` // 推薦人("" = 自然註冊,合格對他無意義)
+	OK        bool   `json:"ok"`     // 此帳號本身是否已被判定合格
 }
 
 // RefAdmin is the 推廣管理 payload: every member's counts + all reward applications.
@@ -321,20 +326,23 @@ func (s *Store) ReferralAdmin() RefAdmin {
 		return out
 	}
 	rows, err := s.db.sql.Query(`
-	  SELECT u.username, COALESCE(u.ref_code,''), u.role,
+	  SELECT u.username, COALESCE(u.ref_code,''), u.role, u.ref_by, u.ref_ok,
 	         (SELECT COUNT(*) FROM users r WHERE r.ref_by = u.username) AS total,
 	         (SELECT COALESCE(SUM(r.ref_ok),0) FROM users r WHERE r.ref_by = u.username) AS qualified,
 	         (SELECT COUNT(*) FROM referral_rewards w WHERE w.username = u.username) AS applied
-	  FROM users u ORDER BY total DESC, u.created ASC`)
+	  FROM users u
+	  ORDER BY (u.ref_by <> '' AND u.ref_ok = 0) DESC, total DESC, u.created ASC`)
 	if err != nil {
 		return out
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r RefAdminRow
-		if rows.Scan(&r.Username, &r.Code, &r.Role, &r.Total, &r.Qualified, &r.Applied) != nil {
+		var ok int
+		if rows.Scan(&r.Username, &r.Code, &r.Role, &r.RefBy, &ok, &r.Total, &r.Qualified, &r.Applied) != nil {
 			continue
 		}
+		r.OK = ok == 1
 		out.Rows = append(out.Rows, r)
 	}
 	out.Rewards = s.db.refRewards("")
