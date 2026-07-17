@@ -22,11 +22,11 @@ type SectorCoin struct {
 // SectorRow is one sector's aggregated strength.
 type SectorRow struct {
 	Sector  string       `json:"sector"`
-	AvgChg  float64      `json:"avg_chg"`  // equal-weight mean 24h %
-	VwChg   float64      `json:"vw_chg"`   // volume-weighted 24h %
-	Breadth float64      `json:"breadth"`  // % of members up (24h)
-	VsBTC   float64      `json:"vs_btc"`   // avgChg − BTC 24h%  (relative strength)
-	Delta   float64      `json:"delta"`    // vsBTC change vs last hour (rotation: + heating, − cooling)
+	AvgChg  float64      `json:"avg_chg"` // equal-weight mean 24h %
+	VwChg   float64      `json:"vw_chg"`  // volume-weighted 24h %
+	Breadth float64      `json:"breadth"` // % of members up (24h)
+	VsBTC   float64      `json:"vs_btc"`  // avgChg − BTC 24h%  (relative strength)
+	Delta   float64      `json:"delta"`   // vsBTC change vs last hour (rotation: + heating, − cooling)
 	Count   int          `json:"count"`
 	Coins   []SectorCoin `json:"coins"` // members, strongest 24h first (drill-down)
 }

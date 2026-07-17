@@ -91,17 +91,17 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/events", s.gate(P, s.handleEvents))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
 	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
-	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit)) // Upbit announcements (zh-TW)
-	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))   // GDELT market headlines (zh-TW)
-	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding)) // OKX funding-rate board
+	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit))         // Upbit announcements (zh-TW)
+	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))           // GDELT market headlines (zh-TW)
+	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding))     // OKX funding-rate board
 	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))       // DefiLlama token-unlock board
 	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))  // 大盤 AI 分析(每整點)
 	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))     // 板塊強弱/輪動(每整點)
 	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))        // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
-	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))     // logo / social / QR
-	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))     // login 公告彈窗 (members)
-	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles)) // column list
+	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))       // logo / social / QR
+	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))       // login 公告彈窗 (members)
+	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles))   // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
 
 	// admin content management
@@ -109,22 +109,21 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/notice", s.gate(A, s.handleAdminNotice)) // 設定登入公告彈窗
 	mux.HandleFunc("/api/admin/upload", s.gate(A, s.handleAdminUpload))
 	mux.HandleFunc("/api/admin/articles", s.gate(A, s.handleAdminArticles))
-	mux.HandleFunc("/api/admin/article-pin", s.gate(A, s.handleAdminArticlePin)) // 置頂/取消置頂
-	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))        // strategy trades → CSV
+	mux.HandleFunc("/api/admin/article-pin", s.gate(A, s.handleAdminArticlePin))  // 置頂/取消置頂
+	mux.HandleFunc("/api/admin/export", s.gate(A, s.handleExport))                // strategy trades → CSV
 	mux.HandleFunc("/api/admin/push-test", s.gate(A, s.handlePushTest))           // fire a test Web Push
 	mux.HandleFunc("/api/admin/push-broadcast", s.gate(A, s.handlePushBroadcast)) // targeted group push
-	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset)) // regen VAPID keys + clear subs
-	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))         // 銀河: 手動出場 (admin-only)
-	mux.HandleFunc("/api/admin/manual-exit", s.gate(A, s.handleManualExit))     // 各策略手動出場(動能衰弱)
-	mux.HandleFunc("/api/admin/strat-states", s.gate(A, s.handleStratStates))   // 策略開關狀態
-	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))   // 開/關某策略進場
-	mux.HandleFunc("/api/admin/gamble-a", s.gate(A, s.handleGambleA)) // 超新星·A 緊止損 (admin A/B)
-	mux.HandleFunc("/api/admin/gamble-b", s.gate(A, s.handleGambleB)) // 超新星·B 位置閘門 (admin A/B)
-	mux.HandleFunc("/api/conv", s.gate(V, s.handleConv)) // 冥王星 (動態ATR均線收斂 4H, VIP)
-	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))         // 逆勢超買空 30m (admin-only)
-	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))       // 布林重回 1h (admin-only)
-	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))         // 乖離回歸 1h (admin-only)
-	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))  // 清空某策略模擬單
+	mux.HandleFunc("/api/admin/push-reset", s.gate(A, s.handlePushReset))         // regen VAPID keys + clear subs
+	mux.HandleFunc("/api/admin/ema-close", s.gate(A, s.handleEMAClose))           // 銀河: 手動出場 (admin-only)
+	mux.HandleFunc("/api/admin/manual-exit", s.gate(A, s.handleManualExit))       // 各策略手動出場(動能衰弱)
+	mux.HandleFunc("/api/admin/strat-states", s.gate(A, s.handleStratStates))     // 策略開關狀態
+	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
+	mux.HandleFunc("/api/conv", s.gate(V, s.handleConv))                          // 冥王星 (動態ATR均線收斂 4H, VIP)
+	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))              // 逆勢超買空 30m (admin-only)
+	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))            // 布林重回 1h (admin-only)
+	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))              // 乖離回歸 1h (admin-only)
+	mux.HandleFunc("/api/admin/bgv2", s.gate(A, s.handleBGV2))                    // 布乖v2 兩腿家族 只做空 (admin-only)
+	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))       // 清空某策略模擬單
 
 	// members (logged in)
 	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
@@ -378,19 +377,13 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Gamble())
 }
 
-// handleGambleA serves the admin A/B 超新星·A(緊止損)tracker.
-func (s *Server) handleGambleA(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.GambleA()) }
-
-// handleGambleB serves the admin A/B 超新星·B(位置閘門)tracker.
-func (s *Server) handleGambleB(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.GambleB()) }
-
 // handleExport streams a strategy book's full trade history as CSV (admin only).
-// ?book=main|gamble|gambleA|gambleB|emaonly. A UTF-8 BOM is emitted so Excel opens
+// ?book=main|gamble|emaonly. A UTF-8 BOM is emitted so Excel opens
 // the Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch book {
-	case "main", "gamble", "gambleA", "gambleB", "emaonly":
+	case "main", "gamble", "emaonly":
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -423,7 +416,6 @@ func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMAOnly())
 }
 
-
 // handleConv serves the 冥王星 (動態ATR均線收斂 4H) strategy tracker. VIP.
 func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
@@ -442,6 +434,11 @@ func (s *Server) handleBollFade(w http.ResponseWriter, r *http.Request) {
 // handleMeanRev serves the admin-only 乖離回歸 1h strategy tracker.
 func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.MeanRevState())
+}
+
+// handleBGV2 serves the admin-only 布乖v2 tracker — both legs merged into one payload.
+func (s *Server) handleBGV2(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.BGV2State())
 }
 
 // handleStratClear (admin): POST ?book=<name>[&scope=closed] resets a strategy's

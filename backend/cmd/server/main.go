@@ -198,6 +198,7 @@ func main() {
 			store.RSIFadeMarkTick()
 			store.BollFadeMarkTick()
 			store.MeanRevMarkTick()
+			store.BGV2MarkTick()
 		}
 	}()
 
@@ -221,6 +222,21 @@ func main() {
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.MeanRevTick()
+		}
+	}()
+	// 布乖v2:兩腿各自照自己的週期評估(1h / 4h),同幣互斥由 famMu 保證。
+	go func() {
+		store.BGV2DevTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.BGV2DevTick()
+		}
+	}()
+	go func() {
+		store.BGV2BollTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.BGV2BollTick()
 		}
 	}()
 

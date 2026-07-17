@@ -193,8 +193,6 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
-	s.tickBook(s.paperGambleA, radar, px, pumpSc, dumpSc, now)
-	s.tickBook(s.paperGambleB, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -215,8 +213,6 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
-		collect("gambleA", s.paperGambleA)
-		collect("gambleB", s.paperGambleB)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -423,10 +419,6 @@ func bookLabel(name string) string {
 	switch name {
 	case "gamble":
 		return "超新星"
-	case "gambleA":
-		return "超新星·A 緊止損"
-	case "gambleB":
-		return "超新星·B 位置閘"
 	case "emaonly":
 		return "銀河"
 	case "trail":
@@ -439,6 +431,8 @@ func bookLabel(name string) string {
 		return "布林重回"
 	case "meanrev":
 		return "乖離回歸"
+	case "bgv2dev", "bgv2boll":
+		return "布乖v2" // 兩腿共用一個對外名稱
 	}
 	return "星軌"
 }
@@ -476,7 +470,9 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "gambleA", "gambleB", "emaonly", "conv", "rsifade", "bollfade", "meanrev":
+	case "bgv2dev", "bgv2boll":
+		return "bgv2" // 布乖v2 兩腿共用一個分頁
+	case "gamble", "emaonly", "conv", "rsifade", "bollfade", "meanrev":
 		return name
 	}
 	return "paper" // main
@@ -649,10 +645,8 @@ func (b *paperBook) state() PaperState {
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
-func (s *Store) Paper() PaperState   { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState  { return s.serve(s.paperGamble, 50) }
-func (s *Store) GambleA() PaperState { return s.serve(s.paperGambleA, 50) } // admin A/B: 緊止損
-func (s *Store) GambleB() PaperState { return s.serve(s.paperGambleB, 50) } // admin A/B: 位置閘門
+func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
+func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
 
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
@@ -670,10 +664,6 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
-	case "gambleA":
-		b = s.paperGambleA
-	case "gambleB":
-		b = s.paperGambleB
 	case "emaonly":
 		b = s.paperEMA
 	default:

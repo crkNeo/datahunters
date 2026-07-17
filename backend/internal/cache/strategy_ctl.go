@@ -11,7 +11,7 @@ import (
 //   2. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "gambleA", "gambleB", "emaonly", "conv", "rsifade", "bollfade", "meanrev"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "rsifade", "bollfade", "meanrev", "bgv2"}
 
 // StrategyState is one strategy's on/off row for the admin UI.
 type StrategyState struct {
@@ -95,17 +95,14 @@ func (s *Store) ManualExit(book, id string) bool {
 		return nil
 	}
 	var done *PaperTrade
+	dbBook := book // 家族的 DB book 名 != 開關 key,需記住實際那一腿
 	switch book {
-	case "main", "gamble", "gambleA", "gambleB":
+	case "main", "gamble":
 		s.paperMu.Lock()
 		b := s.paperMain
 		switch book {
 		case "gamble":
 			b = s.paperGamble
-		case "gambleA":
-			b = s.paperGambleA
-		case "gambleB":
-			b = s.paperGambleB
 		}
 		done = closeIn(b.trades)
 		s.paperMu.Unlock()
@@ -121,6 +118,17 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.meanRevBook.mu.Lock()
 		done = closeIn(s.meanRevBook.trades)
 		s.meanRevBook.mu.Unlock()
+	case "bgv2": // 家族:兩腿都找,並記下命中的那一腿以便寫回正確的 DB book
+		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
+			b.mu.Lock()
+			if tr := closeIn(b.trades); tr != nil {
+				done, dbBook = tr, b.name
+			}
+			b.mu.Unlock()
+			if done != nil {
+				break
+			}
+		}
 	case "conv":
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)
@@ -132,7 +140,7 @@ func (s *Store) ManualExit(book, id string) bool {
 		return false
 	}
 	if s.db != nil {
-		s.db.upsertTrade(book, done)
+		s.db.upsertTrade(dbBook, done)
 	}
 	return true
 }

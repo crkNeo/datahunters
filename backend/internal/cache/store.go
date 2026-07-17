@@ -58,12 +58,10 @@ type Store struct {
 	symTypes map[string]string
 	symTime  time.Time
 
-	paperMu      sync.Mutex // guards the paper-trading books
-	paperMain    *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble  *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
-	paperGambleA *paperBook // admin A/B: 超新星 + 收緊止損濾網 (maxSLPct=8)
-	paperGambleB *paperBook // admin A/B: 超新星 + 進場位置閘門 (posGate=0.9)
-	paperEMA     *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+	paperMu     sync.Mutex // guards the paper-trading books
+	paperMain   *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
+	paperEMA    *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
 	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
@@ -132,6 +130,8 @@ type Store struct {
 	rsiFadeBook  *microBook // 逆勢超買空 30m (admin, microrev.go)
 	bollFadeBook *microBook // 布林重回 1h (admin, microrev.go)
 	meanRevBook  *microBook // 乖離回歸 1h (admin, microrev.go)
+	bgv2Dev      *microBook // 布乖v2 腿1:乖離回歸 1h 只做空 (admin, microrev.go)
+	bgv2Boll     *microBook // 布乖v2 腿2:布林重回 4h 只做空 (admin, microrev.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -183,11 +183,9 @@ func NewStore(coins []string) *Store {
 		details:           map[string]CoinDetail{},
 		ex:                exchange.NewClient(),
 		coins:             coins,
-		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),     // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0),  // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
-		paperGambleA:      newBook("gambleA", 50, false, 1*time.Hour, 0), // admin A/B: 收緊止損
-		paperGambleB:      newBook("gambleB", 50, false, 1*time.Hour, 0), // admin A/B: 位置閘門
-		paperEMA:          newBook("emaonly", 0, false, 0, 0),            // standalone EMA cross (no time cooldown; signal-hour dedup)
+		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
+		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
+		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
@@ -230,13 +228,17 @@ func NewStore(coins []string) *Store {
 	s.paperEMA.plan = tpMomentum
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
 	// candidate fix so it can be compared against the base 超新星.
-	s.paperGambleA.plan, s.paperGambleA.adminOnly, s.paperGambleA.maxSLPct = tpMomentum, true, 8 // A: 收緊止損濾網 12→8
-	s.paperGambleB.plan, s.paperGambleB.adminOnly, s.paperGambleB.maxSLPct = tpMomentum, true, 12
-	s.paperGambleB.posGate = 0.9 // B: 進場位置閘門(多單>0.9 / 空單<0.1 不追)
 	// admin mean-reversion strategies (microrev.go)
 	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, maxSLPct: 10, signal: rsiFadeSignal}
 	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: bollFadeSignal}
 	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
+	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
+	// 照回測規格原樣上線 — 單段止盈(plan nil)、無 maxSLPct 濾網(SL 本就刻意放寬到 4 ATR)、逾時 64 根。
+	bgv2Mu := &sync.Mutex{} // 家族共用鎖:序列化兩腿的進場判斷
+	s.bgv2Dev = &microBook{name: "bgv2dev", stratKey: "bgv2", famMu: bgv2Mu, tf: "1h", barSec: 3600, klimit: 300, minBars: 260, expiry: 64, cooldown: 4, keep: 500, signal: bgv2DevSignal}
+	s.bgv2Boll = &microBook{name: "bgv2boll", stratKey: "bgv2", famMu: bgv2Mu, tf: "4h", barSec: 14400, klimit: 300, minBars: 260, expiry: 64, cooldown: 4, keep: 500, signal: bgv2BollSignal}
+	s.bgv2Dev.family = []*microBook{s.bgv2Dev, s.bgv2Boll}
+	s.bgv2Boll.family = s.bgv2Dev.family
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -249,13 +251,13 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
-		s.paperGambleA.trades = db.loadTrades("gambleA")
-		s.paperGambleB.trades = db.loadTrades("gambleB")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.convTrades = db.loadTrades("conv")
 		s.rsiFadeBook.trades = db.loadTrades("rsifade")
 		s.bollFadeBook.trades = db.loadTrades("bollfade")
 		s.meanRevBook.trades = db.loadTrades("meanrev")
+		s.bgv2Dev.trades = db.loadTrades("bgv2dev")
+		s.bgv2Boll.trades = db.loadTrades("bgv2boll")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}

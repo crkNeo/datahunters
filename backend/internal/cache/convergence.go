@@ -22,19 +22,19 @@ import (
 // emaSeries from the cache package (indicators.go / paper_ema.go).
 
 const (
-	convKlimit      = 260
-	convMinBars     = 210
-	convConsoBars   = 4    // consolidation window (bars)
-	convConsoATR    = 3.0  // 4-bar range must be <= this × ATR (橫盤)
-	convEmaDistATR  = 1.5  // 4-bar EMA-side extreme within this × ATR of EMA200
-	convSLbufATR    = 0.3  // structure-stop buffer beyond the 4-bar extreme
-	convMinRR       = 1.5  // minimum reward:risk to open
-	convVPWindow    = 96   // volume-profile lookback (bars)
-	convVPBins      = 60   // volume-profile price bins
-	convNodeFrac    = 0.6  // a "high-volume node" is a bin with vol >= frac × POC vol
-	convExpiryBars  = 60   // ~10 days on 4H → settle at market
-	convKeepClosed  = 500
-	conv4hMs        = 4 * 3600 * 1000
+	convKlimit     = 260
+	convMinBars    = 210
+	convConsoBars  = 4   // consolidation window (bars)
+	convConsoATR   = 3.0 // 4-bar range must be <= this × ATR (橫盤)
+	convEmaDistATR = 1.5 // 4-bar EMA-side extreme within this × ATR of EMA200
+	convSLbufATR   = 0.3 // structure-stop buffer beyond the 4-bar extreme
+	convMinRR      = 1.5 // minimum reward:risk to open
+	convVPWindow   = 96  // volume-profile lookback (bars)
+	convVPBins     = 60  // volume-profile price bins
+	convNodeFrac   = 0.6 // a "high-volume node" is a bin with vol >= frac × POC vol
+	convExpiryBars = 60  // ~10 days on 4H → settle at market
+	convKeepClosed = 500
+	conv4hMs       = 4 * 3600 * 1000
 )
 
 // volProfile builds a price→volume histogram over the last window bars by spreading

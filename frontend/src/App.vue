@@ -612,6 +612,7 @@ function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 const rsifade = ref(null)
 const bollfade = ref(null)
 const meanrev = ref(null)
+const bgv2 = ref(null)
 async function loadRsifade() {
   try {
     const res = await authFetch('/api/admin/rsifade')
@@ -636,6 +637,14 @@ async function loadMeanrev() {
     /* secondary */
   }
 }
+async function loadBgv2() {
+  try {
+    const res = await authFetch('/api/admin/bgv2')
+    if (res.ok) bgv2.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
 async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
@@ -647,7 +656,7 @@ async function clearStrat(book, loader, closedOnly) {
   if (res.ok && loader) loader()
 }
 // current book name for the shared strategy section (星軌/超新星/銀河)
-const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', gambleA: 'gambleA', gambleB: 'gambleB', emaonly: 'emaonly' }[mainTab.value]))
+const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }[mainTab.value]))
 // the three mean-reversion tabs share one layout; meta drives the unified section.
 const microMeta = {
   rsifade: {
@@ -657,6 +666,10 @@ const microMeta = {
   bollfade: {
     title: '布林重回 · 1h', load: loadBollfade, get: () => bollfade.value,
     help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+  bgv2: {
+    title: '布乖v2 · 1h乖離 + 4h布林 · 只做空', load: loadBgv2, get: () => bgv2.value,
+    help: "<b>只做空的雙腿策略</b>——1h「乖離腿」與 4h「布林腿」共用一個分頁、一個開關。<br><br><b>【通用設定】</b><br>・<b>市場過濾</b>:收盤 &lt; EMA200(各腿用自己週期的 EMA200)<br>・<b>止損</b>:進場 + <b>4.0×ATR(14)</b>(寬止損,扛插針)<br>・<b>時間出場</b>:持滿 <b>64 根</b>收盤平倉<br>・<b>盈虧比閘門</b>:RR 落在 0.4–3.0 才進場<br>・<b>冷卻</b>:訊號後 4 根內不重複進場<br>・<b>同幣互斥</b>:同一幣種同時只允許本家族<b>一個</b>倉位(兩腿誰先觸發誰佔位,另一腿跳過)<br>・所有條件以 <b>K 棒收盤</b>判斷,收盤市價進場;同根同觸止損與目標 → 一律算<b>止損</b>(保守)<br><br><b>【腿 1:乖離回歸 v2 · 1h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② <b>(收盤 − EMA50) / ATR &gt; +2.0</b>(反彈高出 EMA50 兩個 ATR)③ 以「目標 EMA50、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的 <b>EMA50</b> 值 ｜ <b>時間</b>:64 根 ≈ <b>2.7 天</b><br><br><b>【腿 2:布林重回 v2 · 4h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② 前一根收盤 <b>&gt; 布林(50, 2σ) 上軌</b>(衝出通道)③ 本根收盤<b>跌回上軌內、且仍在中軌(SMA50)上方</b>(收回但未跌過頭)④ 以「目標中軌、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的<b>中軌(SMA50)</b>值 ｜ <b>時間</b>:64 根 ≈ <b>10.7 天</b><br><br><b>【倉位】</b>每筆風險 ≤ <b>0.5%</b> 資金(歷史 maxDD 約 20–35R)。<br><br><b>單段止盈,不分批</b> — 照回測規格原樣上線。<br><br>管理員專屬模擬單,⚠️ 非投資建議。",
   },
   meanrev: {
     title: '乖離回歸 · 1h', load: loadMeanrev, get: () => meanrev.value,
@@ -677,21 +690,8 @@ async function loadPaper() {
     /* paper is secondary */
   }
 }
-const gambleA = ref(null)
-const gambleB = ref(null)
-async function loadGambleAB() {
-  try {
-    const [a, b] = await Promise.all([authFetch('/api/admin/gamble-a'), authFetch('/api/admin/gamble-b')])
-    if (a.ok) gambleA.value = await a.json()
-    if (b.ok) gambleB.value = await b.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 const book = computed(() =>
   mainTab.value === 'gamble' ? gamble.value
-    : mainTab.value === 'gambleA' ? gambleA.value
-    : mainTab.value === 'gambleB' ? gambleB.value
     : mainTab.value === 'emaonly' ? emaOnly.value
     : paper.value
 )
@@ -716,7 +716,7 @@ async function manualExit(t) {
 
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
-  const map = { paper: 'main', gamble: 'gamble', gambleA: 'gambleA', gambleB: 'gambleB', emaonly: 'emaonly' }
+  const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
   const bookName = map[mainTab.value]
   if (!bookName) return
   try {
@@ -1671,10 +1671,10 @@ function loadAll() {
     loadUsers()
     // load every strategy each cycle so the nav badges show open counts without
     // having to open each tab first
-    loadGambleAB()
     loadRsifade()
     loadBollfade()
     loadMeanrev()
+    loadBgv2()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
@@ -1742,7 +1742,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'gambleA', 'gambleB', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1850,8 +1850,8 @@ const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
-  admin: 'admin', gambleA: 'admin', gambleB: 'admin', conv: 'vip',
-  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin',
+  admin: 'admin', conv: 'vip',
+  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin', bgv2: 'admin',
 }
 watch(role, () => {
   const need = TAB_MIN_ROLE[mainTab.value]
@@ -2216,12 +2216,6 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor); loadStratStates()">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'gambleA' }" @click="mainTab = 'gambleA'; loadGambleAB()">
-            超新星·A緊損<em v-if="gambleA && gambleA.open.length" class="navbadge">{{ gambleA.open.length }}</em>
-          </button>
-          <button :class="{ active: mainTab === 'gambleB' }" @click="mainTab = 'gambleB'; loadGambleAB()">
-            超新星·B位置<em v-if="gambleB && gambleB.open.length" class="navbadge">{{ gambleB.open.length }}</em>
-          </button>
           <button :class="{ active: mainTab === 'rsifade' }" @click="mainTab = 'rsifade'; loadRsifade()">
             逆勢超買空<em v-if="rsifade && rsifade.open.length" class="navbadge">{{ rsifade.open.length }}</em>
           </button>
@@ -2230,6 +2224,9 @@ watch(role, () => {
           </button>
           <button :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
             乖離回歸<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
+          </button>
+          <button :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
+            布乖v2<em v-if="bgv2 && bgv2.open.length" class="navbadge">{{ bgv2.open.length }}</em>
           </button>
         </div>
       </div>
@@ -2790,9 +2787,9 @@ watch(role, () => {
       <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'gambleA' || mainTab === 'gambleB' || mainTab === 'emaonly'">
+    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
       <div class="mk-head">
-        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'gambleA' ? '超新星 · A(緊止損 8%)' : mainTab === 'gambleB' ? '超新星 · B(位置閘門 0.9)' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gambleA'">管理員 A/B 觀察:與超新星<b>同進場、同分批止盈</b>,唯一差別是<b>止損濾網收緊到 8%</b>(超新星本體為 12%)——止損距離 &gt;8% 的高波動幣不進場,用來測試「砍掉寬止損大虧單」是否更好。⚠️ 僅供觀察。</template><template v-else-if="mainTab === 'gambleB'">管理員 A/B 觀察:與超新星<b>同進場、同分批止盈</b>,唯一差別是加了<b>進場位置閘門</b>——多單若價格已站在 12h 區間 <b>&gt;0.9</b>(追頂)、空單 &lt;0.1(追底)就不進場,用來測試「不追竭盡是否減少直接衝止損」。⚠️ 僅供觀察。</template><template v-else-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
+        <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
         <button v-if="can('admin')" class="clearbtn" @click="clearStrat(curPaperBook, loadPaper, true)">清已結束</button>
