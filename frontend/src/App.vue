@@ -2068,12 +2068,16 @@ watch(role, () => {
         <h4 class="refh4">推廣名單 — 由管理員逐一審核是否完成指定任務</h4>
         <div v-if="!refOfData.records.length" class="refempty">此用戶尚未推薦任何人</div>
         <div v-else class="reftable">
+          <!-- 合格是雙向布林 → 用開關,不用「文字 + 通過/取消鈕」那種狀態與操作重複的組合。
+               欄寬固定(不是 auto),否則每列各自算寬度會對不齊。 -->
           <div v-for="(r, i) in refOfData.records" :key="i" class="refrow4">
             <span class="refname">{{ r.username }}</span>
-            <span class="tsmall">{{ r.status }}</span>
-            <span :class="r.ok ? 'refok' : 'refpend'">{{ r.ok ? '✅ 合格' : '未達成' }}</span>
-            <button v-if="!r.ok" class="okbtn" @click="setRefOK(r.username, true)">通過</button>
-            <button v-else class="nobtn" @click="setRefOK(r.username, false)">取消</button>
+            <span class="tsmall refstatus">{{ r.status }}</span>
+            <label class="switch" :title="r.ok ? '點擊改為未達成' : '點擊標記合格'">
+              <input type="checkbox" :checked="r.ok" @change="setRefOK(r.username, !r.ok)" />
+              <span class="sw-track"></span>
+            </label>
+            <span class="reflabel" :class="r.ok ? 'refok' : 'refpend'">{{ r.ok ? '合格' : '未達成' }}</span>
           </div>
         </div>
       </template>
@@ -2621,15 +2625,18 @@ watch(role, () => {
         <p class="refhint">實際獎勵發放為人工作業,「通過」僅記錄管理員已核可。</p>
         <div v-if="!refAdmin || !refAdmin.rewards.length" class="refempty">目前沒有獎勵申請</div>
         <table v-else class="grid reftbl">
-          <thead><tr><th>帳號</th><th>檔次</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th>狀態</th><th class="r">操作</th></tr></thead>
+          <!-- 狀態與操作合併:待審核時「按鈕就是狀態」,通過後原地換成已通過+時間 -->
+          <thead><tr><th>帳號</th><th>檔次</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th class="r">審核</th></tr></thead>
           <tbody>
-            <tr v-for="w in refAdmin.rewards" :key="w.id">
+            <tr v-for="w in refAdmin.rewards" :key="w.id" :class="{ rowpend: w.status !== 'approved' }">
               <td class="coin"><button class="namebtn" @click="openRefOf(w.username)">{{ w.username }}</button></td>
               <td><span class="tierchip">第 {{ w.tier }} 檔 · {{ w.tier * 10 }} 人</span></td>
               <td class="r refnum">{{ w.qualified }}</td>
               <td class="r tsmall">{{ fmtClock(w.applied) }}</td>
-              <td><span :class="w.status === 'approved' ? 'refok' : 'refpend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 待審核' }}</span></td>
-              <td class="r"><button v-if="w.status !== 'approved'" class="okbtn" @click="approveReward(w.id)">通過</button><small v-else class="tsmall">{{ fmtClock(w.reviewed) }}</small></td>
+              <td class="r">
+                <button v-if="w.status !== 'approved'" class="okbtn" @click="approveReward(w.id)">通過</button>
+                <span v-else class="doneby">✅ 已通過<small>{{ fmtClock(w.reviewed) }}</small></span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -3561,7 +3568,16 @@ body::before {
 .rolechip.vip { background: #0e2a44; color: #6db5ff; }
 .reftbl .tierchip { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; background: rgba(216,173,72,.14); color: #d8ad48; white-space: nowrap; }
 @media (max-width: 700px) { .reftbl { font-size: 12px; } .reftbl th, .reftbl td { padding: 7px 5px; } .reftbl .refnum { font-size: 14px; } }
-.refrow4 { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; background: #1b1e26; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: #e8e9ec; }
+/* 欄寬寫死:auto 會讓「每一列各自」算寬度(每個 .refrow4 是獨立 grid),
+   「✅合格」比「未達成」寬 → 各列對不齊,右緣呈鋸齒。固定寬度才會像表格。 */
+.refrow4 { display: grid; grid-template-columns: 1fr 64px 40px 52px; gap: 10px; align-items: center; background: #1b1e26; border-radius: 7px; padding: 8px 10px; font-size: 12px; color: #e8e9ec; }
+.refrow4 .refstatus { color: #8b909a; }
+.reflabel { font-size: 11px; font-weight: 600; text-align: left; }
+/* 同理:我的推廣的推薦紀錄也是每列獨立 grid */
+.refrow { grid-template-columns: 1fr 108px 56px !important; }
+.doneby { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; color: #2ec26b; font-size: 12px; font-weight: 600; }
+.doneby small { color: #8b909a; font-weight: 400; font-size: 10.5px; }
+.reftbl tr.rowpend td { background: rgba(216,173,72,.05); } /* 待審核的列淡淡標一下 */
 .refempty { text-align: center; color: #8b909a; font-size: 12px; padding: 14px; }
 @media (max-width: 560px) { .refstats { gap: 6px; } .refsv { font-size: 17px; } .refcodev { font-size: 15px; } }
 .userchip { font-size: 12px; color: #c8cdd6; display: inline-flex; align-items: center; gap: 6px; }
