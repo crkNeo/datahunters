@@ -36,6 +36,7 @@ type microBook struct {
 	keep     int     // closed-trade cap
 	plan     *tpPlan // 分批止盈 config (nil = single TP)
 	maxSLPct float64 // skip entries whose SL distance exceeds this % of entry (0 = no filter)
+	beAt     float64 // >0: 保本位 cue at entry + beAt×(TP−entry). NOTIFY-ONLY — never moves the stop.
 	signal   func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
@@ -207,6 +208,69 @@ func meanRevSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 		return "long", roundPx(price), roundPx(price - 3.0*atr), roundPx(ema20), true
 	case price < ema200 && dev > 2.0*atr: // downtrend spike → short back to EMA20
 		return "short", roundPx(price), roundPx(price + 3.0*atr), roundPx(ema20), true
+	}
+	return
+}
+
+// bollEMASignal (布林EMA): 4H 突破蓄勢, long+short. Unlike every other signal here
+// this is a 3-BAR SEQUENCE, judged on the last closed bar (= K2):
+//
+//	cs[n-4] 突破K的前一根 — 收盤還在中軌下方(多)
+//	cs[n-3] 突破K        — 收盤由下往上站上中軌
+//	cs[n-2] 蓄勢K1       — 守在中軌上方,且 ≤ 突破K收盤×1.02
+//	cs[n-1] 蓄勢K2       — 守在中軌上方,且 ≤ 突破K收盤×1.02 → 本根收盤進場
+//
+// 「蓄勢」= 突破後兩根都沒續噴(累計漲幅 ≤2%),賭的是盤整後的再啟動,不是追突破。
+// 空單完全鏡像(站上→跌破、×1.02→×0.98、上方→下方)。
+//
+// 趨勢過濾用 4H EMA50(原版是 1H EMA200,實測等價)。
+// 原版的過濾 A(%B/帶寬喇叭口)與 過濾 B(長影線)刻意不實作 — 消融證實是負貢獻。
+func bollEMASignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	n := len(cs)
+	if n < 5 {
+		return
+	}
+	sma := smaSeries(cs, 20) // 布林中軌
+	ema50 := emaSeries(cs, 50)[n-1]
+	atr := atrSeries(cs, 14)[n-1]
+	if atr <= 0 || ema50 <= 0 || sma[n-1] <= 0 || sma[n-2] <= 0 || sma[n-3] <= 0 || sma[n-4] <= 0 {
+		return
+	}
+	pre, brk, k1, k2 := cs[n-4].Close, cs[n-3].Close, cs[n-2].Close, cs[n-1].Close
+	mid := sma[n-1] // 進場當下的中軌 → 止損基準
+	switch {
+	case k2 > ema50: // 1. 順大勢(多)
+		if !(pre <= sma[n-4] && brk > sma[n-3]) { // 2. 突破K:由下往上站上中軌
+			return
+		}
+		if !(k1 > sma[n-2] && k1 <= brk*1.02) { // 3. 蓄勢K1
+			return
+		}
+		if !(k2 > sma[n-1] && k2 <= brk*1.02) { // 4. 蓄勢K2(累計漲幅 ≤2%)
+			return
+		}
+		// 先四捨五入 entry/SL,再由「取整後」的值算 TP —— 否則存下來的三個數字
+		// 之間不是精準的 1:3(TP 由未取整的 SL 導出,顯示出來會對不上)。
+		e, s := roundPx(k2), roundPx(mid-1.5*atr)
+		if s >= e { // 中軌已在下方夠遠才有結構止損可用
+			return
+		}
+		return "long", e, s, roundPx(e + 3*(e-s)), true // 1:3 RR
+	case k2 < ema50: // 1. 順大勢(空)
+		if !(pre >= sma[n-4] && brk < sma[n-3]) { // 2. 跌破K
+			return
+		}
+		if !(k1 < sma[n-2] && k1 >= brk*0.98) { // 3. 蓄勢K1
+			return
+		}
+		if !(k2 < sma[n-1] && k2 >= brk*0.98) { // 4. 蓄勢K2(累計跌幅 ≤2%)
+			return
+		}
+		e, s := roundPx(k2), roundPx(mid+1.5*atr)
+		if s <= e {
+			return
+		}
+		return "short", e, s, roundPx(e - 3*(s-e)), true
 	}
 	return
 }
@@ -485,7 +549,7 @@ func (s *Store) microMarkTick(b *microBook) {
 		return
 	}
 	now := time.Now()
-	var dirty []*PaperTrade
+	var dirty, beCues []*PaperTrade
 	b.mu.Lock()
 	for _, tr := range b.trades {
 		if tr.Status != "open" {
@@ -495,16 +559,32 @@ func (s *Store) microMarkTick(b *microBook) {
 		if p <= 0 {
 			continue
 		}
+		// 保本位 cue — 通知用,不動止損。刻意放在 stepTP 之前:若同一 tick 直接衝到
+		// 出場,仍要先記下曾經到過保本位,否則這筆單的紀錄會看不出它有走到過。
+		beFired := false
+		if b.beAt > 0 && !tr.BEHit && tr.TP != 0 {
+			lvl := tr.Entry + b.beAt*(tr.TP-tr.Entry) // 多空皆適用:TP−Entry 帶正負號
+			if (tr.Dir == "long" && p >= lvl) || (tr.Dir == "short" && p <= lvl) {
+				tr.BEHit, tr.BEPrice = true, roundPx(lvl)
+				beFired = true
+			}
+		}
 		before := tr.Legs
 		closed := stepTP(tr, p, b.plan, now) // books partial TPs, ratchets stop, closes at TP3/SL
-		if closed || tr.Legs != before {
-			dirty = append(dirty, tr) // persist on any leg change or final close
+		if closed || tr.Legs != before || beFired {
+			dirty = append(dirty, tr) // persist on any leg change, BE latch, or final close
 		}
 		if tr.Legs > before { // a TP (TP1/TP2/TP3) just filled → 軟體通知 (admin book)
 			s.notifyTPHit(b.name, tr, true, tr.Legs)
 		}
+		if beFired {
+			beCues = append(beCues, tr) // 通知在鎖外送出
+		}
 	}
 	b.mu.Unlock()
+	for _, tr := range beCues {
+		s.notifyBEHit(b.name, tr)
+	}
 	if s.db != nil {
 		for _, tr := range dirty {
 			s.db.upsertTrade(b.name, tr)
@@ -565,11 +645,13 @@ func (s *Store) BollFadeTick() { s.microTick(s.bollFadeBook) }
 func (s *Store) MeanRevTick()  { s.microTick(s.meanRevBook) }
 func (s *Store) BGV2DevTick()  { s.microTick(s.bgv2Dev) }
 func (s *Store) BGV2BollTick() { s.microTick(s.bgv2Boll) }
+func (s *Store) BollEMATick()  { s.microTick(s.bollEMABook) }
 
 func (s *Store) RSIFadeMarkTick()  { s.microMarkTick(s.rsiFadeBook) }
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
 func (s *Store) BGV2MarkTick()     { s.microMarkTick(s.bgv2Dev); s.microMarkTick(s.bgv2Boll) }
+func (s *Store) BollEMAMarkTick()  { s.microMarkTick(s.bollEMABook) }
 
 // keepIf filters trades to those still open (closedOnly=true) or wipes all (false).
 func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
@@ -693,4 +775,5 @@ func (s *Store) BollFadeState() PaperState { return s.microState(s.bollFadeBook)
 func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) }
 
 // BGV2State merges both legs into ONE tab payload (布乖v2 是一個策略,不是兩個)。
-func (s *Store) BGV2State() PaperState { return s.microState(s.bgv2Dev, s.bgv2Boll) }
+func (s *Store) BGV2State() PaperState    { return s.microState(s.bgv2Dev, s.bgv2Boll) }
+func (s *Store) BollEMAState() PaperState { return s.microState(s.bollEMABook) }

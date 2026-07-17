@@ -199,6 +199,7 @@ func main() {
 			store.BollFadeMarkTick()
 			store.MeanRevMarkTick()
 			store.BGV2MarkTick()
+			store.BollEMAMarkTick()
 		}
 	}()
 
@@ -237,6 +238,14 @@ func main() {
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.BGV2BollTick()
+		}
+	}()
+	// 布林EMA:4H 突破蓄勢(多空)。
+	go func() {
+		store.BollEMATick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.BollEMATick()
 		}
 	}()
 

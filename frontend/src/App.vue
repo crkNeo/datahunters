@@ -613,6 +613,7 @@ const rsifade = ref(null)
 const bollfade = ref(null)
 const meanrev = ref(null)
 const bgv2 = ref(null)
+const bollema = ref(null)
 async function loadRsifade() {
   try {
     const res = await authFetch('/api/admin/rsifade')
@@ -645,6 +646,14 @@ async function loadBgv2() {
     /* secondary */
   }
 }
+async function loadBollema() {
+  try {
+    const res = await authFetch('/api/admin/bollema')
+    if (res.ok) bollema.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
 async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
@@ -666,6 +675,10 @@ const microMeta = {
   bollfade: {
     title: '布林重回 · 1h', load: loadBollfade, get: () => bollfade.value,
     help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+  bollema: {
+    title: '布林EMA · 4H 突破蓄勢 · 多空', load: loadBollema, get: () => bollema.value,
+    help: "<b>4H 突破蓄勢</b>,多空雙向。賭的是<b>突破後盤整、再啟動</b>,不是追突破。<br><br><b>【指標】</b>全部 4H、收盤判斷:布林(20, 2σ)中軌 = SMA20 ｜ EMA50(趨勢過濾)｜ ATR(14)<br><br><b>【進場・做多】</b>(空單完全鏡像)依序四條全成立:<br>① <b>順大勢</b>:K2 收盤 &gt; 4H EMA50<br>② <b>突破K</b>:某根收盤由下往上站上中軌(前一根收盤 ≤ 中軌、這根 &gt; 中軌)<br>③ <b>蓄勢K1</b>:下一根收盤守在中軌上方,且 ≤ 突破K收盤 × 1.02<br>④ <b>蓄勢K2</b>:再下一根收盤守在中軌上方,且 ≤ 突破K收盤 × 1.02(<b>累計漲幅 ≤ 2%</b>)<br>→ <b>K2 收盤市價進場</b><br><br><b>【出場】</b>(先到先出)<br>・<b>止損</b>:中軌 − 1.5 × ATR<br>・<b>止盈</b>:進場價 + 3 ×(進場價 − 止損價),即 <b>1:3 盈虧比</b><br>・<b>時間出場</b>:持滿 <b>180 根</b>(30 天)未解決 → 收盤平倉(極少觸發)<br><br><b>【保本位・僅通知】</b>價格首次觸及「進場 + 0.3 ×(止盈 − 進場)」時,標記 <b>🛡 已達保本位</b> 並發通知。<br>⚠️ <b>止盈止損不會被修改</b> —— 這只是提示這筆單已覆蓋風險,倉位仍照原本的 TP/SL 運作。<br><br><b>【節流】</b>同幣冷卻 3 根(4H)。<br><br>單段止盈,不分批。管理員專屬模擬單,⚠️ 非投資建議。",
   },
   bgv2: {
     title: '布乖v2 · 1h乖離 + 4h布林 · 只做空', load: loadBgv2, get: () => bgv2.value,
@@ -1675,6 +1688,7 @@ function loadAll() {
     loadBollfade()
     loadMeanrev()
     loadBgv2()
+    loadBollema()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
@@ -1742,7 +1756,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2', 'bollema']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1851,7 +1865,7 @@ const TAB_MIN_ROLE = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', conv: 'vip',
-  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin', bgv2: 'admin',
+  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin',
 }
 watch(role, () => {
   const need = TAB_MIN_ROLE[mainTab.value]
@@ -2228,6 +2242,9 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
             布乖v2<em v-if="bgv2 && bgv2.open.length" class="navbadge">{{ bgv2.open.length }}</em>
           </button>
+          <button :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
+            布林EMA<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
+          </button>
         </div>
       </div>
     </nav>
@@ -2390,7 +2407,11 @@ watch(role, () => {
               <template v-if="t.tp1">
                 <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
               </template>
-              <span v-else class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
+              <template v-else>
+                <span class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
+                <!-- 保本位:純提示,止盈止損不變(布林EMA) -->
+                <span v-if="t.be_hit" class="betag" :title="'價格曾觸及保本位 ' + fmtPrice(t.be_price) + ';止盈止損維持不變'">🛡 已達保本位 {{ fmtPrice(t.be_price) }}</span>
+              </template>
             </td>
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
@@ -3301,6 +3322,7 @@ body::before {
 .mom-alive { background: rgba(46,160,90,0.16); color: #4cd17e; }
 .mom-weak { background: rgba(224,179,65,0.16); color: #f4d774; }
 .mom-dead { background: rgba(229,72,77,0.16); color: #ff6b6f; }
+.betag { display: inline-block; margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 5px; font-weight: 600; background: rgba(74,163,255,0.16); color: #6db5ff; white-space: nowrap; }
 .hedgetag { font-size: 11.5px; white-space: nowrap; padding: 2px 7px; border-radius: 6px; font-weight: 600; background: rgba(74,163,255,0.16); color: #6db5ff; }
 .qtag { font-size: 10px; font-style: normal; padding: 1px 5px; border-radius: 6px; margin-left: 5px; vertical-align: middle; }
 .qtag.hq { background: #2a2410; color: #f4d774; border: 1px solid #e0b341; }

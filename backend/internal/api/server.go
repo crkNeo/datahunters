@@ -123,6 +123,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))            // 布林重回 1h (admin-only)
 	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))              // 乖離回歸 1h (admin-only)
 	mux.HandleFunc("/api/admin/bgv2", s.gate(A, s.handleBGV2))                    // 布乖v2 兩腿家族 只做空 (admin-only)
+	mux.HandleFunc("/api/admin/bollema", s.gate(A, s.handleBollEMA))              // 布林EMA 4H 突破蓄勢 (admin-only)
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))       // 清空某策略模擬單
 
 	// members (logged in)
@@ -439,6 +440,11 @@ func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
 // handleBGV2 serves the admin-only 布乖v2 tracker — both legs merged into one payload.
 func (s *Server) handleBGV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.BGV2State())
+}
+
+// handleBollEMA serves the admin-only 布林EMA (4H 突破蓄勢) tracker.
+func (s *Server) handleBollEMA(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.BollEMAState())
 }
 
 // handleStratClear (admin): POST ?book=<name>[&scope=closed] resets a strategy's

@@ -68,8 +68,11 @@ type PaperTrade struct {
 	Funding    float64    `json:"funding"`            // funding rate at entry (persisted)
 	CurFunding float64    `json:"cur_funding"`        // live funding rate (transient, set at serve)
 	Momentum   string     `json:"momentum,omitempty"` // live momentum light: alive|weak|dead (transient)
-	Hedged     bool       `json:"hedged"`             // 超新星: profit crossed 1/3-to-TP → manual-hedge cue fired (in-memory)
-	HedgePrice float64    `json:"hedge_price,omitempty"`
+	// 保本位 (布林EMA): price reached entry + beAt×(TP−entry) at least once. This is a
+	// CUE ONLY — the stop is NOT moved; TP/SL stay exactly as placed at entry. Latched
+	// (never un-sets) and persisted, since a 30-day hold will outlive a restart.
+	BEHit   bool    `json:"be_hit,omitempty"`
+	BEPrice float64 `json:"be_price,omitempty"` // the 保本位 level itself, for display
 	// 分批止盈 (multi-TP): TP3 = TP (final). TP1/TP2 are partial targets; Legs = how
 	// many TP legs have filled (0..3); Filled = fraction of the position closed so far;
 	// Realized = locked-in PnL% from the filled tranches. Zero for single-TP trades.
@@ -464,6 +467,20 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 		return
 	}
 	go s.pushMgr.Send(title, body, url)
+}
+
+// notifyBEHit fires the 保本位 cue: price reached entry + beAt×(TP−entry).
+// ⚠️ Cue only — the stop is NOT moved (unlike the 分批止盈 ratchet). The trade keeps
+// its original TP/SL; this just tells the admin the position has covered its risk.
+func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
+	if s.pushMgr == nil || s.db == nil {
+		return
+	}
+	title := fmt.Sprintf("🛡 %s 已達保本位", bookLabel(name))
+	body := fmt.Sprintf("%s %s @ $%s · 止盈止損不變", tr.Coin, dirCN(tr.Dir), fmtPx(tr.BEPrice))
+	if subs := s.db.adminSubs(); len(subs) > 0 { // admin book → 只推管理員
+		go s.pushMgr.SendTo(subs, title, body, "/?tab="+bookTab(name))
+	}
 }
 
 // bookTab maps a book name to the frontend mainTab, so a push notification can
