@@ -269,6 +269,9 @@ func NewStore(coins []string) *Store {
 	}
 	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
 	s.loadStratOff()    // restore per-strategy on/off switches
+	if s.db != nil {
+		s.db.backfillRefCodes() // 每個帳號都要有推薦碼(不能等他自己開過我的推廣才生成)
+	}
 	return s
 }
 

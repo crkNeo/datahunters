@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -66,6 +67,31 @@ func (db *DB) refCodeOf(username string) string {
 		return ""
 	}
 	return ""
+}
+
+// backfillRefCodes mints a code for every account that lacks one. Without this the
+// 推廣管理 board shows "—" for anyone who never opened 我的推廣 (codes were minted
+// lazily on first view), and an admin can't hand out a code on a user's behalf.
+// Idempotent; runs once at startup.
+func (db *DB) backfillRefCodes() {
+	rows, err := db.sql.Query(`SELECT username FROM users WHERE ref_code IS NULL OR ref_code=''`)
+	if err != nil {
+		return
+	}
+	var names []string
+	for rows.Next() {
+		var u string
+		if rows.Scan(&u) == nil {
+			names = append(names, u)
+		}
+	}
+	rows.Close() // close before the UPDATEs below — MySQL can't reuse the conn mid-scan
+	for _, u := range names {
+		db.refCodeOf(u)
+	}
+	if len(names) > 0 {
+		log.Printf("referral: backfilled %d referral code(s)", len(names))
+	}
 }
 
 // userByRefCode resolves a referral code to its owner ("" if unknown).

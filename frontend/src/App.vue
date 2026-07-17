@@ -2620,13 +2620,13 @@ watch(role, () => {
         </div>
         <p class="refhint">實際獎勵發放為人工作業,「通過」僅記錄管理員已核可。</p>
         <div v-if="!refAdmin || !refAdmin.rewards.length" class="refempty">目前沒有獎勵申請</div>
-        <table v-else class="ptable">
+        <table v-else class="grid reftbl">
           <thead><tr><th>帳號</th><th>檔次</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th>狀態</th><th class="r">操作</th></tr></thead>
           <tbody>
             <tr v-for="w in refAdmin.rewards" :key="w.id">
               <td class="coin"><button class="namebtn" @click="openRefOf(w.username)">{{ w.username }}</button></td>
-              <td>第 {{ w.tier }} 檔 ({{ w.tier * 10 }} 人)</td>
-              <td class="r">{{ w.qualified }}</td>
+              <td><span class="tierchip">第 {{ w.tier }} 檔 · {{ w.tier * 10 }} 人</span></td>
+              <td class="r refnum">{{ w.qualified }}</td>
               <td class="r tsmall">{{ fmtClock(w.applied) }}</td>
               <td><span :class="w.status === 'approved' ? 'refok' : 'refpend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 待審核' }}</span></td>
               <td class="r"><button v-if="w.status !== 'approved'" class="okbtn" @click="approveReward(w.id)">通過</button><small v-else class="tsmall">{{ fmtClock(w.reviewed) }}</small></td>
@@ -2642,16 +2642,16 @@ watch(role, () => {
           <span class="mk-count" v-if="refAdmin">{{ refAdmin.rows.length }} 位</span>
         </div>
         <p class="refhint">點帳號可看該用戶的推廣名單。合格與否在名單內逐一切換。</p>
-        <table class="ptable">
+        <table class="grid reftbl">
           <thead><tr><th>帳號</th><th>推薦碼</th><th>角色</th><th class="r">總推薦人數</th><th class="r">合格人數</th><th class="r">申請獎勵次數</th></tr></thead>
           <tbody>
             <tr v-for="r in (refAdmin ? refAdmin.rows : [])" :key="r.username">
               <td class="coin"><button class="namebtn" @click="openRefOf(r.username)">{{ r.username }}</button></td>
-              <td class="tsmall refname">{{ r.code || '—' }}</td>
-              <td class="tsmall">{{ r.role }}</td>
-              <td class="r"><b>{{ r.total }}</b></td>
-              <td class="r" :class="r.qualified ? 'long' : ''"><b>{{ r.qualified }}</b></td>
-              <td class="r">{{ r.applied }}</td>
+              <td class="refcodecell">{{ r.code || '—' }}</td>
+              <td><span class="rolechip" :class="r.role">{{ r.role }}</span></td>
+              <td class="r refnum" :class="{ zero: !r.total }">{{ r.total }}</td>
+              <td class="r refnum" :class="r.qualified ? 'long' : 'zero'">{{ r.qualified }}</td>
+              <td class="r refnum" :class="{ zero: !r.applied }">{{ r.applied }}</td>
             </tr>
           </tbody>
         </table>
@@ -3549,6 +3549,18 @@ body::before {
 .refname { font-family: ui-monospace, monospace; }
 .refok { color: #2ec26b; font-weight: 600; }
 .refpend { color: #8b909a; }
+/* 推廣管理表:欄寬固定,標題不換行(數字欄本來會被中文標題擠爛) */
+.reftbl th { white-space: nowrap; font-size: 12px; }
+.reftbl td { vertical-align: middle; }
+.reftbl .refcodecell { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 1px; color: #d8ad48; white-space: nowrap; }
+.reftbl .refnum { font-size: 15px; font-weight: 700; }
+.reftbl .refnum.zero { color: #5c616b; font-weight: 500; } /* 0 不用搶眼 */
+.reftbl tr:hover td { background: #14161b; }
+.rolechip { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; background: #1f2229; color: #b8bcc4; }
+.rolechip.admin { background: #2a2410; color: #f4d774; }
+.rolechip.vip { background: #0e2a44; color: #6db5ff; }
+.reftbl .tierchip { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; background: rgba(216,173,72,.14); color: #d8ad48; white-space: nowrap; }
+@media (max-width: 700px) { .reftbl { font-size: 12px; } .reftbl th, .reftbl td { padding: 7px 5px; } .reftbl .refnum { font-size: 14px; } }
 .refrow4 { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; background: #1b1e26; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: #e8e9ec; }
 .refempty { text-align: center; color: #8b909a; font-size: 12px; padding: 14px; }
 @media (max-width: 560px) { .refstats { gap: 6px; } .refsv { font-size: 17px; } .refcodev { font-size: 15px; } }
