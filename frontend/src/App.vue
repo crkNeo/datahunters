@@ -173,6 +173,7 @@ async function doRegister() {
   // so the admin review card shows it without any backend schema change
   fd.append('exchange', [regForm.value.email.trim(), regForm.value.exchange.trim()].filter(Boolean).join(' · '))
   if (regFile.value) fd.append('proof', regFile.value)
+  if (pendingRef.value) fd.append('referralCode', pendingRef.value) // 註冊是唯一的綁定時機
   try {
     const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
     if (!res.ok) {
@@ -436,6 +437,77 @@ async function onQrPick(e) {
 
 // ---- login notice popup (公告彈窗) ----
 const notice = ref(null)
+// ---- 推薦系統 ----
+// ⚠️ pendingRef 刻意「只放記憶體」:用戶要求關閉頁面與重新整理都要清除。
+// localStorage 跨分頁存活、sessionStorage 撐過重新整理 —— 兩者都不符合,所以用純 ref,
+// 並在讀取後把 URL 參數清掉(見 onMounted)。代價:使用者若在註冊前重新整理,推薦歸屬會消失。
+const pendingRef = ref('')
+const refShow = ref(false)
+const refData = ref(null)
+const refBusy = ref(false)
+const refUrl = computed(() => refData.value && refData.value.code ? location.origin + '/?referralCode=' + refData.value.code : '')
+async function loadReferral() {
+  try {
+    const res = await authFetch('/api/referral')
+    if (res.ok) refData.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+function openReferral() { refShow.value = true; loadReferral() }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); showToast('已複製') }
+  catch (e) { showToast('複製失敗,請長按選取', 'err') }
+}
+async function applyReward() {
+  if (refBusy.value) return
+  refBusy.value = true
+  try {
+    const res = await authFetch('/api/referral/apply', { method: 'POST' })
+    if (res.ok) { showToast('已送出申請,待管理員審核'); await loadReferral() }
+    else showToast(await res.text(), 'err')
+  } catch (e) { showToast('申請失敗', 'err') }
+  refBusy.value = false
+}
+
+// ---- admin: 推廣管理 ----
+const refAdmin = ref(null)
+const refOfShow = ref(false)
+const refOfData = ref(null)
+const refOfUser = ref('')
+async function loadRefAdmin() {
+  try {
+    const res = await authFetch('/api/admin/referrals')
+    if (res.ok) refAdmin.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+// 使用者管理點名字 → 該用戶的推廣名單(全名,不遮罩)
+async function openRefOf(u) {
+  refOfUser.value = u
+  refOfData.value = null
+  refOfShow.value = true
+  try {
+    const res = await authFetch('/api/admin/referral-of?user=' + encodeURIComponent(u))
+    if (res.ok) refOfData.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+async function setRefOK(name, ok) {
+  const res = await authFetch('/api/admin/referral-ok', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: name, ok }),
+  })
+  if (!res.ok) { showToast('更新失敗', 'err'); return }
+  showToast(ok ? '已標記合格' : '已改為未達成')
+  loadRefAdmin()
+  if (refOfShow.value) openRefOf(refOfUser.value)
+}
+async function approveReward(id) {
+  const res = await authFetch('/api/admin/referral-approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+  if (!res.ok) { showToast('審核失敗', 'err'); return }
+  showToast('已通過'); loadRefAdmin()
+}
+
 const noticeShow = ref(false)
 const noticeDont = ref(false)
 const noticeForm = ref({ title: '', text: '', until: '' }) // admin editor
@@ -1682,6 +1754,7 @@ function loadAll() {
   }
   if (can('admin')) {
     loadUsers()
+    loadRefAdmin()
     // load every strategy each cycle so the nav badges show open counts without
     // having to open each tab first
     loadRsifade()
@@ -1756,7 +1829,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2', 'bollema']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 let onVisibility = null
 let onPageShow = null
@@ -1811,7 +1884,14 @@ onMounted(async () => {
   const qart = qs.get('article')
   if (qtab) gotoTab(qtab)
   if (qart) openArticleById(qart)
-  if (qtab || qart) history.replaceState({}, '', location.pathname)
+  // 推薦連結 /?referralCode=XXXX → 記在記憶體、自動切到註冊頁。URL 隨即清掉,所以
+  // 重新整理/關閉頁面推薦碼就消失(用戶指定的行為)。
+  const qref = qs.get('referralCode')
+  if (qref && !authed.value) {
+    pendingRef.value = qref.trim().toUpperCase()
+    authTab.value = 'register'
+  }
+  if (qtab || qart || qref) history.replaceState({}, '', location.pathname)
   if (bfOpen.value) bfStart() // 戰場:開 WS + 動畫迴圈
   // register service worker for PWA + push
   if ('serviceWorker' in navigator) {
@@ -1864,7 +1944,7 @@ const TAB_MIN_ROLE = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
-  admin: 'admin', conv: 'vip',
+  admin: 'admin', referral: 'admin', conv: 'vip',
   rsifade: 'admin', bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin',
 }
 watch(role, () => {
@@ -1920,6 +2000,8 @@ watch(role, () => {
             <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片(300U 以上)' }}</span>
             <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
           </label>
+          <!-- 好友推薦碼:刻意不叫「推薦碼」,上面的 Bitunix vipCode 也叫推薦碼,兩者不同 -->
+          <div v-if="pendingRef" class="refnote">🎁 已套用好友推薦碼 <b>{{ pendingRef }}</b><span>註冊完成後將自動綁定</span></div>
           <button class="authbtn" @click="doRegister">註冊</button>
           <div v-if="regErr" class="autherr">{{ regErr }}</div>
           <div v-if="regDone" class="authok">{{ regDone }}</div>
@@ -1949,7 +2031,7 @@ watch(role, () => {
       <button class="regbtn" :class="{ on: qualityFilter }" @click="toggleQuality" title="只保留 OI 收縮(衰竭/平倉)時的訊號;樣本外驗證有效">
         OI收縮過濾 {{ qualityFilter ? '✓' : '✕' }}
       </button>
-      <span v-if="role !== 'public'" class="userchip">{{ username }} <em>{{ role }}</em>
+      <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openReferral" title="我的推廣">{{ username }}</button> <em>{{ role }}</em>
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
@@ -1969,6 +2051,90 @@ watch(role, () => {
       <p v-if="loginErr" class="err">{{ loginErr }}</p>
       <button class="loginbtn" @click="doLogin">登入</button>
       <p class="loginhint">尚無帳號?請依公告填寫 Google 表單申請(附入金與 UID 證明)。</p>
+    </div>
+  </div>
+
+  <!-- admin:某用戶的推廣名單(使用者管理/推廣管理 點名字開啟;帳號不遮罩) -->
+  <div v-if="refOfShow" class="overlay" @click="refOfShow = false">
+    <div class="refbox" @click.stop>
+      <div class="refhead"><h3>👥 {{ refOfUser }} 的推廣名單</h3><button class="xbtn" @click="refOfShow = false">✕</button></div>
+      <template v-if="refOfData">
+        <div class="refstats">
+          <div class="refstat"><div class="refsk">總推薦人數</div><div class="refsv">{{ refOfData.total }}</div></div>
+          <div class="refstat"><div class="refsk">合格人數</div><div class="refsv ok">{{ refOfData.qualified }}</div></div>
+          <div class="refstat"><div class="refsk">申請獎勵</div><div class="refsv">{{ refOfData.applied }} 次</div></div>
+        </div>
+        <div class="refcode"><span class="refk">推薦碼</span><b class="refcodev">{{ refOfData.code || '—' }}</b></div>
+        <h4 class="refh4">推廣名單 — 由管理員逐一審核是否完成指定任務</h4>
+        <div v-if="!refOfData.records.length" class="refempty">此用戶尚未推薦任何人</div>
+        <div v-else class="reftable">
+          <div v-for="(r, i) in refOfData.records" :key="i" class="refrow4">
+            <span class="refname">{{ r.username }}</span>
+            <span class="tsmall">{{ r.status }}</span>
+            <span :class="r.ok ? 'refok' : 'refpend'">{{ r.ok ? '✅ 合格' : '未達成' }}</span>
+            <button v-if="!r.ok" class="okbtn" @click="setRefOK(r.username, true)">通過</button>
+            <button v-else class="nobtn" @click="setRefOK(r.username, false)">取消</button>
+          </div>
+        </div>
+      </template>
+      <div v-else class="refempty">載入中…</div>
+    </div>
+  </div>
+
+  <!-- 我的推廣 modal(點名字開啟) -->
+  <div v-if="refShow" class="overlay" @click="refShow = false">
+    <div class="refbox" @click.stop>
+      <div class="refhead"><h3>🎁 我的推廣</h3><button class="xbtn" @click="refShow = false">✕</button></div>
+      <template v-if="refData">
+        <!-- 1. 推薦碼 + 2. 網址 -->
+        <div class="refcode">
+          <span class="refk">我的推薦碼</span>
+          <b class="refcodev">{{ refData.code || '—' }}</b>
+          <button class="refcopy" @click="copyText(refData.code)">複製</button>
+        </div>
+        <div class="refurl">
+          <span class="refk">推廣連結</span>
+          <input class="refurlin" :value="refUrl" readonly @focus="$event.target.select()" />
+          <button class="refcopy" @click="copyText(refUrl)">複製</button>
+        </div>
+
+        <!-- 4. 統計表(在推薦紀錄上方) -->
+        <div class="refstats">
+          <div class="refstat"><div class="refsk">總推薦人數</div><div class="refsv">{{ refData.total }}</div></div>
+          <div class="refstat"><div class="refsk">合格人數</div><div class="refsv ok">{{ refData.qualified }}</div></div>
+          <div class="refstat"><div class="refsk">已申請獎勵</div><div class="refsv">{{ refData.applied }} 次</div></div>
+        </div>
+        <div class="refapply">
+          <button class="authbtn" :disabled="!refData.can_apply || refBusy" @click="applyReward">
+            {{ refData.can_apply ? ('申請第 ' + refData.next_tier + ' 檔推薦獎勵') : ('尚差 ' + refData.next_need + ' 位合格解鎖第 ' + refData.next_tier + ' 檔') }}
+          </button>
+          <p class="refhint">每 {{ refData.per_tier }} 位合格好友可申請一檔獎勵(累計計算,不扣除)。合格與否由管理員審核。</p>
+        </div>
+
+        <!-- 我的申請紀錄 -->
+        <template v-if="refData.rewards.length">
+          <h4 class="refh4">申請紀錄</h4>
+          <div class="reftable">
+            <div v-for="w in refData.rewards" :key="w.id" class="refrow">
+              <span>第 {{ w.tier }} 檔({{ w.tier * refData.per_tier }} 人)</span>
+              <span class="tsmall">合格 {{ w.qualified }} 位</span>
+              <span :class="w.status === 'approved' ? 'refok' : 'refpend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 審核中' }}</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- 3. 我的推薦紀錄(帳號已於伺服器端遮罩) -->
+        <h4 class="refh4">我的推薦紀錄</h4>
+        <div v-if="!refData.records.length" class="refempty">還沒有人使用你的推薦碼</div>
+        <div v-else class="reftable">
+          <div v-for="(r, i) in refData.records" :key="i" class="refrow">
+            <span class="refname">{{ r.username }}</span>
+            <span class="tsmall">{{ fmtClock(r.created) }}</span>
+            <span :class="r.ok ? 'refok' : 'refpend'">{{ r.ok ? '✅ 合格' : '未達成' }}</span>
+          </div>
+        </div>
+      </template>
+      <div v-else class="refempty">載入中…</div>
     </div>
   </div>
 
@@ -2230,6 +2396,9 @@ watch(role, () => {
           <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor); loadStratStates()">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
+          <button :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
+            推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
+          </button>
           <button :class="{ active: mainTab === 'rsifade' }" @click="mainTab = 'rsifade'; loadRsifade()">
             逆勢超買空<em v-if="rsifade && rsifade.open.length" class="navbadge">{{ rsifade.open.length }}</em>
           </button>
@@ -2441,6 +2610,54 @@ watch(role, () => {
     </section>
 
     <!-- 後台管理 (admin only) -->
+    <!-- 推廣管理 (admin) -->
+    <section v-else-if="mainTab === 'referral' && can('admin')">
+      <!-- 2. 審核獎勵發放(有待審核就置頂,3. 申請時管理員已收到推播) -->
+      <section class="card adminbox">
+        <div class="mk-head">
+          <h3 class="psub">🎁 審核獎勵發放<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em></h3>
+          <span class="mk-count" v-if="refAdmin">共 {{ refAdmin.rewards.length }} 筆申請</span>
+        </div>
+        <p class="refhint">實際獎勵發放為人工作業,「通過」僅記錄管理員已核可。</p>
+        <div v-if="!refAdmin || !refAdmin.rewards.length" class="refempty">目前沒有獎勵申請</div>
+        <table v-else class="ptable">
+          <thead><tr><th>帳號</th><th>檔次</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th>狀態</th><th class="r">操作</th></tr></thead>
+          <tbody>
+            <tr v-for="w in refAdmin.rewards" :key="w.id">
+              <td class="coin"><button class="namebtn" @click="openRefOf(w.username)">{{ w.username }}</button></td>
+              <td>第 {{ w.tier }} 檔 ({{ w.tier * 10 }} 人)</td>
+              <td class="r">{{ w.qualified }}</td>
+              <td class="r tsmall">{{ fmtClock(w.applied) }}</td>
+              <td><span :class="w.status === 'approved' ? 'refok' : 'refpend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 待審核' }}</span></td>
+              <td class="r"><button v-if="w.status !== 'approved'" class="okbtn" @click="approveReward(w.id)">通過</button><small v-else class="tsmall">{{ fmtClock(w.reviewed) }}</small></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 1. 每個會員的推廣統計 -->
+      <section class="card adminbox">
+        <div class="mk-head">
+          <h3 class="psub">👥 會員推廣統計</h3>
+          <span class="mk-count" v-if="refAdmin">{{ refAdmin.rows.length }} 位</span>
+        </div>
+        <p class="refhint">點帳號可看該用戶的推廣名單。合格與否在名單內逐一切換。</p>
+        <table class="ptable">
+          <thead><tr><th>帳號</th><th>推薦碼</th><th>角色</th><th class="r">總推薦人數</th><th class="r">合格人數</th><th class="r">申請獎勵次數</th></tr></thead>
+          <tbody>
+            <tr v-for="r in (refAdmin ? refAdmin.rows : [])" :key="r.username">
+              <td class="coin"><button class="namebtn" @click="openRefOf(r.username)">{{ r.username }}</button></td>
+              <td class="tsmall refname">{{ r.code || '—' }}</td>
+              <td class="tsmall">{{ r.role }}</td>
+              <td class="r"><b>{{ r.total }}</b></td>
+              <td class="r" :class="r.qualified ? 'long' : ''"><b>{{ r.qualified }}</b></td>
+              <td class="r">{{ r.applied }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </section>
+
     <section v-else-if="mainTab === 'admin' && can('admin')">
       <div class="mk-head"><h2>後台 · 使用者管理</h2><span class="mk-count">{{ users.length }} 位</span></div>
       <p v-if="adminMsg" class="admin-msg">{{ adminMsg }}</p>
@@ -2488,7 +2705,7 @@ watch(role, () => {
           <tbody>
             <tr v-for="u in filteredUsers" :key="u.username">
               <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="proofView = u.proof" /><span v-else>—</span></td>
-              <td class="coin">{{ u.username }}
+              <td class="coin"><button class="namebtn" @click="openRefOf(u.username)" title="查看推廣名單">{{ u.username }}</button>
                 <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
                 <em v-else-if="u.status === 'banned'" class="qtag bad">停用</em>
               </td>
@@ -3304,6 +3521,37 @@ body::before {
 .regbtn { background: #16181d; border: 1px solid #23262d; color: #8b909a; padding: 4px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .regbtn.on { background: #2a2410; border-color: #e0b341; color: #f4d774; }
 .regbtn.login { background: #1b2942; border-color: #5b8def; color: #cfe0ff; }
+/* 推薦系統 */
+.namebtn { background: none; border: none; color: #c8cdd6; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; text-decoration: underline dotted rgba(216,173,72,.6); text-underline-offset: 3px; }
+.namebtn:hover { color: #d8ad48; }
+.refnote { background: rgba(216,173,72,.1); border: 1px solid #3a3320; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #d8ad48; display: flex; flex-direction: column; gap: 2px; }
+.refnote span { color: #8b909a; font-size: 11px; }
+.refbox { background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px; width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
+.refhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.refhead h3 { margin: 0; font-size: 16px; color: #d8ad48; }
+.xbtn { background: none; border: none; color: #8b909a; font-size: 18px; cursor: pointer; line-height: 1; }
+.refcode, .refurl { display: flex; align-items: center; gap: 8px; background: #1b1e26; border: 1px solid #2b2f3a; border-radius: 9px; padding: 9px 11px; margin-bottom: 8px; }
+.refk { font-size: 11px; color: #8b909a; white-space: nowrap; }
+.refcodev { font-size: 18px; letter-spacing: 2px; color: #d8ad48; font-family: ui-monospace, monospace; flex: 1; }
+.refurlin { flex: 1; background: #0f1116; border: 1px solid #2b2f3a; border-radius: 6px; color: #b9bdc4; font-size: 11px; padding: 5px 7px; min-width: 0; }
+.refcopy { background: #2a2f3a; border: 1px solid #3a3f4a; color: #d8ad48; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.refstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 10px; }
+.refstat { background: #1b1e26; border: 1px solid #2b2f3a; border-radius: 9px; padding: 10px; text-align: center; }
+.refsk { font-size: 11px; color: #8b909a; margin-bottom: 4px; }
+.refsv { font-size: 20px; font-weight: 700; color: #e8e9ec; }
+.refsv.ok { color: #2ec26b; }
+.refapply .authbtn { width: 100%; }
+.refapply .authbtn:disabled { opacity: .45; cursor: not-allowed; }
+.refhint { font-size: 11px; color: #8b909a; margin: 6px 0 0; line-height: 1.6; }
+.refh4 { font-size: 13px; color: #c8cdd6; margin: 14px 0 6px; }
+.reftable { display: flex; flex-direction: column; gap: 4px; }
+.refrow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; background: #1b1e26; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: #e8e9ec; }
+.refname { font-family: ui-monospace, monospace; }
+.refok { color: #2ec26b; font-weight: 600; }
+.refpend { color: #8b909a; }
+.refrow4 { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; background: #1b1e26; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: #e8e9ec; }
+.refempty { text-align: center; color: #8b909a; font-size: 12px; padding: 14px; }
+@media (max-width: 560px) { .refstats { gap: 6px; } .refsv { font-size: 17px; } .refcodev { font-size: 15px; } }
 .userchip { font-size: 12px; color: #c8cdd6; display: inline-flex; align-items: center; gap: 6px; }
 .userchip em { font-style: normal; background: #2a2410; color: #f4d774; padding: 1px 6px; border-radius: 6px; font-size: 11px; }
 .loginbox { background: #16181d; border: 1px solid #2a2d35; border-radius: 14px; padding: 22px; width: 300px; display: flex; flex-direction: column; gap: 10px; }

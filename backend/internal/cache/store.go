@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -672,7 +673,7 @@ func (s *Store) PrecheckRegister(username, password string) error {
 
 // Register creates a self-service account in "pending" review status (member
 // role). proof is the stored asset-proof image path; exchange goes in notes.
-func (s *Store) Register(username, password, uid, exchange, proof string) error {
+func (s *Store) Register(username, password, uid, exchange, proof, refCode string) error {
 	if err := s.PrecheckRegister(username, password); err != nil {
 		return err
 	}
@@ -680,7 +681,16 @@ func (s *Store) Register(username, password, uid, exchange, proof string) error 
 	if err != nil {
 		return err
 	}
-	s.db.registerUser(username, h, uid, exchange, proof)
+	// 綁定推薦人 — 這是「唯一」會發生綁定的時機,之後永不變更。
+	// 無效/不存在的碼一律當沒帶(不讓註冊因此失敗)。自我推薦在此結構下不可能:
+	// 新用戶的 ref_code 是註冊當下才生成的,他不可能事先知道自己的碼。
+	refBy := ""
+	if refCode != "" {
+		if owner := s.db.userByRefCode(refCode); owner != "" && !strings.EqualFold(owner, username) {
+			refBy = owner
+		}
+	}
+	s.db.registerUser(username, h, uid, exchange, proof, refBy)
 	return nil
 }
 

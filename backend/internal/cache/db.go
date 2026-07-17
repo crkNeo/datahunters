@@ -53,7 +53,29 @@ CREATE TABLE IF NOT EXISTS users (
   created   BIGINT,
   expiry    BIGINT DEFAULT 0,
   notes     VARCHAR(255) NOT NULL DEFAULT '',
-  proof     VARCHAR(512) NOT NULL DEFAULT ''
+  proof     VARCHAR(512) NOT NULL DEFAULT '',
+  -- 推薦系統. ref_code is NULLable on purpose: MySQL's UNIQUE index permits many
+  -- NULLs but only ONE '' — a NOT NULL DEFAULT '' column could never take a second
+  -- user before backfill. ref_by is set ONCE at registration and never changes.
+  ref_code  VARCHAR(16) NULL,
+  ref_by    VARCHAR(191) NOT NULL DEFAULT '',
+  ref_ok    TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_ref_code (ref_code),
+  KEY idx_ref_by (ref_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 推薦獎勵申請. UNIQUE(username,tier) makes "每檔只能領一次" a DB-level guarantee,
+-- so a double-click or two concurrent requests can never book the same tier twice.
+CREATE TABLE IF NOT EXISTS referral_rewards (
+  id        BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username  VARCHAR(191) NOT NULL,
+  tier      INT NOT NULL,           -- 1 = 10 人, 2 = 20 人, …(每 10 個合格一檔)
+  qualified INT NOT NULL,           -- 申請當下的合格人數(留證)
+  status    VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending | approved
+  applied   BIGINT,
+  reviewed  BIGINT,
+  UNIQUE KEY uk_user_tier (username, tier),
+  KEY idx_rr_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS site_config (
@@ -147,6 +169,29 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 			d.Exec(`ALTER TABLE paper_trades ` + ddl)
 		}
 	}
+	// 推薦系統 columns on pre-existing users tables. Idempotent.
+	for col, ddl := range map[string]string{
+		"ref_code": "ADD COLUMN ref_code VARCHAR(16) NULL",
+		"ref_by":   "ADD COLUMN ref_by VARCHAR(191) NOT NULL DEFAULT ''",
+		"ref_ok":   "ADD COLUMN ref_ok TINYINT NOT NULL DEFAULT 0",
+	} {
+		var has int
+		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME=?`, col).Scan(&has)
+		if has == 0 {
+			d.Exec(`ALTER TABLE users ` + ddl)
+		}
+	}
+	// …and their indexes (ADD COLUMN doesn't bring the keys from the CREATE above).
+	for idx, ddl := range map[string]string{
+		"uk_ref_code": "ADD UNIQUE KEY uk_ref_code (ref_code)",
+		"idx_ref_by":  "ADD KEY idx_ref_by (ref_by)",
+	} {
+		var has int
+		d.QueryRow(`SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND INDEX_NAME=?`, idx).Scan(&has)
+		if has == 0 {
+			d.Exec(`ALTER TABLE users ` + ddl)
+		}
+	}
 	return d, nil
 }
 
@@ -198,10 +243,11 @@ func (db *DB) userRoleStatus(username string) (role, status string, ok bool) {
 }
 
 // registerUser inserts a self-registered account in "pending" review status.
-func (db *DB) registerUser(username, passHash, uid, notes, proof string) {
-	db.sql.Exec(`INSERT INTO users(username,pass_hash,role,status,uid,created,notes,proof)
-	  VALUES(?,?,?,?,?,?,?,?)`,
-		username, passHash, "member", "pending", uid, time.Now().UnixMilli(), notes, proof)
+func (db *DB) registerUser(username, passHash, uid, notes, proof, refBy string) {
+	db.sql.Exec(`INSERT INTO users(username,pass_hash,role,status,uid,created,notes,proof,ref_by)
+	  VALUES(?,?,?,?,?,?,?,?,?)`,
+		username, passHash, "member", "pending", uid, time.Now().UnixMilli(), notes, proof, refBy)
+	db.refCodeOf(username) // 立刻發自己的推薦碼(refCodeOf 生成並寫入)
 }
 
 func (db *DB) listUsers() []User {

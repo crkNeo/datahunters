@@ -140,6 +140,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/ema-only", s.gate(V, s.handleEMAOnly))
 	mux.HandleFunc("/api/sr", s.gate(V, s.handleSR)) // 支撐壓力監控 (VIP)
 
+	// 推薦系統
+	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
+	mux.HandleFunc("/api/referral/apply", s.gate(M, s.handleReferralApply))           // 申請下一檔獎勵
+	mux.HandleFunc("/api/admin/referrals", s.gate(A, s.handleAdminReferrals))         // 推廣管理:名單 + 申請
+	mux.HandleFunc("/api/admin/referral-ok", s.gate(A, s.handleAdminReferralOK))      // 切換「合格」
+	mux.HandleFunc("/api/admin/referral-approve", s.gate(A, s.handleAdminRefApprove)) // 審核獎勵:通過
+	mux.HandleFunc("/api/admin/referral-of", s.gate(A, s.handleAdminReferralOf))      // 某用戶的推廣名單(全名)
+
 	// web push (PWA notifications)
 	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
 	mux.HandleFunc("/api/push/subscribe", s.gate(M, s.handlePushSubscribe))
@@ -228,7 +236,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		proofPath = p
 	}
-	if err := s.store.Register(username, password, uid, exchange, proofPath); err != nil {
+	// 推薦碼:註冊是「唯一」會綁定推薦人的時機。無效的碼在 store 層會被當成沒帶。
+	refCode := strings.TrimSpace(r.FormValue("referralCode"))
+	if err := s.store.Register(username, password, uid, exchange, proofPath, refCode); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -440,6 +450,91 @@ func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
 // handleBGV2 serves the admin-only 布乖v2 tracker — both legs merged into one payload.
 func (s *Server) handleBGV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.BGV2State())
+}
+
+// ---- 推薦系統 ----
+
+// handleReferral serves 我的推廣 for the caller. Referred account names are masked
+// server-side — the full names never leave the box.
+func (s *Server) handleReferral(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Referral(s.userOf(r)))
+}
+
+// handleReferralApply books the caller's next reward tier. 每 10 個合格解鎖一檔,
+// 累計不消耗;DB 的 UNIQUE(username,tier) 擋掉重複申請。
+func (s *Server) handleReferralApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	user := s.userOf(r)
+	if user == "" {
+		http.Error(w, "未登入", http.StatusUnauthorized)
+		return
+	}
+	if err := s.store.ApplyReward(user); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAdminReferrals serves 推廣管理: every member's counts + all applications.
+func (s *Server) handleAdminReferrals(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.ReferralAdmin())
+}
+
+// handleAdminReferralOK flips a referred account's 合格 flag. POST {username, ok}.
+func (s *Server) handleAdminReferralOK(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Username string `json:"username"`
+		OK       bool   `json:"ok"`
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Username == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.SetRefOK(in.Username, in.OK) {
+		http.Error(w, "查無此用戶", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAdminRefApprove marks a reward application 通過. POST {id}.
+// 發放本身是人工的 — this only records the sign-off.
+func (s *Server) handleAdminRefApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		ID int64 `json:"id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.ID == 0 {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.ApproveReward(in.ID) {
+		http.Error(w, "查無此申請或已審核", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAdminReferralOf serves one user's referral list in FULL (admin drill-down
+// from 使用者管理 — names unmasked). GET ?user=xxx
+func (s *Server) handleAdminReferralOf(w http.ResponseWriter, r *http.Request) {
+	u := strings.TrimSpace(r.URL.Query().Get("user"))
+	if u == "" {
+		http.Error(w, "missing user", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, s.store.ReferralOf(u))
 }
 
 // handleBollEMA serves the admin-only 布林EMA (4H 突破蓄勢) tracker.
