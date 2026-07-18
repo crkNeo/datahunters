@@ -264,9 +264,9 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 		}
 		tr.Cur = p
 		tr.PnLPct = pnl(tr.Dir, tr.Entry, p)
-		if b.plan != nil {
+		if plan, beOn := s.tpFor(b.name, b.plan); plan != nil {
 			before := tr.Legs
-			stepTP(tr, p, b.plan, now) // 分批止盈: partial TPs + trailing stop on live price
+			stepTP(tr, p, plan, beOn, now) // 分批止盈: partial TPs + trailing stop on live price
 			if tr.Status == "open" && tr.Legs > before {
 				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
 			}
@@ -355,7 +355,8 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),
 			Cur: roundPx(p), Status: "open", OpenTime: now,
 		}
-		setupTP(tr, b.plan) // 分批止盈: TP1/TP2 at entry (no-op if plan == nil)
+		emaPlan, _ := s.tpFor(b.name, b.plan)
+		setupTP(tr, emaPlan) // 分批止盈: TP1/TP2 at entry (no-op when off)
 		b.trades = append(b.trades, tr)
 		s.notifyTradeOpen(b, tr)
 		active[coin] = true

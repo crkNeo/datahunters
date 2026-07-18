@@ -71,7 +71,9 @@ func setupTP(tr *PaperTrade, p *tpPlan) {
 // fills (ratcheting the stop up), and closes the trade fully at TP3 or the current
 // stop. Returns true when the trade is now fully closed. Single-TP trades (TP1==0)
 // just do the TP3/SL check on the whole position.
-func stepTP(tr *PaperTrade, price float64, p *tpPlan, now time.Time) bool {
+// be=false keeps the original stop after TP1 (admin turned 保本 off); the TP2→鎖TP1
+// ratchet is 鎖利, not 保本, so it always applies.
+func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bool {
 	long := tr.Dir == "long"
 	reached := func(level float64) bool {
 		if level == 0 {
@@ -87,10 +89,12 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, now time.Time) bool {
 			tr.Realized += p.w1 * pnl(tr.Dir, tr.Entry, tr.TP1)
 			tr.Filled += p.w1
 			tr.Legs = 1
-			if long { // TP1 → move stop to break-even+
-				tr.SL = roundPx(tr.Entry * (1 + p.beBuf))
-			} else {
-				tr.SL = roundPx(tr.Entry * (1 - p.beBuf))
+			if be { // TP1 → move stop to break-even+ (skipped when 保本 is off)
+				if long {
+					tr.SL = roundPx(tr.Entry * (1 + p.beBuf))
+				} else {
+					tr.SL = roundPx(tr.Entry * (1 - p.beBuf))
+				}
 			}
 		}
 		if tr.Legs < 2 && reached(tr.TP2) {

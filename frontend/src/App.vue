@@ -678,6 +678,41 @@ async function toggleStrat(st) {
   })
   if (res.ok) { st.enabled = !st.enabled; adminMsg.value = '✓ ' + st.label + (st.enabled ? ' 已開啟' : ' 已關閉(不再開新單)') }
 }
+// admin: per-strategy config (類型 / 風控警語 / 最大止損% / 保本 / 分批止盈)
+const STRAT_TAGS = ['激進', '保守', '高頻', '低頻', '長線', '短線']
+function toggleStratTag(st, tag) {
+  const tags = Array.isArray(st.tags) ? st.tags.slice() : []
+  const i = tags.indexOf(tag)
+  if (i >= 0) tags.splice(i, 1); else tags.push(tag)
+  st.tags = tags
+}
+async function saveStratCfg(st) {
+  const cfg = {
+    tags: st.tags || [], show_risk: !!st.show_risk,
+    max_sl_pct: Number(st.max_sl_pct) || 0, breakeven: !!st.breakeven, multi_tp: !!st.multi_tp,
+  }
+  const res = await authFetch('/api/admin/strat-config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: st.name, cfg }),
+  })
+  adminMsg.value = res.ok ? '✓ ' + st.label + ' 設定已儲存(下一筆開單起生效)' : '✗ 儲存失敗'
+  if (res.ok) loadStratMeta()
+}
+// public: 策略類型標籤 + 風控警語旗標(給各策略頁用)
+const stratMeta = ref({})
+async function loadStratMeta() {
+  try {
+    const res = await authFetch('/api/strat-meta')
+    if (res.ok) stratMeta.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
+function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
+// 分頁 → 策略 key。微策略分頁名本身就是 key(rsifade/bollfade/meanrev/bgv2…),
+// 只有雷達三本的分頁名與 book 名不同。
+const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
+const curStrat = computed(() => STRAT_KEY_BY_TAB[mainTab.value] || mainTab.value)
 function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 
 // ---- admin: mean-reversion strategies (逆勢超買空 / 布林重回 / 乖離回歸) ----
@@ -1873,6 +1908,7 @@ onMounted(async () => {
   }
   document.addEventListener('click', onDocClick)
   loadConfig()
+  loadStratMeta() // 各策略類型標籤 + 風控警語
   await loadMe()
   loadAll()
   if (authed.value) loadNotice().then(maybeShowNotice) // 返回用戶(帶 token)登入時的公告彈窗
@@ -2487,8 +2523,9 @@ watch(role, () => {
         <h2>冥王星<span class="help" tabindex="0">?<span class="help-pop">‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
+      <p v-if="stratRisky('conv')" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
       <div v-if="conv" class="pstats">
-        <div class="pstat"><div class="stat-k">獲利因子</div><div class="stat-v" :class="conv.stats.profit_factor >= 1 ? 'long' : 'short'">{{ conv.stats.profit_factor ? conv.stats.profit_factor.toFixed(2) : '—' }}</div></div>
+        <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf('conv').join('・') || '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="conv.stats.win_rate >= 50 ? 'long' : 'short'">{{ conv.stats.win_rate }}%</div></div>
         <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="conv.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.avg_pnl) }}</div></div>
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="conv.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.total_pnl) }}</div></div>
@@ -2548,11 +2585,12 @@ watch(role, () => {
         <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }} · 已結束 {{ microState.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
 
+      <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
       <div v-if="microState" class="pstats">
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="microState.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.total_pnl) }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="microState.stats.win_rate >= 50 ? 'long' : 'short'">{{ microState.stats.win_rate }}%</div></div>
         <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="microState.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">獲利因子<span class="help" tabindex="0">?<span class="help-pop">總獲利 ÷ 總虧損。&gt;1 代表整體賺錢,&gt;1.5 算不錯。跟勝率互補:高勝率但低獲利因子代表賺小賠大。</span></span></div><div class="stat-v" :class="microState.stats.profit_factor >= 1 ? 'long' : 'short'">{{ microState.stats.profit_factor ? microState.stats.profit_factor.toFixed(2) : '—' }}</div></div>
+        <div class="pstat"><div class="stat-k">策略類型<span class="help" tabindex="0">?<span class="help-pop">此策略的操作屬性:激進/保守(風險)、高頻/低頻(開單頻率)、長線/短線(持倉時間)。由管理端設定。</span></span></div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
       </div>
 
       <div v-if="microState && microState.stats.multi_tp && microState.stats.closed" class="tpfunnel">
@@ -2784,15 +2822,42 @@ watch(role, () => {
       <section class="card adminbox">
         <h3 class="psub">策略開關 <button class="minibtn" @click="loadStratStates">刷新</button></h3>
         <div class="strat-toggles">
-          <div v-for="st in stratStates" :key="st.name" class="strat-row">
-            <span class="strat-name">{{ st.label }}</span>
-            <button class="toggle" :class="{ on: st.enabled }" @click="toggleStrat(st)">
-              <span class="toggle-knob"></span>
-            </button>
-            <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
+          <div v-for="st in stratStates" :key="st.name" class="stratcfg">
+            <div class="strat-row">
+              <span class="strat-name">{{ st.label }}</span>
+              <button class="toggle" :class="{ on: st.enabled }" @click="toggleStrat(st)">
+                <span class="toggle-knob"></span>
+              </button>
+              <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
+            </div>
+            <div class="stratcfg-line">
+              <span class="stratcfg-k">類型</span>
+              <button v-for="tg in STRAT_TAGS" :key="tg" class="tagchip" :class="{ on: (st.tags || []).includes(tg) }" @click="toggleStratTag(st, tg)">{{ tg }}</button>
+            </div>
+            <div class="stratcfg-line">
+              <span class="stratcfg-k">最大止損%</span>
+              <input v-model.number="st.max_sl_pct" type="number" min="0" max="100" step="0.5" class="stratcfg-num" />
+              <span class="stratcfg-hint">0 = 不限制;止損距離超過此% 不開新單</span>
+            </div>
+            <div class="stratcfg-line">
+              <label class="stratcfg-chk"><input v-model="st.show_risk" type="checkbox" /> 顯示風控建議</label>
+              <label class="stratcfg-chk"><input v-model="st.multi_tp" type="checkbox" /> 分批止盈</label>
+              <!-- 保本由 TP1 觸發,沒有分批止盈就沒有 TP1 → 關閉時停用,避免看起來像獨立開關 -->
+              <label class="stratcfg-chk" :class="{ dim: !st.multi_tp }" :title="st.multi_tp ? '' : '需先開啟分批止盈'">
+                <input v-model="st.breakeven" type="checkbox" :disabled="!st.multi_tp" /> 保本(TP1後移止損)
+              </label>
+              <button class="minibtn" @click="saveStratCfg(st)">儲存</button>
+            </div>
+            <p v-if="!st.multi_tp" class="stratcfg-dep">↳ 保本由 TP1 觸發,分批止盈關閉時<b>不會生效</b></p>
           </div>
         </div>
-        <p class="loginhint">關閉 = 該策略<b>不再開新單</b>;進行中的單<b>不會被平掉</b>(照常跑到止盈止損)。設定會保存,重啟後仍生效。</p>
+        <p class="loginhint">
+          關閉 = 該策略<b>不再開新單</b>;進行中的單<b>不會被平掉</b>(照常跑到止盈止損)。<br />
+          「顯示風控建議」開啟後,該策略頁會出現<b>風險警語</b>提醒使用者謹慎操作。<br />
+          最大止損% / 保本 / 分批止盈 只影響<b>之後開的新單</b>,已進行中的單維持原本的止盈止損設定。<br />
+          <b>保本依附於分批止盈</b>:止損是在 TP1 觸及時才移到保本價(進場±0.05%),所以分批止盈關閉時保本無效。<br />
+          另:止盈距離不到 <b>0.8%</b> 的單會自動<b>不分批</b>(退回單段),那種單也不會有保本。
+        </p>
       </section>
 
       <!-- 站台設定:logo / 社群 / QR -->
@@ -3072,8 +3137,9 @@ watch(role, () => {
         <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
         <span class="tf-note">統計依所選範圍重算</span>
       </div>
+      <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
       <div v-if="bookF" class="pstats">
-        <div class="pstat"><div class="stat-k">{{ bookF.stats.multi_tp ? '獲利因子' : '已結束' }}</div><div v-if="bookF.stats.multi_tp" class="stat-v" :class="bookF.stats.profit_factor >= 1 ? 'long' : 'short'">{{ bookF.stats.profit_factor ? bookF.stats.profit_factor.toFixed(2) : '—' }}</div><div v-else class="stat-v">{{ bookF.stats.closed }}</div></div>
+        <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bookF.stats.win_rate >= 50 ? 'long' : 'short'">{{ bookF.stats.win_rate }}%</div></div>
         <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="bookF.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.avg_pnl) }}</div></div>
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="bookF.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.total_pnl) }}</div></div>
@@ -3836,7 +3902,20 @@ body::before {
 .sec-chip { display: inline-block; font-size: 11.5px; padding: 2px 7px; margin: 2px 4px 2px 0; border-radius: 5px; }
 .sec-chip.up { background: #133027; color: #5fd39a; }
 .sec-chip.down { background: #2f1a1a; color: #e0857f; }
-.strat-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 14px; margin: 4px 0 6px; }
+.strat-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 14px; margin: 4px 0 6px; }
+.stratcfg { border: 1px solid #2b2e36; border-radius: 8px; padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; }
+.stratcfg-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.stratcfg-k { font-size: 11px; color: #8b909a; min-width: 56px; }
+.stratcfg-num { width: 66px; background: #1b1d23; border: 1px solid #363943; border-radius: 6px; color: #e6e8ec; padding: 3px 6px; font-size: 12px; }
+.stratcfg-hint { font-size: 10px; color: #71767f; }
+.stratcfg-chk { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #cdd0d6; cursor: pointer; }
+.stratcfg-chk.dim { color: #62666e; cursor: not-allowed; }
+.stratcfg-chk.dim input { cursor: not-allowed; }
+.stratcfg-dep { font-size: 10px; color: #b4642a; margin: -3px 0 0 4px; }
+.tagchip { background: #24262c; border: 1px solid #363943; color: #8b909a; border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; transition: all .12s; }
+.tagchip.on { background: #2ea86a22; border-color: #2ea86a; color: #57d495; }
+.stat-tags { font-size: 12px !important; color: #cdd0d6 !important; line-height: 1.35; }
+.riskwarn { background: #4a2b1a; border: 1px solid #b4642a; color: #ffbf7d; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600; margin: 8px 0; line-height: 1.5; }
 .strat-row { display: flex; align-items: center; gap: 9px; }
 .strat-name { flex: 1; font-size: 13px; color: #cdd0d6; }
 .strat-status { font-size: 11px; width: 28px; }

@@ -242,7 +242,8 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 			Status:   "open",
 			OpenTime: time.UnixMilli(last.Ts).UTC(),
 		}
-		setupTP(tr, tpMomentum) // 分批止盈: TP1/TP2 at 40%/70% of entry→POC target
+		convPlan, _ := s.tpFor("conv", tpMomentum)
+		setupTP(tr, convPlan) // 分批止盈: TP1/TP2 at 40%/70% of entry→POC target
 		s.convTrades = append(s.convTrades, tr)
 		dirty = tr
 		s.convTrim()
@@ -262,6 +263,7 @@ func (s *Store) ConvMarkTick() {
 		return
 	}
 	now := time.Now()
+	convPlan, convBE := s.tpFor("conv", tpMomentum) // admin 分批止盈/保本 設定,讀在鎖外
 	var dirty []*PaperTrade
 	s.convMu.Lock()
 	for _, tr := range s.convTrades {
@@ -273,7 +275,7 @@ func (s *Store) ConvMarkTick() {
 			continue
 		}
 		before := tr.Legs
-		if closed := stepTP(tr, p, tpMomentum, now); closed || tr.Legs != before {
+		if closed := stepTP(tr, p, convPlan, convBE, now); closed || tr.Legs != before {
 			dirty = append(dirty, tr) // persist on any leg change or final close
 		}
 		if tr.Legs > before { // a TP just filled → 軟體通知

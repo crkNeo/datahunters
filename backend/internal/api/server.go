@@ -91,17 +91,18 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/events", s.gate(P, s.handleEvents))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
 	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
-	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit))         // Upbit announcements (zh-TW)
-	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))           // GDELT market headlines (zh-TW)
-	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding))     // OKX funding-rate board
-	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))       // DefiLlama token-unlock board
-	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood)) // Robinhood 上架 board
-	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))  // 大盤 AI 分析(每整點)
-	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))     // 板塊強弱/輪動(每整點)
-	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))        // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
-	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))       // logo / social / QR
-	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))       // login 公告彈窗 (members)
-	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles))   // column list
+	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit))          // Upbit announcements (zh-TW)
+	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))            // GDELT market headlines (zh-TW)
+	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding))      // OKX funding-rate board
+	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))        // DefiLlama token-unlock board
+	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood))  // Robinhood 上架 board
+	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))   // 大盤 AI 分析(每整點)
+	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))      // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta)) // 各策略類型標籤 + 風控警語旗標
+	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))         // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
+	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))        // logo / social / QR
+	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))        // login 公告彈窗 (members)
+	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles))    // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
 
 	// admin content management
@@ -118,6 +119,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/manual-exit", s.gate(A, s.handleManualExit))       // 各策略手動出場(動能衰弱)
 	mux.HandleFunc("/api/admin/strat-states", s.gate(A, s.handleStratStates))     // 策略開關狀態
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
+	mux.HandleFunc("/api/admin/strat-config", s.gate(A, s.handleStratConfig))     // 策略設定(類型/風控/止損上限/保本/分批)
 	mux.HandleFunc("/api/conv", s.gate(V, s.handleConv))                          // 冥王星 (動態ATR均線收斂 4H, VIP)
 	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))              // 逆勢超買空 30m (admin-only)
 	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))            // 布林重回 1h (admin-only)
@@ -617,6 +619,34 @@ func (s *Server) handleStratToggle(w http.ResponseWriter, r *http.Request) {
 	}
 	s.store.SetStrategyEnabled(in.Name, in.On)
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleStratConfig saves one strategy's admin tuning (類型 / 風控警語 / 最大止損% /
+// 保本 / 分批止盈). Takes effect on the NEXT entry — open trades keep their levels.
+func (s *Server) handleStratConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Name string         `json:"name"`
+		Cfg  cache.StratCfg `json:"cfg"`
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.SetStrategyConfig(in.Name, in.Cfg) {
+		http.Error(w, "unknown strategy", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleStratMeta serves the PUBLIC per-strategy meta (類型 tags + 風控警語 flag)
+// that the strategy pages render. Admin-only fields are not exposed here.
+func (s *Server) handleStratMeta(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.StrategyMeta())
 }
 
 // handleScoreLog serves the log of when coins crossed the ±20 signal line.

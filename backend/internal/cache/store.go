@@ -171,8 +171,9 @@ type Store struct {
 	sectorBucket int64 // last processed hour bucket
 	sectorSeeded bool  // first tick seeds the baseline (no rotation push)
 
-	stratMu  sync.RWMutex    // guards the per-strategy on/off switches (admin)
-	stratOff map[string]bool // strategy name → disabled (won't open new trades)
+	stratMu  sync.RWMutex        // guards the per-strategy on/off switches + config (admin)
+	stratOff map[string]bool     // strategy name → disabled (won't open new trades)
+	stratCfg map[string]StratCfg // strategy name → admin config override (empty = code default)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -205,6 +206,7 @@ func NewStore(coins []string) *Store {
 		maiW:              marketai.NewClient(),
 		sectorPrev:        map[string]float64{},
 		stratOff:          map[string]bool{},
+		stratCfg:          map[string]StratCfg{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},
@@ -269,6 +271,7 @@ func NewStore(coins []string) *Store {
 	}
 	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
 	s.loadStratOff()    // restore per-strategy on/off switches
+	s.loadStratCfg()    // restore per-strategy admin config (類型/風控/止損上限/保本/分批)
 	if s.db != nil {
 		s.db.backfillRefCodes() // 每個帳號都要有推薦碼(不能等他自己開過我的推廣才生成)
 	}

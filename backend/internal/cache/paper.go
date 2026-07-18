@@ -261,11 +261,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 		}
 		tr.Cur = p
 		tr.PnLPct = pnl(tr.Dir, tr.Entry, p)
-		if b.plan != nil {
+		if plan, beOn := s.tpFor(b.name, b.plan); plan != nil {
 			// 分批止盈: books partial TPs, ratchets the stop (TP1→保本, TP2→TP1), and
 			// closes at TP3 / the (trailed) stop — all on the live price.
 			before := tr.Legs
-			stepTP(tr, p, b.plan, now)
+			stepTP(tr, p, plan, beOn, now)
 			if tr.Status == "open" && tr.Legs > before { // partial TP1/TP2 filled (TP3 close → close alert covers it)
 				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
 			}
@@ -378,8 +378,8 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 			if dir == "short" && !(it.TP < p && it.SL > p) {
 				continue
 			}
-			if b.maxSLPct > 0 { // SL 距離超過上限(波動過大的低市值幣)→ 不進場
-				if slDist := math.Abs(p-it.SL) / p * 100; slDist > b.maxSLPct {
+			if cap := s.stratMaxSL(b.name, b.maxSLPct); cap > 0 { // SL 距離超過上限(波動過大的低市值幣)→ 不進場
+				if slDist := math.Abs(p-it.SL) / p * 100; slDist > cap {
 					continue
 				}
 			}
@@ -403,7 +403,8 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 					tr.SL = p + 0.5*tr.R
 				}
 			}
-			setupTP(tr, b.plan) // 分批止盈: compute TP1/TP2 at entry (no-op when b.plan == nil)
+			entryPlan, _ := s.tpFor(b.name, b.plan)
+			setupTP(tr, entryPlan) // 分批止盈: compute TP1/TP2 at entry (no-op when off)
 			b.trades = append(b.trades, tr)
 			s.notifyTradeOpen(b, tr)
 			active[it.Coin] = true

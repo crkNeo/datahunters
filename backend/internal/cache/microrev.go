@@ -434,7 +434,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		}
 		dirty = open
 	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
-		if dir, entry, sl, tp, ok := b.signal(cs); ok && microSLOK(b, entry, sl) {
+		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) {
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:     coin,
@@ -446,7 +446,8 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				Status:   "open",
 				OpenTime: time.UnixMilli(last.Ts).UTC(),
 			}
-			setupTP(tr, b.plan) // compute TP1/TP2 (分批止盈) at entry
+			plan, _ := s.tpFor(b.strat(), b.plan)
+			setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
 			b.trades = append(b.trades, tr)
 			dirty = tr
 			microTrim(b)
@@ -465,11 +466,13 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 // maxSLPct filter. Backtest (jmch_posts.csv) showed a handful of wide-stop trades
 // caused the bulk of the losses; capping SL distance at entry removes them without
 // touching the trend of small TP1-then-breakeven wins. 0 = no filter.
-func microSLOK(b *microBook, entry, sl float64) bool {
-	if b.maxSLPct <= 0 || entry <= 0 {
+// The admin 最大止損% setting overrides the book's own value when present.
+func (s *Store) microSLOK(b *microBook, entry, sl float64) bool {
+	cap := s.stratMaxSL(b.strat(), b.maxSLPct)
+	if cap <= 0 || entry <= 0 {
 		return true
 	}
-	return math.Abs(entry-sl)/entry*100 <= b.maxSLPct
+	return math.Abs(entry-sl)/entry*100 <= cap
 }
 
 // strat returns the StrategyEnabled key for this book (a family shares one switch).
@@ -549,6 +552,7 @@ func (s *Store) microMarkTick(b *microBook) {
 		return
 	}
 	now := time.Now()
+	plan, beOn := s.tpFor(b.strat(), b.plan) // admin 分批止盈/保本 設定,讀在鎖外
 	var dirty, beCues []*PaperTrade
 	b.mu.Lock()
 	for _, tr := range b.trades {
@@ -570,7 +574,7 @@ func (s *Store) microMarkTick(b *microBook) {
 			}
 		}
 		before := tr.Legs
-		closed := stepTP(tr, p, b.plan, now) // books partial TPs, ratchets stop, closes at TP3/SL
+		closed := stepTP(tr, p, plan, beOn, now) // books partial TPs, ratchets stop, closes at TP3/SL
 		if closed || tr.Legs != before || beFired {
 			dirty = append(dirty, tr) // persist on any leg change, BE latch, or final close
 		}
