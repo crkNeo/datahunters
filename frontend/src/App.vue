@@ -1053,6 +1053,12 @@ const bfSR = ref(null)
 const bfLive = ref({ price: 0, longPct: 50, oi: 0, liqLong: 0, liqShort: 0, buy: 0, sell: 0, conn: false })
 let bfWS = null, bfRAF = null, bfFarTimer = null, bfStatTimer = null, bfRetry = 0
 let bfSoldiers = [], bfBlasts = [], bfSparks = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
+// 戰場氛圍(純裝飾,不代表任何盤面數據):飄塵 + 戰線餘燼。
+// 平靜盤成交稀疏時,光靠真實成交撐不起畫面,這層讓場景不會死掉。
+let bfDust = [], bfEmbers = []
+// 戰場實體:砲彈(砲兵齊射)、飛機(巨鯨成交 / 清算空襲)、殘骸(陣亡堆積)
+let bfShells = [], bfPlanes = [], bfWrecks = [], bfBombs = []
+let bfArtyT = 0 // 砲兵齊射計時器
 // 士兵/坦克 icon:離屏預渲染一次,之後只 drawImage。220 個單位若每格重畫路徑會拖垮手機。
 let bfSprites = null
 function bfMakeSprites() {
@@ -1085,9 +1091,58 @@ function bfMakeSprites() {
     c.fillRect(11, 2, 10, 5)                                // 砲塔
     c.fillRect(20, 3.4, 13, 2.2)                            // 砲管
   })
+  // 裝甲車:比坦克小、比步兵重 — 中等單量
+  const apc = (col, dark) => mk(26, 15, (c) => {
+    c.fillStyle = dark
+    c.fillRect(2, 9, 20, 4)
+    c.fillStyle = 'rgba(0,0,0,0.35)'
+    for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(6 + i * 6, 12, 2.1, 0, 7); c.fill() } // 輪
+    c.fillStyle = col
+    c.fillRect(3, 4, 17, 5.5)                               // 車體
+    c.beginPath(); c.moveTo(20, 4); c.lineTo(25, 7); c.lineTo(20, 9.5); c.closePath(); c.fill() // 斜前緣
+    c.fillStyle = dark
+    c.fillRect(14, 1.5, 5, 3)                               // 機槍塔
+  })
+  // 砲兵:駐守後方,朝敵方拋射 — 掛單量的具象化
+  // 砲兵。底下墊一塊深色陣地,否則綠砲兵擺在綠地上根本看不見(實測)。
+  const arty = (col, dark) => mk(26, 20, (c) => {
+    c.fillStyle = 'rgba(0,0,0,0.45)'                        // 陣地土堆 → 拉開與地面的對比
+    c.beginPath(); c.ellipse(12, 17, 12, 3.4, 0, 0, 7); c.fill()
+    c.fillStyle = dark
+    c.fillRect(3, 12, 15, 3.4)                              // 底座
+    c.beginPath(); c.arc(6, 15.4, 2.6, 0, 7); c.fill()
+    c.beginPath(); c.arc(13, 15.4, 2.6, 0, 7); c.fill()
+    c.fillStyle = col
+    c.fillRect(5, 8, 10, 4.8)                               // 機身
+    c.save(); c.translate(13, 9); c.rotate(-0.62)           // 仰角砲管
+    c.fillStyle = dark; c.fillRect(0, -2.1, 14, 4.2)        // 砲管外框(深色描邊)
+    c.fillStyle = col; c.fillRect(0, -1.1, 13, 2.2)
+    c.restore()
+  })
+  // 轟炸機:巨鯨成交 / 清算空襲 — 從天上飛過來投彈
+  const plane = (col, dark) => mk(42, 16, (c) => {
+    c.fillStyle = col
+    c.beginPath(); c.ellipse(20, 8, 19, 3.2, 0, 0, 7); c.fill() // 機身
+    c.fillStyle = dark
+    c.beginPath(); c.moveTo(18, 7); c.lineTo(8, 1); c.lineTo(14, 7); c.closePath(); c.fill()   // 上翼
+    c.beginPath(); c.moveTo(18, 9); c.lineTo(8, 15); c.lineTo(14, 9); c.closePath(); c.fill()  // 下翼
+    c.beginPath(); c.moveTo(2, 8); c.lineTo(0, 3); c.lineTo(6, 7); c.closePath(); c.fill()     // 尾翼
+    c.fillStyle = 'rgba(255,255,255,0.5)'
+    c.beginPath(); c.arc(31, 7.4, 2, 0, 7); c.fill()        // 駕駛艙
+  })
+  // 殘骸:陣亡留在戰場上,看得出剛剛哪一段打得最兇
+  const wreck = (dark) => mk(14, 7, (c) => {
+    c.fillStyle = dark
+    c.fillRect(1, 4, 11, 2.5)
+    c.fillRect(3, 2, 3, 2.5); c.fillRect(8, 1.5, 2.5, 3)
+  })
   bfSprites = {
     bull: soldier('#3ddb84', '#1a7a45'), bear: soldier('#ff6b6b', '#8f2f2f'),
+    bullApc: apc('#3ddb84', '#146b3c'), bearApc: apc('#ff6b6b', '#7d2a2a'),
     bullTank: tank('#3ddb84', '#126034'), bearTank: tank('#ff6b6b', '#6f2424'),
+    bullArty: arty('#48c98a', '#125c33'), bearArty: arty('#e07a7a', '#6b2626'),
+    bullPlane: plane('#5fe3a0', '#1a7a45'), bearPlane: plane('#ff8a8a', '#8f2f2f'),
+    bullWreck: wreck('rgba(20,70,45,0.85)'), bearWreck: wreck('rgba(80,28,28,0.85)'),
   }
 }
 let bfPrice = 0, bfLastT = 0, bfLastTrade = 0
@@ -1185,22 +1240,49 @@ function bfOnTrade(px, qty, buyerMaker) {
   // 門檻實測校準:BTC 多數成交量都很小,原本 0.004(≈$260)會砍掉約 3/4 的兵,
   // 戰場看起來空無一人;坦克門檻 1.5 BTC(≈$97k)更是幾乎不會觸發。
   if (qty < 0.0008) return // 只濾真正的塵埃
-  if (bfSoldiers.length > 220) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
-  const tank = qty >= 0.4 // 大單(≈$26k+)→ 坦克
-  bfSoldiers.push({
-    bull, tank,
-    scale: tank ? Math.min(1.5, 0.85 + Math.sqrt(qty) * 0.5) : Math.min(1.15, 0.6 + Math.sqrt(qty) * 2.4),
-    u: bull ? BF_SUPX : BF_RESX, // 從自家城堡出發
-    state: 'march',
-    spd: (0.0055 + Math.random() * 0.004) * (tank ? 0.65 : 1), // 坦克較慢
-    // 交戰壽命:實測 26–60 幀(約 0.5s)太短,肉搏帶堆不起來就死光了。
-    // 拉長後穩態約 50–70 兵膠著在戰線上,才有交戰感(上限 220 仍是效能保險絲)。
-    hp: tank ? 130 + Math.random() * 110 : 55 + Math.random() * 85,
-    ph: Math.random() * 6.28, // 刺擊動畫相位
-    lunge: 0,
-    lane: Math.random(), // 0..1 縱深車道
-  })
+  if (bfSoldiers.length > 260) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
+  // 兵種分級 ∝ 成交量:量級一眼看得出來,不再只有「兵/坦克」兩檔。
+  //   步兵 <0.05 ｜ 裝甲車 0.05–0.5 ｜ 坦克 0.5–2 ｜ 轟炸機 ≥2(巨鯨,走空中)
+  if (qty >= 2) { bfPlanes.push(bfMkPlane(bull, 'whale', qty)); return }
+  const kind = qty >= 0.5 ? 'tank' : qty >= 0.05 ? 'apc' : 'inf'
+  const tank = kind === 'tank'
+  // 一筆大單 = 一個班,不是一個兵:兵力 ∝ 成交量,大錢進場才看得出份量。
+  const squad = tank ? Math.min(3, 1 + Math.floor(Math.sqrt(qty / 0.5))) : kind === 'apc' ? 2 : 1
+  // 自穩定的停留時間。BTC 成交率忽高忽低(實測穩態在 2 兵到 54 兵之間跳),
+  // 固定壽命的結果就是冷清時空無一人、熱絡時糊成一坨色塊。改成「人少活久、
+  // 人多活短」把場上人數收斂到 ~28:每個兵仍然是一筆真實成交,只是停留時間隨場面調整。
+  const lifeMul = Math.max(0.5, Math.min(4.5, 26 / Math.max(4, bfSoldiers.length)))
+  for (let i = 0; i < squad; i++) {
+    bfSoldiers.push({
+      bull, tank, kind,
+      scale: tank ? Math.min(1.5, 0.85 + Math.sqrt(qty) * 0.5) : Math.min(1.15, 0.6 + Math.sqrt(qty) * 2.4),
+      u: bull ? BF_SUPX : BF_RESX, // 從自家城堡出發
+      state: 'march',
+      spd: (0.0055 + Math.random() * 0.004) * (tank ? 0.65 : 1), // 坦克較慢
+      // 交戰壽命。實測穩態只有 3–6 兵(不是註解原本說的 50–70):BTC 平靜時
+      // 每秒才 3–5 筆成交,舊的 1–2 秒壽命根本堆不出肉搏帶。拉長到 3–6 秒後
+      // 穩態約 15–30 兵,平靜盤也看得到交戰(上限 260 仍是效能保險絲)。
+      hp: (tank ? 220 + Math.random() * 160 : 140 + Math.random() * 170) * lifeMul,
+      ph: Math.random() * 6.28, // 刺擊動畫相位
+      lunge: 0,
+      lane: Math.random(), // 0..1 縱深車道
+    })
+  }
 }
+// bfMkPlane 造一架轟炸機。whale = 巨鯨成交(≥2 BTC),從自家方向飛入戰線投彈;
+// liq = 清算空襲,由「贏的那方」飛過來炸被強平的一方。
+function bfMkPlane(bull, kind, mag) {
+  return {
+    bull, kind,
+    u: bull ? -0.25 : 1.25,
+    sky: 0.28 + Math.random() * 0.34,          // 0..1:天空高度(0=地平線)
+    spd: 0.0042 + Math.random() * 0.002, // 慢一點才看得清楚:0.010 時整趟只有 3 秒
+    dropU: 0.5 + (Math.random() - 0.5) * 0.12, // 投彈點(接近戰線)
+    dropped: false,
+    mag: Math.min(60, 16 + Math.sqrt(mag) * 8), // 爆炸半徑
+  }
+}
+
 function bfOnLiq(px, qty, side) {
   // side=SELL → 多單被清算(強制賣出);BUY → 空單被清算
   const long = side === 'SELL'
@@ -1209,6 +1291,8 @@ function bfOnLiq(px, qty, side) {
   else bfLive.value.liqShort += usd
   // 爆炸打在戰線附近(帶點隨機偏移),不是絕對價格位置
   bfBlasts.push({ long, off: (Math.random() - 0.5) * 0.1, r: 0, max: Math.min(52, 12 + Math.sqrt(usd) / 20), t: 0 })
+  // 夠大的清算 → 加派空襲:贏家(被清算方的對面)飛過來投彈,比原地爆一團有戲
+  if (usd > 20000 && bfPlanes.length < 4) bfPlanes.push(bfMkPlane(!long, 'liq', usd / 12000))
 }
 
 // REST 成交備援:WS 的 aggTrade 沒供應時改用輪詢。以 aggTrade id (a) 去重,
@@ -1290,6 +1374,9 @@ function bfDraw() {
   // 等距投影:u = 戰場橫向座標 (0..1),t = 縱深 (0=地平線, 1=最前緣)
   const PX = (u, t) => W / 2 + (u - 0.5) * W * (0.5 + 0.5 * t)
   const PY = (t) => horizon + groundH * t
+  // 車道 → 縱深。士兵、火花、餘燼共用同一條換算:火花的 lane 是從陣亡的士兵複製過來的,
+  // 兩邊若用不同公式,爆點就會跟屍體錯開。
+  const LT = (lane) => 0.58 + lane * 0.40
 
   const w = bfWalls()
   const fu = bfFrontU()
@@ -1319,6 +1406,19 @@ function bfDraw() {
   band(fu, 1.15, 'rgba(150,50,50,0.5)')
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1
   for (let i = 1; i < 5; i++) { const y = PY(i / 5); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke() }
+
+  // ---- 飄塵(裝飾):讓大片空地不至於是死的色塊 ----
+  while (bfDust.length < 26) bfDust.push({ u: Math.random() * 1.3 - 0.15, t: 0.3 + Math.random() * 0.7, sp: 0.0004 + Math.random() * 0.0012, r: 0.6 + Math.random() * 1.6, a: 0.05 + Math.random() * 0.13 })
+  bfDust = bfDust.filter((d) => {
+    if (d.life) { d.t2 = (d.t2 || 0) + step; if (d.t2 > d.life) return false } // 衝鋒揚塵:有壽命
+    d.u += d.sp * step * (dom >= 0 ? 1 : -1) // 常駐飄塵:順著主動買賣的優勢方向飄
+    if (d.u > 1.2) d.u = -0.15
+    if (d.u < -0.2) d.u = 1.15
+    const a = d.life ? d.a * (1 - (d.t2 || 0) / d.life) : d.a
+    ctx.fillStyle = `rgba(200,208,220,${a})`
+    ctx.beginPath(); ctx.arc(PX(d.u, d.t), PY(d.t), d.r, 0, 7); ctx.fill()
+    return true
+  })
 
   // ---- 城堡 ----
   const rsv = bfReserves()
@@ -1362,6 +1462,63 @@ function bfDraw() {
   castle(BF_SUPX, sr && sr.sup_ok ? sr.sup_touches : 0, true, !!(sr && sr.status === 'break_down'), w.supReal, w.sup, rsv.bid)
   castle(BF_RESX, sr && sr.res_ok ? sr.res_touches : 0, false, !!(sr && sr.status === 'break_up'), w.resReal, w.res, rsv.ask)
 
+  if (!bfSprites) bfMakeSprites() // 殘骸/砲兵/飛機都要用,必須在它們之前備好
+
+  // ---- 殘骸:躺在地上慢慢淡掉,看得出剛剛哪一段打得最兇 ----
+  bfWrecks = bfWrecks.filter((k) => {
+    k.t += step
+    if (k.t > k.life) return false
+    const t = LT(k.lane)
+    const sp = k.bull ? bfSprites.bullWreck : bfSprites.bearWreck
+    const sc = (k.big ? 1.5 : 1) * (0.75 + t * 0.55)
+    ctx.globalAlpha = Math.min(0.7, (1 - k.t / k.life) * 1.4)
+    ctx.drawImage(sp, PX(k.u, t) - (sp.width * sc) / 2, PY(t) - sp.height * sc, sp.width * sc, sp.height * sc)
+    ctx.globalAlpha = 1
+    return true
+  })
+  if (bfWrecks.length > 70) bfWrecks = bfWrecks.slice(-70)
+
+  // ---- 砲兵:駐守自家城牆後方,朝戰線拋射。齊射頻率 ∝ 掛單量(後備軍力) ----
+  const artyDraw = (u, bull, reserve) => {
+    const t = 0.52
+    const sp = bull ? bfSprites.bullArty : bfSprites.bearArty
+    const k = 0.85 * (0.75 + t * 0.55)
+    const x = PX(u, t), y = PY(t)
+    ctx.save(); ctx.translate(x, y); if (!bull) ctx.scale(-1, 1)
+    ctx.drawImage(sp, (-sp.width * k) / 2, -sp.height * k, sp.width * k, sp.height * k)
+    ctx.restore()
+    return { x, y, t, ratio: reserve / rsvMax }
+  }
+  const aB = artyDraw(BF_SUPX - 0.06, true, rsv.bid)
+  const aR = artyDraw(BF_RESX + 0.06, false, rsv.ask)
+  bfArtyT += step
+  if (bfArtyT > 26 && bfShells.length < 14) { // 節流:齊射不能無限制,手機吃不消
+    bfArtyT = 0
+    const fire = (from, bull, ratio) => {
+      if (Math.random() > 0.35 + ratio * 0.5) return // 後備軍越厚,開火越勤
+      bfShells.push({ bull, u0: bull ? BF_SUPX - 0.06 : BF_RESX + 0.06, t0: 0.52,
+        u1: fu + (bull ? -1 : 1) * (0.02 + Math.random() * 0.06), t1: 0.72 + Math.random() * 0.2, k: 0, sp: 0.020 + Math.random() * 0.012 })
+    }
+    fire(aB, true, aB.ratio); fire(aR, false, aR.ratio)
+  }
+  bfShells = bfShells.filter((sh) => {
+    sh.k += sh.sp * step
+    const u = sh.u0 + (sh.u1 - sh.u0) * sh.k
+    const t = sh.t0 + (sh.t1 - sh.t0) * sh.k
+    const arc = Math.sin(Math.PI * Math.min(1, sh.k)) * 46 // 拋物線
+    const x = PX(u, t), y = PY(t) - arc
+    if (sh.k >= 1) { // 落地 → 小爆點 + 揚塵
+      bfSparks.push({ u, lane: (t - 0.58) / 0.40, t: 0, life: 16, bull: sh.bull, death: true })
+      for (let i = 0; i < 3; i++) bfEmbers.push({ u: u + (Math.random() - 0.5) * 0.02, lane: (t - 0.58) / 0.40, t: 0, life: 26 + Math.random() * 20, dx: (Math.random() - 0.5) * 0.4 })
+      return false
+    }
+    ctx.fillStyle = sh.bull ? 'rgba(150,255,200,0.95)' : 'rgba(255,180,180,0.95)'
+    ctx.beginPath(); ctx.arc(x, y, 2.1, 0, 7); ctx.fill()
+    ctx.fillStyle = sh.bull ? 'rgba(90,220,150,0.25)' : 'rgba(230,120,120,0.25)' // 彈道殘影
+    ctx.beginPath(); ctx.arc(x - (sh.u1 > sh.u0 ? 4 : -4), y + 3, 1.4, 0, 7); ctx.fill()
+    return true
+  })
+
   // ---- 士兵:行軍 → 抵達戰線 → 停下對砍 → 陣亡 ----
   // 兩軍都停在戰線上肉搏,所以中間會自然堆出一條交戰帶(這才是「多空交戰」)。
   if (!bfSprites) bfMakeSprites()
@@ -1369,28 +1526,37 @@ function bfDraw() {
   bfSoldiers = bfSoldiers.filter((s) => {
     const dir = s.bull ? 1 : -1
     if (s.state === 'march') {
-      s.u += dir * s.spd * step
+      // 衝鋒波:主動買賣極度失衡時,優勢方整批加速推進
+      const charge = Math.abs(dom) > 0.35 && ((dom > 0) === s.bull) ? 1.9 : 1
+      s.u += dir * s.spd * charge * step
+      if (charge > 1 && Math.random() < 0.06 * step) { // 衝鋒揚塵
+        bfDust.push({ u: s.u, t: LT(s.lane), sp: 0, r: 1.2 + Math.random(), a: 0.22, life: 30 + Math.random() * 20 })
+      }
       // 觸及戰線 → 進入交戰(留一點點間隙,兩軍才會面對面而不是重疊)
-      if ((s.bull && s.u >= fu - 0.012) || (!s.bull && s.u <= fu + 0.012)) {
+      // 交戰帶要有「厚度」:全部擠在同一條線上會糊成一坨色塊,散開才看得出是兩軍列陣
+      if ((s.bull && s.u >= fu - 0.014) || (!s.bull && s.u <= fu + 0.014)) {
         s.state = 'fight'
-        s.u = fu - dir * (0.012 + Math.random() * 0.02)
+        s.u = fu - dir * (0.014 + Math.random() * 0.075)
       }
     } else {
       s.hp -= step
-      if (s.hp <= 0) { // 陣亡
+      if (s.hp <= 0) { // 陣亡 → 留下殘骸
         bfSparks.push({ u: s.u, lane: s.lane, t: 0, life: 14, bull: s.bull, death: true })
+        bfWrecks.push({ u: s.u, lane: s.lane, bull: s.bull, t: 0, life: 520, big: s.kind !== 'inf' })
         return false
       }
-      s.u += (fu - dir * 0.016 - s.u) * 0.05 * step // 戰線移動時交戰帶跟著推移
+      s.u += (fu - dir * (0.016 + s.lane * 0.06) - s.u) * 0.05 * step // 戰線移動時交戰帶跟著推移(保留厚度)
       s.ph += 0.34 * step
       s.lunge = Math.sin(s.ph) * 0.005 * dir // 刺擊
       if (Math.random() < 0.05 * step) { // 兵器碰撞火花
         bfSparks.push({ u: s.u + dir * 0.008, lane: s.lane, t: 0, life: 8, bull: s.bull })
       }
     }
-    const t = 0.70 + s.lane * 0.26
+    const t = LT(s.lane)
     const x = PX(s.u + s.lunge, t), y = PY(t)
-    const sp = s.tank ? (s.bull ? bfSprites.bullTank : bfSprites.bearTank) : (s.bull ? bfSprites.bull : bfSprites.bear)
+    const sp = s.kind === 'tank' ? (s.bull ? bfSprites.bullTank : bfSprites.bearTank)
+      : s.kind === 'apc' ? (s.bull ? bfSprites.bullApc : bfSprites.bearApc)
+        : (s.bull ? bfSprites.bull : bfSprites.bear)
     const k = s.scale * (0.75 + t * 0.55) // 近大遠小
     const w = sp.width * k, h = sp.height * k
     ctx.save()
@@ -1405,7 +1571,7 @@ function bfDraw() {
   bfSparks = bfSparks.filter((k) => {
     k.t += step
     if (k.t > k.life) return false
-    const t = 0.70 + k.lane * 0.26
+    const t = LT(k.lane)
     const x = PX(k.u, t), y = PY(t)
     const a = 1 - k.t / k.life
     if (k.death) {
@@ -1434,6 +1600,62 @@ function bfDraw() {
   })
   if (bfBlasts.length > 30) bfBlasts = bfBlasts.slice(-30)
 
+  // ---- 交戰帶光暈 + 餘燼:強度 ∝ 正在肉搏的兵力,所以打得越兇燒得越旺 ----
+  const melee = bfSoldiers.reduce((n, s) => n + (s.state === 'fight' ? 1 : 0), 0)
+  if (melee > 0) {
+    const heat = Math.min(1, melee / 26)
+    const gx = PX(fu, 0.8), gy = PY(0.8)
+    const gg = ctx.createRadialGradient(gx, gy - 6, 0, gx, gy - 6, 26 + heat * 74)
+    gg.addColorStop(0, `rgba(255,206,120,${0.10 + heat * 0.20})`)
+    gg.addColorStop(0.45, `rgba(255,150,60,${0.05 + heat * 0.10})`)
+    gg.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(gx, gy - 6, 26 + heat * 74, 0, 7); ctx.fill()
+    if (Math.random() < 0.55 * heat * step) {
+      bfEmbers.push({ u: fu + (Math.random() - 0.5) * 0.05, lane: Math.random(), t: 0, life: 40 + Math.random() * 40, dx: (Math.random() - 0.5) * 0.3 })
+    }
+  }
+  bfEmbers = bfEmbers.filter((e) => {
+    e.t += step
+    if (e.t > e.life) return false
+    const t = LT(e.lane)
+    const a = (1 - e.t / e.life) * 0.75
+    ctx.fillStyle = `rgba(255,${170 + Math.round(60 * (1 - e.t / e.life))},90,${a})`
+    ctx.beginPath(); ctx.arc(PX(e.u, t) + e.dx * e.t, PY(t) - 6 - e.t * 0.55, 1.3, 0, 7); ctx.fill()
+    return true
+  })
+  if (bfEmbers.length > 90) bfEmbers = bfEmbers.slice(-90)
+
+  // ---- 轟炸機:巨鯨成交 / 清算空襲。飛過戰線投彈,落地接爆炸 ----
+  bfPlanes = bfPlanes.filter((pl) => {
+    pl.u += (pl.bull ? 1 : -1) * pl.spd * step
+    if (pl.u > 1.45 || pl.u < -0.45) return false
+    const skyY = horizon * (1 - pl.sky) + 6
+    const x = W / 2 + (pl.u - 0.5) * W * 0.92
+    if (!pl.dropped && ((pl.bull && pl.u >= pl.dropU) || (!pl.bull && pl.u <= pl.dropU))) {
+      pl.dropped = true
+      bfBombs.push({ u: pl.u, y: skyY, bull: pl.bull, mag: pl.mag, kind: pl.kind })
+    }
+    const sp = pl.bull ? bfSprites.bullPlane : bfSprites.bearPlane
+    ctx.save(); ctx.translate(x, skyY); if (!pl.bull) ctx.scale(-1, 1)
+    ctx.drawImage(sp, -sp.width / 2, -sp.height / 2)
+    ctx.restore()
+    return true
+  })
+  if (bfPlanes.length > 5) bfPlanes = bfPlanes.slice(-5)
+  // 落下的炸彈 → 觸地變爆炸
+  bfBombs = bfBombs.filter((b) => {
+    b.y += 3.4 * step
+    const gy = PY(0.8)
+    const x = W / 2 + (b.u - 0.5) * W * 0.92
+    if (b.y >= gy - 8) {
+      bfBlasts.push({ long: !b.bull, off: b.u - fu, r: 0, max: b.mag, t: 0 })
+      return false
+    }
+    ctx.fillStyle = '#ffd479'
+    ctx.beginPath(); ctx.ellipse(x, b.y, 2.2, 4, 0, 0, 7); ctx.fill()
+    return true
+  })
+
   // ---- 戰線(現價) ----
   const x0 = PX(fu, 0), x1 = PX(fu, 1)
   const grad = ctx.createLinearGradient(x0, horizon, x1, H)
@@ -1461,7 +1683,8 @@ function bfStop() {
   clearInterval(bfFarTimer); clearInterval(bfStatTimer); clearInterval(bfDog)
   clearInterval(bfPoll); bfPoll = null
   bfDisconnect()
-  bfSoldiers = []; bfBlasts = []; bfSparks = []; bfQueue = []
+  bfSoldiers = []; bfBlasts = []; bfSparks = []; bfQueue = []; bfDust = []; bfEmbers = []
+  bfShells = []; bfPlanes = []; bfWrecks = []; bfBombs = []; bfArtyT = 0
 }
 function bfToggle() { bfOpen.value = !bfOpen.value; bfOpen.value ? bfStart() : bfStop() }
 const bfPressure = computed(() => {
@@ -3937,13 +4160,17 @@ body::before {
 .bf-dot.off { background: #6b7280; animation: none; }
 .bf-fold { background: #1b1e26; border: 1px solid #2b2f3a; color: #b9bdc4; border-radius: 7px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
 .bf-cv { display: block; width: 100%; height: 260px; border-radius: 9px; background: linear-gradient(#0d0f14, #101319); }
-.bf-bar { position: relative; height: 20px; background: rgba(226,74,74,0.25); border-radius: 6px; margin-top: 9px; overflow: hidden; }
-.bf-bar-fill { height: 100%; background: rgba(46,194,107,0.42); transition: width .5s ease; }
-.bf-bar-l, .bf-bar-r { position: absolute; top: 0; line-height: 20px; font-size: 11px; font-weight: 600; color: #e8e9ec; }
+.bf-bar { position: relative; height: 22px; background: linear-gradient(90deg, rgba(226,74,74,0.20), rgba(226,74,74,0.42)); border-radius: 6px; margin-top: 9px; overflow: hidden; }
+/* 推進條:漸層 + 前緣發光,讓「誰在推」一眼看得出來,不是一塊死色 */
+.bf-bar-fill { position: relative; height: 100%; background: linear-gradient(90deg, rgba(46,194,107,0.30), rgba(46,194,107,0.62)); box-shadow: 0 0 12px rgba(46,194,107,0.45); transition: width .5s ease; }
+.bf-bar-fill::after { content: ''; position: absolute; top: 0; right: -1px; width: 2px; height: 100%; background: #7defb0; box-shadow: 0 0 8px #2ec26b; animation: bfedge 1.6s ease-in-out infinite; }
+@keyframes bfedge { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+.bf-bar-l, .bf-bar-r { position: absolute; top: 0; line-height: 22px; font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
 .bf-bar-l { left: 8px; } .bf-bar-r { right: 8px; }
-.bf-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 9px; font-size: 12px; color: #e8e9ec; }
-.bf-stats span { display: inline-flex; align-items: baseline; gap: 5px; }
-.bf-k { font-style: normal; font-size: 11px; color: #8b909a; }
+/* 數據列:改成小卡片,數字放大,不再是一排灰字 */
+.bf-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; font-size: 13px; color: #e8e9ec; }
+.bf-stats span { display: inline-flex; align-items: baseline; gap: 6px; background: #1a1d24; border: 1px solid #262a33; border-radius: 7px; padding: 4px 9px; font-weight: 700; }
+.bf-k { font-style: normal; font-size: 11px; color: #8b909a; font-weight: 600; }
 .bf-k.bull { color: #3ddb84; } .bf-k.bear { color: #ff6b6b; }
 @media (max-width: 560px) { .bf-cv { height: 200px; } .bf-stats { font-size: 11px; gap: 5px 10px; } }
 
