@@ -34,6 +34,20 @@ func TestStratDefaultsMirrorCode(t *testing.T) {
 	}
 }
 
+// Every strategy in the admin list needs its own defaults AND its own bookLabel
+// case — a missing label silently falls through to "星軌", which is how bgv2 and
+// bollema ended up mislabelled in the panel.
+func TestEveryStrategyIsFullyRegistered(t *testing.T) {
+	for _, n := range allStrategies {
+		if _, ok := stratDefaults[n]; !ok {
+			t.Errorf("%s: missing from stratDefaults", n)
+		}
+		if lbl := bookLabel(n); lbl == "星軌" && n != "main" {
+			t.Errorf("%s: bookLabel fell through to 星軌 (no case for it)", n)
+		}
+	}
+}
+
 // stratMaxSL falls back to the book's own value until an admin override exists.
 func TestStratMaxSLOverride(t *testing.T) {
 	s := newCfgStore()

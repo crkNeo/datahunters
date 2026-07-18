@@ -1655,6 +1655,12 @@ function fmtNum(n) {
 function fmtPct(n) {
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
 }
+// 止盈位相對進場的幅度。順著單子方向算,所以空單的止盈(價格更低)一樣是正數。
+function lvlPct(t, lvl) {
+  if (!t || !lvl || !t.entry) return ''
+  const p = t.dir === 'short' ? ((t.entry - lvl) / t.entry) * 100 : ((lvl - t.entry) / t.entry) * 100
+  return fmtPct(p)
+}
 function fmtClock(iso) {
   if (!iso) return '-'
   return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
@@ -2610,12 +2616,12 @@ watch(role, () => {
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ('止盈 ' + fmtPrice(t.tp))">
+            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' (' + lvlPct(t, t.tp1) + ') · TP2 ' + fmtPrice(t.tp2) + ' (' + lvlPct(t, t.tp2) + ') · TP3 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')') : ('止盈 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')')">
               <template v-if="t.tp1">
-                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
+                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
               </template>
               <template v-else>
-                <span class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
+                <span class="tsmall">單一 · {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span>
                 <!-- 保本位:純提示,止盈止損不變(布林EMA) -->
                 <span v-if="t.be_hit" class="betag" :title="'價格曾觸及保本位 ' + fmtPrice(t.be_price) + ';止盈止損維持不變'">🛡 已達保本位 {{ fmtPrice(t.be_price) }}</span>
               </template>
@@ -3963,6 +3969,7 @@ body::before {
 .tpf-val b { color: #4ec77e; }
 .tppill { display: inline-block; font-size: 10px; color: #6b7078; border: 1px solid #2a2e37; border-radius: 4px; padding: 1px 5px; margin-right: 3px; }
 .tppill.hit { background: #183a2a; color: #5fd39a; border-color: #1f5238; }
+.tppct { font-style: normal; opacity: .72; }
 .sorttabs { display: flex; gap: 8px; margin-bottom: 8px; }
 .sorttabs button { background: #16181d; border: 1px solid #23262d; color: #b8bcc4; padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .sorttabs button.active { background: #2a2410; border-color: #e0b341; color: #f4d774; }

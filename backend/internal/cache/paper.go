@@ -435,8 +435,10 @@ func bookLabel(name string) string {
 		return "布林重回"
 	case "meanrev":
 		return "乖離回歸"
-	case "bgv2dev", "bgv2boll":
+	case "bgv2dev", "bgv2boll", "bgv2": // 兩腿的 DB book 名 + 家族開關 key
 		return "布乖v2" // 兩腿共用一個對外名稱
+	case "bollema":
+		return "布林EMA"
 	}
 	return "星軌"
 }

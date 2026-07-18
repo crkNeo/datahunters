@@ -15,7 +15,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "rsifade", "bollfade", "meanrev", "bgv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "rsifade", "bollfade", "meanrev", "bgv2", "bollema"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -44,6 +44,10 @@ var stratDefaults = map[string]StratCfg{
 	"bollfade": {Tags: []string{"高頻", "短線"}, MaxSLPct: 10, Breakeven: true, MultiTP: true},
 	"meanrev":  {Tags: []string{"高頻", "短線"}, MaxSLPct: 10, Breakeven: true, MultiTP: true},
 	"bgv2":     {Tags: []string{"保守", "低頻", "長線"}, MaxSLPct: 0, Breakeven: false, MultiTP: false},
+	// 布林EMA:單段止盈(1:3 RR)、無濾網、最長 180 根 4H(≈30天)。Breakeven=false 指的是
+	// 「TP1→移止損」那種保本(它沒有分批所以沒有 TP1);它自己的 beAt=0.3 保本位是純通知,
+	// 不受這個開關影響。
+	"bollema": {Tags: []string{"保守", "低頻", "長線"}, MaxSLPct: 0, Breakeven: false, MultiTP: false},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -261,6 +265,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.meanRevBook.mu.Lock()
 		done = closeIn(s.meanRevBook.trades)
 		s.meanRevBook.mu.Unlock()
+	case "bollema":
+		s.bollEMABook.mu.Lock()
+		done = closeIn(s.bollEMABook.trades)
+		s.bollEMABook.mu.Unlock()
 	case "bgv2": // 家族:兩腿都找,並記下命中的那一腿以便寫回正確的 DB book
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()

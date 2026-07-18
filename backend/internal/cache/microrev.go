@@ -688,6 +688,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.meanRevBook.mu.Lock()
 		s.meanRevBook.trades = keepIf(s.meanRevBook.trades, closedOnly)
 		s.meanRevBook.mu.Unlock()
+	case "bollema":
+		s.bollEMABook.mu.Lock()
+		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
+		s.bollEMABook.mu.Unlock()
 	case "bgv2": // 家族:一個開關清兩腿
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
