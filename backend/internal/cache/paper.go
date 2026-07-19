@@ -301,18 +301,20 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 				}
 			}
 		} else {
+			// 單段/保本模式:停損可能已被保本機制上調過,所以結果一律交給
+			// slOutcome 判定,不能寫死 "sl"(否則獲利出場會被標成 止損 SL)。
 			switch tr.Dir {
 			case "long":
 				if p >= tr.TP {
 					closeTrade(tr, tr.TP, "tp", now)
 				} else if p <= tr.SL {
-					closeTrade(tr, tr.SL, "sl", now)
+					closeTrade(tr, tr.SL, slOutcome(tr), now)
 				}
 			case "short":
 				if p <= tr.TP {
 					closeTrade(tr, tr.TP, "tp", now)
 				} else if p >= tr.SL {
-					closeTrade(tr, tr.SL, "sl", now)
+					closeTrade(tr, tr.SL, slOutcome(tr), now)
 				}
 			}
 		}
@@ -513,6 +515,8 @@ func outcomeCN(o string) string {
 		return "TP2後出場"
 	case "tp1sl":
 		return "TP1後保本"
+	case "besl":
+		return "保本出場"
 	case "sl":
 		return "止損 SL"
 	case "trail":
@@ -640,7 +644,7 @@ func pnl(dir string, entry, cur float64) float64 {
 
 func closeTrade(tr *PaperTrade, exit float64, outcome string, now time.Time) {
 	tr.Status = "closed"
-	tr.Outcome = outcome
+	tr.Outcome = stopOutcome(tr, outcome, exit) // 停損價被保本上調過 → 標成 保本出場
 	tr.Cur = exit
 	// blend any already-realized tranches (分批止盈) with the remaining position closed
 	// at `exit`. For single-TP trades Filled=0/Realized=0, so this is just pnl(entry,exit).

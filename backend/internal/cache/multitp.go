@@ -158,6 +158,20 @@ func slOutcome(tr *PaperTrade) string {
 	}
 }
 
+// stopOutcome 是 slOutcome 的最終防線:停損價有可能被保本/鎖利機制上調到成本價
+// 之上(分批的 TP1→保本、單段模式的 applyBreakeven),這時候出場其實是「保本出場」
+// 而不是虧損的「止損 SL」。用實際損益判定,任何路徑漏掉 slOutcome 都能兜住。
+// exit 是這次成交價;pnl 只看剩餘倉位,已實現的分批獲利不算(那是 tp1sl/tp2sl 的事)。
+func stopOutcome(tr *PaperTrade, exit string, price float64) string {
+	if exit != "sl" {
+		return exit
+	}
+	if pnl(tr.Dir, tr.Entry, price) > 0 {
+		return "besl" // 保本出場
+	}
+	return exit
+}
+
 // tpStats folds one closed trade into multi-TP funnel + profit-factor accumulators.
 func tpStats(tr *PaperTrade, tp1, tp2, tp3 *int, grossWin, grossLoss *float64) {
 	if tr.Legs >= 1 {

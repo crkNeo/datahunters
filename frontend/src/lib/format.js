@@ -49,8 +49,13 @@ export function lvlPct(t, lvl) {
 // 漏斗百分比(小數一位)
 export function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 
-// 出場結果 → 中文
-export function outcomeCN(o) {
+// 停損出場但損益是正的 → 其實是停損被保本機制上調後的「保本出場」,不是止損。
+// 後端新單會直接存成 besl;這裡再擋一次,讓修正前就存成 'sl' 的舊單子也顯示正確。
+function isBE(o, pnl) { return o === 'besl' || (o === 'sl' && Number(pnl) > 0) }
+
+// 出場結果 → 中文。pnl 傳 t.pnl_pct(用來辨識保本出場)。
+export function outcomeCN(o, pnl) {
+  if (isBE(o, pnl)) return '保本出場'
   return o === 'tp' ? '止盈 TP' : o === 'tp3' ? 'TP3 完整'
     : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
       : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
@@ -59,7 +64,8 @@ export function outcomeCN(o) {
 }
 
 // 出場結果 → 樣式類別
-export function outcomeCls(o) {
+export function outcomeCls(o, pnl) {
+  if (isBE(o, pnl)) return 'reversed' // 保本出場用中性色,不能是紅的
   if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
   if (o === 'tp1sl') return 'reversed'
   if (o === 'sl') return 'sl'

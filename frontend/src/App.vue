@@ -2095,7 +2095,7 @@ watch([role, tabPerms, authReady], () => {
             <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
             <td class="r">{{ fmtPrice(t.entry) }}</td>
             <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
+            <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ convOutcome(t.outcome, t.pnl_pct) }}</span></td>
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>

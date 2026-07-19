@@ -272,18 +272,19 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
 			}
 		} else {
+			// 同 paper.go:停損可能已被保本上調,結果交給 slOutcome 判定。
 			switch tr.Dir {
 			case "long":
 				if p >= tr.TP {
 					closeTrade(tr, tr.TP, "tp", now)
 				} else if p <= tr.SL {
-					closeTrade(tr, tr.SL, "sl", now)
+					closeTrade(tr, tr.SL, slOutcome(tr), now)
 				}
 			case "short":
 				if p <= tr.TP {
 					closeTrade(tr, tr.TP, "tp", now)
 				} else if p >= tr.SL {
-					closeTrade(tr, tr.SL, "sl", now)
+					closeTrade(tr, tr.SL, slOutcome(tr), now)
 				}
 			}
 		}
