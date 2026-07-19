@@ -13,14 +13,25 @@ const emit = defineEmits(['changed', 'msg'])
 const ROLE_CN = { public: '公開', member: '會員', vip: 'VIP', admin: '管理員' }
 const ROLES = ['public', 'member', 'vip', 'admin']
 const rows = ref([])
+const busy = ref(false)
 
-async function load() {
+// quiet=true 是掛載時的首次載入(不需要「已重新載入」這種回饋)。
+// 手動按刷新一定要給訊息 —— 重載後資料通常和原本一樣,沒有訊息就像按了沒反應。
+async function load(quiet = false) {
+  if (busy.value) return
+  busy.value = true
   try {
     const res = await authFetch('/api/admin/tab-perms')
-    if (res.ok) rows.value = await res.json()
+    if (res.ok) {
+      rows.value = await res.json()
+      if (!quiet) emit('msg', '✓ 已重新載入(共 ' + rows.value.length + ' 個標籤)')
+    } else if (!quiet) {
+      emit('msg', '✗ 載入失敗:' + ((await res.text()).trim() || ('HTTP ' + res.status)))
+    }
   } catch (e) {
-    /* secondary */
+    if (!quiet) emit('msg', '✗ 載入失敗:連線異常')
   }
+  busy.value = false
 }
 
 async function setRole(row, role) {
@@ -38,13 +49,18 @@ async function setRole(row, role) {
   }
 }
 
-onMounted(load)
+onMounted(() => load(true)) // 首次載入不出訊息
 defineExpose({ load })
 </script>
 
 <template>
   <section class="card adminbox">
-    <h3 class="psub">標籤權限 <button class="minibtn" @click="load">刷新</button></h3>
+    <!-- 一定要寫 load() 而不是 load —— 直接傳函式會把 MouseEvent 當成 quiet 參數,
+         quiet 變成 truthy,按了就不會有任何訊息(看起來就像沒反應)。 -->
+    <h3 class="psub">
+      標籤權限
+      <button class="minibtn" :disabled="busy" @click="load()">{{ busy ? '刷新中…' : '刷新' }}</button>
+    </h3>
     <div class="tabperms">
       <div v-for="row in rows" :key="row.tab" class="tabperm-row">
         <span class="tabperm-name">{{ row.label }}<em v-if="row.locked" class="tabperm-lock">🔒</em></span>

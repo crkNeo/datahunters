@@ -1028,25 +1028,26 @@ function loadAll() {
   loadRobinhood()
   loadMarketAI()
   loadArticles()
-  if (can('member')) {
-    loadBoard()
-    loadRadar()
-    loadScoreLog()
-  }
-  if (can('vip')) {
-    loadPaper()
-    loadSR()
-    loadConv()
-  }
+  // 這裡的條件必須跟導覽列一樣用 canTab(),不能寫死 can('member')/can('vip') ——
+  // 標籤顯示是後台可調的,載入卻寫死身分的話,把某個分頁調成公開之後訪客會「看得到
+  // 標籤、點進去永遠是空的」,也就是設定與實際結果不一致。
+  // 後端每個端點都有 gateTab 把關,所以這裡多打一次不會洩漏資料,最多就是拿到 403。
+  if (canTab('oi')) loadBoard()
+  if (canTab('radar')) loadRadar()
+  if (canTab('scorelog')) loadScoreLog()
+  // 星軌/超新星/銀河 共用 /api/paper(靠 curPaperBook 切換),任一個看得到就要載
+  if (canTab('paper') || canTab('gamble') || canTab('emaonly')) loadPaper()
+  if (canTab('sr')) loadSR()
+  if (canTab('conv')) loadConv()
+  // 這四個的端點路徑是 /api/admin/* (歷史名稱),但權限同樣由 gateTab 決定
+  if (canTab('bollfade')) loadBollfade()
+  if (canTab('meanrev')) loadMeanrev()
+  if (canTab('bgv2')) loadBgv2()
+  if (canTab('bollema')) loadBollema()
+  // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
     loadUsers()
     loadRefAdmin()
-    // load every strategy each cycle so the nav badges show open counts without
-    // having to open each tab first
-    loadBollfade()
-    loadMeanrev()
-    loadBgv2()
-    loadBollema()
   }
 }
 // per-tick: re-verify the session (idle timeout / ban take effect within 15s),
@@ -1180,8 +1181,9 @@ onMounted(async () => {
   document.addEventListener('click', onDocClick)
   loadConfig()
   loadStratMeta() // 各策略類型標籤 + 風控警語
-  loadTabPerms()  // 各分頁所需最低身分(後台可調)
-  await loadMe()
+  // 這兩個都要等 —— loadAll() 現在用 canTab() 決定要載哪些資料,權限還沒到手就
+  // 只能用備援值,剛被後台調過的分頁會空到下一輪 tick(15 秒)才補上。
+  await Promise.all([loadTabPerms(), loadMe()])
   loadAll()
   if (authed.value) loadNotice().then(maybeShowNotice) // 返回用戶(帶 token)登入時的公告彈窗
   timer = setInterval(tick, 15000)

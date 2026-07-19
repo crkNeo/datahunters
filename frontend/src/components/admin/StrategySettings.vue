@@ -11,14 +11,25 @@ import { authFetch } from '../../lib/api'
 
 const emit = defineEmits(['changed', 'msg'])
 const stratStates = ref([])
+const stratBusy = ref(false)
 
-async function loadStratStates() {
+// quiet=true 是掛載時的首次載入。手動刷新要給訊息 —— 重載後畫面通常長一樣,
+// 沒有回饋就會以為按鈕壞了。
+async function loadStratStates(quiet = false) {
+  if (stratBusy.value) return
+  stratBusy.value = true
   try {
     const res = await authFetch('/api/admin/strat-states')
-    if (res.ok) stratStates.value = await res.json()
+    if (res.ok) {
+      stratStates.value = await res.json()
+      if (!quiet) emit('msg', '✓ 已重新載入策略狀態')
+    } else if (!quiet) {
+      emit('msg', '✗ 載入失敗:' + ((await res.text()).trim() || ('HTTP ' + res.status)))
+    }
   } catch (e) {
-    /* secondary */
+    if (!quiet) emit('msg', '✗ 載入失敗:連線異常')
   }
+  stratBusy.value = false
 }
 async function toggleStrat(st) {
   const res = await authFetch('/api/admin/strat-toggle', {
@@ -61,13 +72,13 @@ async function resetStratCfg(st) {
   if (res.ok) { loadStratStates(); emit('changed') }
 }
 
-onMounted(loadStratStates)
+onMounted(() => loadStratStates(true)) // 首次載入不出訊息
 defineExpose({ load: loadStratStates })
 </script>
 
 <template>
 <section class="card adminbox">
-  <h3 class="psub">策略開關 <button class="minibtn" @click="loadStratStates">刷新</button></h3>
+  <h3 class="psub">策略開關 <button class="minibtn" :disabled="stratBusy" @click="loadStratStates()">{{ stratBusy ? '刷新中…' : '刷新' }}</button></h3>
   <div class="strat-toggles">
     <div v-for="st in stratStates" :key="st.name" class="stratcfg">
       <div class="strat-row">
