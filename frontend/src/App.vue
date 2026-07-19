@@ -7,6 +7,7 @@ import LoginNotice from './components/admin/LoginNotice.vue'
 import PushBroadcast from './components/admin/PushBroadcast.vue'
 import SiteSettings from './components/admin/SiteSettings.vue'
 import UserManagement from './components/admin/UserManagement.vue'
+import ReferralRules from './components/admin/ReferralRules.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { token, setToken, authFetch, setUnauthorizedHandler } from './lib/api'
 import { validImage, uploadImage } from './lib/upload'
@@ -341,16 +342,31 @@ async function loadReferral() {
     if (res.ok) refData.value = await res.json()
   } catch (e) { /* secondary */ }
 }
-function openReferral() { refShow.value = true; loadReferral() }
+function openReferral() { refShow.value = true; loadReferral(); loadRefRules() }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); showToast('已複製') }
   catch (e) { showToast('複製失敗,請長按選取', 'err') }
 }
-async function applyReward() {
+// 推廣規則。後端未發佈時回空的,所以 text 是空字串就代表「不要顯示入口」——
+// 前端不用另外判斷 published。
+const refRules = ref({ title: '', text: '', published: false })
+const refRulesShow = ref(false)
+// 空行分段;段落內的單一換行由 CSS 的 white-space: pre-line 保留。
+const refRuleParas = computed(() => (refRules.value.text || '').split(/\n{2,}/).filter(p => p.trim()))
+async function loadRefRules() {
+  try {
+    const res = await authFetch('/api/referral/rules')
+    if (res.ok) refRules.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+
+// kind: 'usdt'(30U) 或 'merch'(BITUNIX 周邊)。兩者共用兌換額度,各消耗一次。
+async function applyReward(kind = 'usdt') {
   if (refBusy.value) return
   refBusy.value = true
   try {
-    const res = await authFetch('/api/referral/apply', { method: 'POST' })
+    const body = new URLSearchParams({ kind })
+    const res = await authFetch('/api/referral/apply', { method: 'POST', body })
     if (res.ok) { showToast('已送出申請,待管理員審核'); await loadReferral() }
     else showToast(await res.text(), 'err')
   } catch (e) { showToast('申請失敗', 'err') }
@@ -362,11 +378,35 @@ const refAdmin = ref(null)
 const refOfShow = ref(false)
 const refOfData = ref(null)
 const refOfUser = ref('')
+// 周邊庫存。total 是後台設定的總量,used/left 由後端從申請數算出來(不另存,
+// 免得庫存和實際申請對不起來)。
+const merchStock = ref({ total: 0, used: 0, left: 0 })
+const merchInput = ref(0)
+const merchBusy = ref(false)
+async function loadMerchStock() {
+  try {
+    const res = await authFetch('/api/admin/merch-stock')
+    if (res.ok) { merchStock.value = await res.json(); merchInput.value = merchStock.value.total }
+  } catch (e) { /* secondary */ }
+}
+async function saveMerchStock() {
+  if (merchBusy.value) return
+  const n = Number(merchInput.value)
+  if (!Number.isInteger(n) || n < 0) { showToast('庫存總量必須是 0 或正整數', 'err'); return }
+  merchBusy.value = true
+  try {
+    const res = await authFetch('/api/admin/merch-stock', { method: 'POST', body: new URLSearchParams({ total: String(n) }) })
+    if (res.ok) { merchStock.value = await res.json(); merchInput.value = merchStock.value.total; showToast('庫存已更新') }
+    else showToast(await res.text(), 'err')
+  } catch (e) { showToast('更新失敗', 'err') }
+  merchBusy.value = false
+}
 async function loadRefAdmin() {
   try {
     const res = await authFetch('/api/admin/referrals')
     if (res.ok) refAdmin.value = await res.json()
   } catch (e) { /* secondary */ }
+  await loadMerchStock()
 }
 // 使用者管理點名字 → 該用戶的推廣名單(全名,不遮罩)
 async function openRefOf(u) {
@@ -498,6 +538,7 @@ const ADMIN_TABS = [
   ['strat', '策略設定'],
   ['site', '站台設定'],
   ['notice', '登入公告'],
+  ['refrules', '推廣規則'],
   ['push', '即時推播'],
 ]
 
@@ -1370,6 +1411,10 @@ watch([role, tabPerms, authReady], () => {
   <div v-if="refShow" class="overlay" @click="refShow = false">
     <div class="refbox" @click.stop>
       <div class="refhead"><h3>🎁 我的推廣</h3><button class="xbtn" @click="refShow = false">✕</button></div>
+      <!-- 規則入口:後端未發佈時 text 是空的,整個按鈕就不出現 -->
+      <button v-if="refRules.text" class="rulesbtn" @click="refRulesShow = true">
+        📜 推廣規則與獎勵制度<span class="rulesgo">查看 ›</span>
+      </button>
       <template v-if="refData">
         <!-- 1. 推薦碼 + 2. 網址 -->
         <div class="refcode">
@@ -1390,10 +1435,24 @@ watch([role, tabPerms, authReady], () => {
           <div class="refstat"><div class="refsk">已申請獎勵</div><div class="refsv">{{ refData.applied }} 次</div></div>
         </div>
         <div class="refapply">
-          <button class="authbtn" :disabled="!refData.can_apply || refBusy" @click="applyReward">
-            {{ refData.can_apply ? ('申請第 ' + refData.next_tier + ' 檔推薦獎勵') : ('尚差 ' + refData.next_need + ' 位合格解鎖第 ' + refData.next_tier + ' 檔') }}
-          </button>
-          <p class="refhint">每 {{ refData.per_tier }} 位合格好友可申請一檔獎勵(累計計算,不扣除)。合格與否由管理員審核。</p>
+          <!-- 兩種獎勵共用兌換額度,各消耗一次。按鈕開關與失敗原因都由後端算好帶下來,
+               前端不重算規則,免得跟伺服器的判斷不一致。 -->
+          <div class="refbtns">
+            <button class="authbtn" :disabled="!refData.can_usdt || refBusy" @click="applyReward('usdt')">
+              申請 {{ refData.usdt_amt }} USDT
+            </button>
+            <button class="authbtn merch" :disabled="!refData.can_merch || refBusy" @click="applyReward('merch')">
+              申請 BITUNIX 周邊
+              <span class="refstock" v-if="refData.merch_total > 0">剩 {{ refData.merch_left }}</span>
+            </button>
+          </div>
+          <p v-if="refData.usdt_why" class="refwhy">30 USDT:{{ refData.usdt_why }}</p>
+          <p v-if="refData.merch_why" class="refwhy">周邊:{{ refData.merch_why }}</p>
+          <p class="refhint">
+            每 {{ refData.per_tier }} 位合格受邀戶累積 1 次兌換額度(累計計算,不扣除)。
+            額度可換 {{ refData.usdt_amt }} USDT,或在累積滿 {{ refData.merch_at }} 積分後換 1 組 BITUNIX 限量周邊(每人限一組,贈完為止)。
+            本月已兌換 {{ refData.month_used }} / {{ refData.month_cap }} 次。合格與否由管理員審核。
+          </p>
         </div>
 
         <!-- 我的申請紀錄 -->
@@ -1401,8 +1460,8 @@ watch([role, tabPerms, authReady], () => {
           <h4 class="refh4">申請紀錄</h4>
           <div class="reftable">
             <div v-for="w in refData.rewards" :key="w.id" class="refrow">
-              <span>第 {{ w.tier }} 檔({{ w.tier * refData.per_tier }} 人)</span>
-              <span class="tsmall">合格 {{ w.qualified }} 位</span>
+              <span>{{ w.kind === 'merch' ? '🎁 BITUNIX 周邊' : ('💵 ' + refData.usdt_amt + ' USDT') }}</span>
+              <span class="tsmall">第 {{ w.tier }} 次 · 合格 {{ w.qualified }} 位</span>
               <span :class="w.status === 'approved' ? 'refok' : 'refpend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 審核中' }}</span>
             </div>
           </div>
@@ -1420,6 +1479,19 @@ watch([role, tabPerms, authReady], () => {
         </div>
       </template>
       <div v-else class="refempty">載入中…</div>
+    </div>
+  </div>
+
+  <!-- 推廣規則 modal(疊在我的推廣之上;關掉它會回到推廣頁,不是整個關掉) -->
+  <div v-if="refRulesShow" class="overlay rulesover" @click="refRulesShow = false">
+    <div class="refbox" @click.stop>
+      <div class="refhead">
+        <h3>📜 {{ refRules.title || '推廣規則與獎勵制度' }}</h3>
+        <button class="xbtn" @click="refRulesShow = false">✕</button>
+      </div>
+      <div class="rulesbody">
+        <p v-for="(para, i) in refRuleParas" :key="i" class="rulespara">{{ para }}</p>
+      </div>
     </div>
   </div>
 
@@ -1775,6 +1847,27 @@ watch([role, tabPerms, authReady], () => {
     <!-- 後台管理 (admin only) -->
     <!-- 推廣管理 (admin) -->
     <section v-else-if="mainTab === 'referral' && can('admin')">
+      <!-- 0. 周邊庫存:放最上面,因為庫存歸零會直接關掉所有人的周邊按鈕 -->
+      <section class="card adminbox">
+        <div class="mk-head"><h3 class="psub">📦 周邊庫存管理</h3></div>
+        <div class="merchbox">
+          <div class="merchstats">
+            <div class="refstat"><div class="refsk">庫存總量</div><div class="refsv">{{ merchStock.total }}</div></div>
+            <div class="refstat"><div class="refsk">已申請</div><div class="refsv">{{ merchStock.used }}</div></div>
+            <div class="refstat"><div class="refsk">剩餘</div><div class="refsv" :class="merchStock.left > 0 ? 'ok' : 'zero'">{{ merchStock.left }}</div></div>
+          </div>
+          <div class="merchset">
+            <label class="refk">設定總量</label>
+            <input class="merchin" type="number" min="0" step="1" v-model.number="merchInput" />
+            <button class="okbtn" :disabled="merchBusy" @click="saveMerchStock">儲存</button>
+          </div>
+        </div>
+        <p class="refhint">
+          剩餘 = 總量 − 已申請(送出申請就佔用庫存,不等審核通過,否則會超發)。
+          剩餘歸零時所有人的「申請周邊」按鈕會自動關閉。總量設成 0 等於停止發放。
+        </p>
+      </section>
+
       <!-- 2. 審核獎勵發放(有待審核就置頂,3. 申請時管理員已收到推播) -->
       <section class="card adminbox">
         <div class="mk-head">
@@ -1785,11 +1878,16 @@ watch([role, tabPerms, authReady], () => {
         <div v-if="!refAdmin || !refAdmin.rewards.length" class="refempty">目前沒有獎勵申請</div>
         <table v-else class="grid reftbl">
           <!-- 狀態與操作合併:待審核時「按鈕就是狀態」,通過後原地換成已通過+時間 -->
-          <thead><tr><th>帳號</th><th>檔次</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th class="r">審核</th></tr></thead>
+          <thead><tr><th>帳號</th><th>獎勵品項</th><th class="r">申請時合格數</th><th class="r">申請時間</th><th class="r">審核</th></tr></thead>
           <tbody>
             <tr v-for="w in refAdmin.rewards" :key="w.id" :class="{ rowpend: w.status !== 'approved' }">
               <td class="coin"><button class="namebtn" @click="openRefOf(w.username)">{{ w.username }}</button></td>
-              <td><span class="tierchip">第 {{ w.tier }} 檔 · {{ w.tier * 10 }} 人</span></td>
+              <td>
+                <span class="tierchip" :class="w.kind === 'merch' ? 'merch' : ''">
+                  {{ w.kind === 'merch' ? '🎁 BITUNIX 周邊' : '💵 30 USDT' }}
+                </span>
+                <small class="tsmall"> 第 {{ w.tier }} 次</small>
+              </td>
               <td class="r refnum">{{ w.qualified }}</td>
               <td class="r tsmall">{{ fmtClock(w.applied) }}</td>
               <td class="r">
@@ -1867,6 +1965,9 @@ watch([role, tabPerms, authReady], () => {
 
       <LoginNotice v-else-if="adminTab === 'notice'" :notice="notice"
         @saved="loadNotice" @msg="(m) => (adminMsg = m)" @toast="(t, k) => showToast(t, k)" />
+      <!-- 存檔後重新載入會員視角那份,後台改完立刻反映到「我的推廣」的入口 -->
+      <ReferralRules v-else-if="adminTab === 'refrules'"
+        @msg="(m) => { adminMsg = m; loadRefRules() }" @toast="(t, k) => showToast(t, k)" />
       <PushBroadcast v-else-if="adminTab === 'push'" :articles="articles"
         @toast="(t, k) => showToast(t, k)" />
 
@@ -2352,6 +2453,13 @@ body::before {
 .refsv.ok { color: #2ec26b; }
 .refapply .authbtn { width: 100%; }
 .refapply .authbtn:disabled { opacity: .45; cursor: not-allowed; }
+/* 兩顆兌換按鈕:窄螢幕自動疊成上下,不會擠成兩個沒人按得到的小方塊 */
+.refbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.refbtns .authbtn { flex: 1 1 160px; width: auto; }
+.authbtn.merch { background: #2a2410; color: #f4d774; border-color: #4a3f18; }
+.authbtn.merch:hover:not(:disabled) { background: #3a3216; }
+.refstock { font-size: 11px; opacity: .8; margin-left: 6px; }
+.refwhy { font-size: 11px; color: #f4d774; margin: 6px 0 0; }
 .refhint { font-size: 11px; color: #8b909a; margin: 6px 0 0; line-height: 1.6; }
 .refh4 { font-size: 13px; color: #c8cdd6; margin: 14px 0 6px; }
 .reftable { display: flex; flex-direction: column; gap: 4px; }
@@ -2359,6 +2467,29 @@ body::before {
 .refname { font-family: ui-monospace, monospace; }
 .refok { color: #2ec26b; font-weight: 600; }
 .refpend { color: #8b909a; }
+/* 推廣規則入口:放在「我的推廣」標題下方,要一眼看到所以用金色高亮 */
+.rulesbtn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; margin: 0 0 14px; padding: 11px 14px; cursor: pointer;
+  background: linear-gradient(90deg, #2a2410, #1e1c14);
+  border: 1px solid #4a3f18; border-radius: 10px;
+  color: #f4d774; font-size: 13px; font-weight: 600;
+}
+.rulesbtn:hover { background: linear-gradient(90deg, #3a3216, #2a2618); border-color: #6a5a20; }
+.rulesgo { font-size: 12px; opacity: .75; font-weight: 400; }
+/* 疊在我的推廣 modal 之上 —— 同樣是 .overlay,不加這行會被蓋住 */
+.rulesover { z-index: 60; }
+.rulesbody { padding: 2px 0 8px; }
+/* pre-line:段落內的單一換行保留(規則常是條列),段落間距靠 <p> */
+.rulespara { margin: 0 0 12px; font-size: 13px; line-height: 1.85; color: #c8ccd4; white-space: pre-line; }
+.rulespara:last-child { margin-bottom: 0; }
+/* 周邊庫存管理 */
+.merchbox { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+.merchstats { display: flex; gap: 10px; flex: 1 1 260px; }
+.merchset { display: flex; gap: 8px; align-items: center; }
+.merchin { width: 90px; padding: 7px 10px; border-radius: 8px; border: 1px solid #2a2f3a; background: #14171d; color: #e8eaee; }
+.refsv.zero { color: #ff5c5c; }
+.tierchip.merch { background: #2a2410; color: #f4d774; }
 /* 推廣管理表:欄寬固定,標題不換行(數字欄本來會被中文標題擠爛) */
 .reftbl th { white-space: nowrap; font-size: 12px; }
 .reftbl td { vertical-align: middle; }

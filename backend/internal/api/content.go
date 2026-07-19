@@ -132,6 +132,39 @@ func (s *Server) handleAdminNotice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// handleRefRules (member): 推廣規則與獎勵制度。未發佈時回空的 —— 草稿不外流。
+func (s *Server) handleRefRules(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.RefRules(false))
+}
+
+// handleAdminRefRules (admin): GET 取原始內容(含草稿),POST {title,text,published} 儲存。
+func (s *Server) handleAdminRefRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, s.store.RefRules(true))
+		return
+	}
+	var in struct {
+		Title, Text string
+		Published   bool
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	in.Text = strings.TrimSpace(in.Text)
+	if len([]rune(in.Title)) > 60 || len([]rune(in.Text)) > 8000 {
+		http.Error(w, "標題上限 60 字、內容上限 8000 字", http.StatusBadRequest)
+		return
+	}
+	if in.Published && in.Text == "" {
+		http.Error(w, "內容是空的,無法發佈", http.StatusBadRequest)
+		return
+	}
+	s.store.SetRefRules(in.Title, in.Text, in.Published)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 // handleAdminConfig (admin): POST {key, value} upserts one setting.
 func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

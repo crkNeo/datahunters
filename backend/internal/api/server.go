@@ -173,6 +173,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/referral-ok", s.gate(A, s.handleAdminReferralOK))      // 切換「合格」
 	mux.HandleFunc("/api/admin/referral-approve", s.gate(A, s.handleAdminRefApprove)) // 審核獎勵:通過
 	mux.HandleFunc("/api/admin/referral-of", s.gate(A, s.handleAdminReferralOf))      // 某用戶的推廣名單(全名)
+	mux.HandleFunc("/api/admin/merch-stock", s.gate(A, s.handleAdminMerchStock))      // 周邊庫存管理
+	mux.HandleFunc("/api/referral/rules", s.gate(M, s.handleRefRules))               // 推廣規則(會員,未發佈回空)
+	mux.HandleFunc("/api/admin/referral-rules", s.gate(A, s.handleAdminRefRules))    // 推廣規則:編輯/發佈
 
 	// web push (PWA notifications)
 	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
@@ -494,11 +497,32 @@ func (s *Server) handleReferralApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "未登入", http.StatusUnauthorized)
 		return
 	}
-	if err := s.store.ApplyReward(user); err != nil {
+	kind := strings.TrimSpace(r.FormValue("kind"))
+	if kind == "" {
+		kind = "usdt" // 舊前端沒帶 kind → 維持原本的 30U 行為
+	}
+	if err := s.store.ApplyReward(user, kind); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAdminMerchStock 設定/查詢周邊庫存總量。GET 回傳現況,POST {total} 設定。
+func (s *Server) handleAdminMerchStock(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		n, err := strconv.Atoi(strings.TrimSpace(r.FormValue("total")))
+		if err != nil || n < 0 {
+			http.Error(w, "庫存總量必須是 0 或正整數", http.StatusBadRequest)
+			return
+		}
+		if !s.store.SetMerchStock(n) {
+			http.Error(w, "設定失敗", http.StatusInternalServerError)
+			return
+		}
+	}
+	total, used, left := s.store.MerchStock()
+	writeJSON(w, map[string]any{"total": total, "used": used, "left": left})
 }
 
 // handleAdminReferrals serves 推廣管理: every member's counts + all applications.

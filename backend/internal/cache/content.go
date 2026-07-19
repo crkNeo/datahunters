@@ -96,6 +96,53 @@ func (s *Store) Notice() NoticeData {
 	}
 }
 
+// ---- 推廣規則與獎勵制度: 一份由管理員維護、會員在「我的推廣」看得到的說明文。
+// 和登入公告一樣存在 site_config,差別是它沒有到期時間,改用明確的「發佈」開關 ——
+// 管理員可以先存草稿改到滿意再發佈,草稿期間會員看到的是空的。 ----
+
+// RefRulesData is the 推廣規則 payload.
+type RefRulesData struct {
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	Published bool   `json:"published"`
+	Ver       int64  `json:"ver"` // 最後更新時間(ms)
+}
+
+// RefRules returns the 推廣規則。draft=true 是後台編輯器要的原始內容(含草稿);
+// draft=false 是會員視角 —— 沒發佈就回空的,草稿內容不會外流。
+func (s *Store) RefRules(draft bool) RefRulesData {
+	if s.db == nil {
+		return RefRulesData{}
+	}
+	all := s.db.allConfig()
+	ver, _ := strconv.ParseInt(all["refrules_ver"], 10, 64)
+	d := RefRulesData{
+		Title:     all["refrules_title"],
+		Text:      all["refrules_text"],
+		Published: all["refrules_pub"] == "1",
+		Ver:       ver,
+	}
+	if !draft && !d.Published {
+		return RefRulesData{} // 未發佈 → 會員拿到空的,前端據此把入口藏起來
+	}
+	return d
+}
+
+// SetRefRules upserts the 推廣規則 (admin)。published=false 等於下架(內容留著)。
+func (s *Store) SetRefRules(title, text string, published bool) {
+	if s.db == nil {
+		return
+	}
+	pub := "0"
+	if published {
+		pub = "1"
+	}
+	s.db.setConfig("refrules_title", title)
+	s.db.setConfig("refrules_text", text)
+	s.db.setConfig("refrules_pub", pub)
+	s.db.setConfig("refrules_ver", strconv.FormatInt(time.Now().UnixMilli(), 10))
+}
+
 // SetNotice upserts the login notice (admin). An empty text disables it. Each save
 // bumps notice_ver so a previously-dismissed client shows the new content.
 func (s *Store) SetNotice(title, text string, expiry int64) {

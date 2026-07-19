@@ -69,12 +69,18 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS referral_rewards (
   id        BIGINT AUTO_INCREMENT PRIMARY KEY,
   username  VARCHAR(191) NOT NULL,
-  tier      INT NOT NULL,           -- 1 = 10 人, 2 = 20 人, …(每 10 個合格一檔)
+  tier      INT NOT NULL,           -- 第幾次兌換(每 10 個合格解鎖一次額度)
   qualified INT NOT NULL,           -- 申請當下的合格人數(留證)
+  kind      VARCHAR(16) NOT NULL DEFAULT 'usdt', -- usdt(30U) | merch(BITUNIX 周邊)
+  -- 「周邊每人限一組」的 DB 級保證:merch 列填 username,usdt 列填 NULL。
+  -- MySQL 的 UNIQUE 允許多個 NULL,所以 usdt 不受限,merch 每人只塞得下一列。
+  merch_key VARCHAR(191) NULL,
   status    VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending | approved
   applied   BIGINT,
   reviewed  BIGINT,
   UNIQUE KEY uk_user_tier (username, tier),
+  UNIQUE KEY uk_merch_once (merch_key),
+  KEY idx_rr_user_applied (username, applied),
   KEY idx_rr_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -179,6 +185,28 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME=?`, col).Scan(&has)
 		if has == 0 {
 			d.Exec(`ALTER TABLE users ` + ddl)
+		}
+	}
+	// 獎勵品項 columns on pre-existing referral_rewards tables. Idempotent.
+	// 舊資料一律視為 usdt(那時候只有一種獎勵),merch_key 留 NULL 不佔用限額。
+	for col, ddl := range map[string]string{
+		"kind":      "ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'usdt'",
+		"merch_key": "ADD COLUMN merch_key VARCHAR(191) NULL",
+	} {
+		var has int
+		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='referral_rewards' AND COLUMN_NAME=?`, col).Scan(&has)
+		if has == 0 {
+			d.Exec(`ALTER TABLE referral_rewards ` + ddl)
+		}
+	}
+	for idx, ddl := range map[string]string{
+		"uk_merch_once":      "ADD UNIQUE KEY uk_merch_once (merch_key)",
+		"idx_rr_user_applied": "ADD KEY idx_rr_user_applied (username, applied)",
+	} {
+		var has int
+		d.QueryRow(`SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='referral_rewards' AND INDEX_NAME=?`, idx).Scan(&has)
+		if has == 0 {
+			d.Exec(`ALTER TABLE referral_rewards ` + ddl)
 		}
 	}
 	// …and their indexes (ADD COLUMN doesn't bring the keys from the CREATE above).
