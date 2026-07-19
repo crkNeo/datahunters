@@ -364,7 +364,9 @@ func (s *Store) ManualExit(book, id string) bool {
 				if exit <= 0 {
 					exit = tr.Entry
 				}
-				closeTrade(tr, exit, "momdead", now) // blends any realized 分批 tranches
+				// outcome "manual" = 手動平倉。舊資料寫的是 "momdead"(當時借用了
+				// 動能衰弱這個代碼),顯示層把它當同義字處理,所以歷史單子也會正確。
+				closeTrade(tr, exit, "manual", now) // blends any realized 分批 tranches
 				return tr
 			}
 		}

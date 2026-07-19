@@ -527,8 +527,10 @@ func outcomeCN(o string) string {
 		return "逾時平倉"
 	case "hedge":
 		return "套保出場"
-	case "momdead":
-		return "動能衰弱"
+	// "momdead" 是舊的手動平倉代碼(當時借用了動能衰弱),沒有別的來源,
+	// 所以直接當 "manual" 的同義字 —— 既有資料不必改寫就會顯示正確。
+	case "manual", "momdead":
+		return "手動平倉"
 	}
 	return o
 }

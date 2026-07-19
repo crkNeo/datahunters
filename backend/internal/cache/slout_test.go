@@ -61,3 +61,18 @@ func TestProfitableStopIsNotLabeledSL(t *testing.T) {
 		}
 	})
 }
+
+// 手動平倉的出場結果必須是「手動平倉」,不能借用逾時/動能衰弱的代碼。
+func TestManualOutcomeLabel(t *testing.T) {
+	if got := outcomeCN("manual"); got != "手動平倉" {
+		t.Errorf("outcomeCN(manual) = %q, want 手動平倉", got)
+	}
+	// 舊資料:momdead 只有手動出場這一個來源,要當同義字
+	if got := outcomeCN("momdead"); got != "手動平倉" {
+		t.Errorf("outcomeCN(momdead) = %q, want 手動平倉", got)
+	}
+	// expired 仍然是真的逾時(收斂/microrev/paper 都會產生),不能被改掉
+	if got := outcomeCN("expired"); got != "逾時平倉" {
+		t.Errorf("outcomeCN(expired) = %q, want 逾時平倉", got)
+	}
+}

@@ -232,7 +232,9 @@ func (s *Store) ManualCloseEMA(id string) bool {
 	if exit <= 0 {
 		exit = target.Entry
 	}
-	closeTrade(target, exit, "expired", now) // outcome "expired" → UI shows 逾時
+	// 之前借用 "expired" 導致通知顯示「逾時平倉」—— 但銀河根本沒有逾時出場,
+	// 而 "expired" 在其他策略是真的逾時,語意撞在一起。改用專屬的 "manual"。
+	closeTrade(target, exit, "manual", now)
 	s.paperMu.Unlock()
 
 	// 手動出場一律通知(force),與其他策略的 ManualExit 一致 —— 不受「平倉通知」開關影響

@@ -60,7 +60,8 @@ export function outcomeCN(o, pnl) {
     : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
       : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
         : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
-          : o === 'momdead' ? '動能衰弱' : o === 'expired' ? '逾時' : o
+          // momdead 是舊的手動平倉代碼(只有這一個來源),當同義字處理,舊資料才顯示得對
+          : (o === 'manual' || o === 'momdead') ? '手動平倉' : o === 'expired' ? '逾時' : o
 }
 
 // 出場結果 → 樣式類別
@@ -69,6 +70,6 @@ export function outcomeCls(o, pnl) {
   if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
   if (o === 'tp1sl') return 'reversed'
   if (o === 'sl') return 'sl'
-  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'momdead') return 'reversed'
+  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'momdead' || o === 'manual') return 'reversed'
   return 'expired'
 }
