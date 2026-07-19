@@ -128,7 +128,6 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	rsiFadeBook  *microBook // 逆勢超買空 30m (admin, microrev.go)
 	bollFadeBook *microBook // 布林重回 1h (admin, microrev.go)
 	meanRevBook  *microBook // 乖離回歸 1h (admin, microrev.go)
 	bgv2Dev      *microBook // 布乖v2 腿1:乖離回歸 1h 只做空 (admin, microrev.go)
@@ -175,6 +174,9 @@ type Store struct {
 	stratOff map[string]bool     // strategy name → disabled (won't open new trades)
 	stratCfg map[string]StratCfg // strategy name → admin config override (empty = code default)
 
+	tabMu    sync.RWMutex      // guards the tab→minimum-role table (admin, tabperm.go)
+	tabPerms map[string]string // tab → 最低角色 override(空 = 用 tabMeta 預設)
+
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
@@ -207,6 +209,7 @@ func NewStore(coins []string) *Store {
 		sectorPrev:        map[string]float64{},
 		stratOff:          map[string]bool{},
 		stratCfg:          map[string]StratCfg{},
+		tabPerms:          map[string]string{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
 		rlFails:           map[string]int{},
@@ -233,7 +236,6 @@ func NewStore(coins []string) *Store {
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
 	// candidate fix so it can be compared against the base 超新星.
 	// admin mean-reversion strategies (microrev.go)
-	s.rsiFadeBook = &microBook{name: "rsifade", tf: "30m", barSec: 1800, klimit: 300, minBars: 210, expiry: 16, cooldown: 4, keep: 500, plan: tpMeanRev, maxSLPct: 10, signal: rsiFadeSignal}
 	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: bollFadeSignal}
 	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
 	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
@@ -260,7 +262,6 @@ func NewStore(coins []string) *Store {
 		s.paperGamble.trades = db.loadTrades("gamble")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.convTrades = db.loadTrades("conv")
-		s.rsiFadeBook.trades = db.loadTrades("rsifade")
 		s.bollFadeBook.trades = db.loadTrades("bollfade")
 		s.meanRevBook.trades = db.loadTrades("meanrev")
 		s.bgv2Dev.trades = db.loadTrades("bgv2dev")
@@ -272,6 +273,7 @@ func NewStore(coins []string) *Store {
 	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
 	s.loadStratOff()    // restore per-strategy on/off switches
 	s.loadStratCfg()    // restore per-strategy admin config (類型/風控/止損上限/保本/分批)
+	s.loadTabPerms()    // restore 各身分組可見標籤 設定
 	if s.db != nil {
 		s.db.backfillRefCodes() // 每個帳號都要有推薦碼(不能等他自己開過我的推廣才生成)
 	}

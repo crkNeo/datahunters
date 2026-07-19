@@ -22,8 +22,6 @@ type tpPlan struct {
 
 // Presets from the design discussion.
 var (
-	// mean-reversion: reversion fades fast → front-load size + place partials nearer.
-	tpMeanRev = &tpPlan{a: 0.30, b: 0.60, w1: 0.50, w2: 0.30, w3: 0.20, beBuf: 0.0005, minSplitPct: 0.008}
 	// mean-reversion, extra front-loaded (bollfade/meanrev): these targets are the
 	// mean itself (EMA20 / 布林中軌) so there's no trend tail to ride — banking more
 	// at TP1 beats holding. jmch_posts.csv sweep: 50/30/20→60/25/15 lifted both books'
@@ -120,6 +118,32 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 	tr.Cur = roundPx(price)
 	tr.PnLPct = round2(tr.Realized + (1-tr.Filled)*pnl(tr.Dir, tr.Entry, price))
 	return false
+}
+
+// applyBreakeven is the STANDALONE 保本 mode: once price has travelled `at` of the
+// way from entry to TP, move the stop to break-even (± buf). Single-TP books only —
+// in split mode TP1 already does this, and the two modes are mutually exclusive.
+//
+// It reuses BEHit/BEPrice, which the notify-only 保本位提示 also uses; that's safe
+// because a strategy is in exactly one mode, never both.
+//
+// ⚠️ 回測提醒:單段部位走到 X% 就移保本,實測是負優化(+35.6% → −37.5%/−26.3%/+0.7%,
+// 對應 1/3、1/2、2/3),因為剪掉了肥尾止盈。這裡照設定執行,好壞由設定的人負責。
+func applyBreakeven(tr *PaperTrade, price, at, buf float64) bool {
+	if at <= 0 || tr.TP == 0 || tr.Entry == 0 || tr.BEHit {
+		return false
+	}
+	lvl := tr.Entry + at*(tr.TP-tr.Entry) // TP−Entry 帶正負號,多空皆適用
+	if !((tr.Dir == "long" && price >= lvl) || (tr.Dir == "short" && price <= lvl)) {
+		return false
+	}
+	tr.BEHit, tr.BEPrice = true, roundPx(lvl)
+	if tr.Dir == "long" {
+		tr.SL = roundPx(tr.Entry * (1 + buf))
+	} else {
+		tr.SL = roundPx(tr.Entry * (1 - buf))
+	}
+	return true
 }
 
 // slOutcome labels a stop-out by how far the trade got before stopping.

@@ -70,9 +70,24 @@ func (s *Server) gate(min string, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// gateTab is gate() for endpoints whose required role is admin-configurable
+// (cache/tabperm.go). Hiding a tab in the UI is cosmetic — the caller can still
+// hit the API — so the same table has to gate the data, resolved per request so
+// an admin change takes effect immediately.
+func (s *Server) gateTab(tab string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !auth.AtLeast(s.roleOf(r), s.store.TabRole(tab)) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h(w, r)
+	}
+}
+
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	P, M, V, A := auth.RolePublic, auth.RoleMember, auth.RoleVIP, auth.RoleAdmin
+	// VIP 不再直接出現在這裡:所有 VIP 路由都改走 gateTab(角色由後台設定決定)
+	P, M, A := auth.RolePublic, auth.RoleMember, auth.RoleAdmin
 
 	// auth
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -85,24 +100,28 @@ func (s *Server) Routes() http.Handler {
 	// /uploads/proofs/ etc., letting anyone enumerate member asset proofs.
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", noDirListing(http.FileServer(http.Dir(uploadDir)))))
 
-	// public (no login)
-	mux.HandleFunc("/api/ranking", s.gate(P, s.handleRanking))
+	// 內容分頁:預設公開,但角色一樣由「標籤權限」決定 —— 管理員把某個公開分頁
+	// 調高成會員/VIP 時,API 必須跟著擋,否則只是在導覽列藏起來而已。
+	mux.HandleFunc("/api/ranking", s.gateTab("ranking", s.handleRanking))
+	mux.HandleFunc("/api/events", s.gateTab("events", s.handleEvents))
+	mux.HandleFunc("/api/liquidations", s.gateTab("flow", s.handleLiquidations))
+	mux.HandleFunc("/api/upbit", s.gateTab("upbit", s.handleUpbit))             // Upbit announcements (zh-TW)
+	mux.HandleFunc("/api/news", s.gateTab("news", s.handleNews))                // GDELT market headlines (zh-TW)
+	mux.HandleFunc("/api/funding", s.gateTab("funding", s.handleFunding))       // OKX funding-rate board
+	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))          // DefiLlama token-unlock board
+	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood)) // Robinhood 上架 board
+	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))       // 板塊強弱/輪動(每整點)
+
+	// 基礎設施 / 首頁共用資料,不屬於任何分頁,固定公開
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
-	mux.HandleFunc("/api/events", s.gate(P, s.handleEvents))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
-	mux.HandleFunc("/api/liquidations", s.gate(P, s.handleLiquidations))
-	mux.HandleFunc("/api/upbit", s.gate(P, s.handleUpbit))          // Upbit announcements (zh-TW)
-	mux.HandleFunc("/api/news", s.gate(P, s.handleNews))            // GDELT market headlines (zh-TW)
-	mux.HandleFunc("/api/funding", s.gate(P, s.handleFunding))      // OKX funding-rate board
-	mux.HandleFunc("/api/unlock", s.gate(P, s.handleUnlock))        // DefiLlama token-unlock board
-	mux.HandleFunc("/api/robinhood", s.gate(P, s.handleRobinhood))  // Robinhood 上架 board
-	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))   // 大盤 AI 分析(每整點)
-	mux.HandleFunc("/api/sectors", s.gate(P, s.handleSectors))      // 板塊強弱/輪動(每整點)
-	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta)) // 各策略類型標籤 + 風控警語旗標
-	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))         // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
-	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))        // logo / social / QR
-	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))        // login 公告彈窗 (members)
-	mux.HandleFunc("/api/articles", s.gate(P, s.handleArticles))    // column list
+	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))            // 首頁整點大盤分析橫幅
+	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta))          // 各策略類型標籤 + 風控警語旗標
+	mux.HandleFunc("/api/tab-perms", s.gate(P, s.handleTabPerms))            // 各分頁所需最低身分(給前端決定顯示哪些)
+	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))                  // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
+	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))                 // logo / social / QR
+	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))                 // login 公告彈窗 (members)
+	mux.HandleFunc("/api/articles", s.gateTab("articles", s.handleArticles)) // column list
 	mux.HandleFunc("/api/articles/", s.gate(P, s.handleArticleOne))
 
 	// admin content management
@@ -120,27 +139,32 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/strat-states", s.gate(A, s.handleStratStates))     // 策略開關狀態
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
 	mux.HandleFunc("/api/admin/strat-config", s.gate(A, s.handleStratConfig))     // 策略設定(類型/風控/止損上限/保本/分批)
-	mux.HandleFunc("/api/conv", s.gate(V, s.handleConv))                          // 冥王星 (動態ATR均線收斂 4H, VIP)
-	mux.HandleFunc("/api/admin/rsifade", s.gate(A, s.handleRSIFade))              // 逆勢超買空 30m (admin-only)
-	mux.HandleFunc("/api/admin/bollfade", s.gate(A, s.handleBollFade))            // 布林重回 1h (admin-only)
-	mux.HandleFunc("/api/admin/meanrev", s.gate(A, s.handleMeanRev))              // 乖離回歸 1h (admin-only)
-	mux.HandleFunc("/api/admin/bgv2", s.gate(A, s.handleBGV2))                    // 布乖v2 兩腿家族 只做空 (admin-only)
-	mux.HandleFunc("/api/admin/bollema", s.gate(A, s.handleBollEMA))              // 布林EMA 4H 突破蓄勢 (admin-only)
-	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))       // 清空某策略模擬單
+	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
+	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
+	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
+	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv)) // 冥王星 (動態ATR均線收斂 4H)
+	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
+	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
+	mux.HandleFunc("/api/admin/bgv2", s.gateTab("bgv2", s.handleBGV2))
+	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
+	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
 
-	// members (logged in)
-	mux.HandleFunc("/api/oi-cache", s.gate(M, s.handleOICache))
-	mux.HandleFunc("/api/signals", s.gate(M, s.handleSignals))
-	mux.HandleFunc("/api/radar", s.gate(M, s.handleRadar))
-	mux.HandleFunc("/api/scorelog", s.gate(M, s.handleScoreLog))
-	mux.HandleFunc("/api/klines", s.gate(M, s.handleKlines))
+	// 以下路由的角色由「標籤權限」設定決定(預設值同原本寫死的角色),
+	// 管理員在後台調整後立即生效 — 前端隱藏分頁只是外觀,這裡才是真正的門。
+	mux.HandleFunc("/api/oi-cache", s.gateTab("oi", s.handleOICache))
+	mux.HandleFunc("/api/signals", s.gateTab("signals", s.handleSignals))
+	mux.HandleFunc("/api/radar", s.gateTab("radar", s.handleRadar))
+	mux.HandleFunc("/api/scorelog", s.gateTab("scorelog", s.handleScoreLog))
+	mux.HandleFunc("/api/klines", s.gateTab("oi", s.handleKlines))
+	// 注意:「幣種一覽」分頁本身是公開的,但個別幣種的詳細資料仍是會員限定 —
+	// 兩者不是同一件事,別把這條接到 coins 分頁的權限上。
 	mux.HandleFunc("/api/coin/", s.gate(M, s.handleCoinDetail))
 
 	// VIP (live entries with TP/SL)
-	mux.HandleFunc("/api/paper", s.gate(V, s.handlePaper))
-	mux.HandleFunc("/api/gamble", s.gate(V, s.handleGamble))
-	mux.HandleFunc("/api/ema-only", s.gate(V, s.handleEMAOnly))
-	mux.HandleFunc("/api/sr", s.gate(V, s.handleSR)) // 支撐壓力監控 (VIP)
+	mux.HandleFunc("/api/paper", s.gateTab("paper", s.handlePaper))
+	mux.HandleFunc("/api/gamble", s.gateTab("gamble", s.handleGamble))
+	mux.HandleFunc("/api/ema-only", s.gateTab("emaonly", s.handleEMAOnly))
+	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR)) // 支撐壓力監控
 
 	// 推薦系統
 	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
@@ -434,10 +458,6 @@ func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
 }
 
-// handleRSIFade serves the admin-only 逆勢超買空 30m strategy tracker.
-func (s *Server) handleRSIFade(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.RSIFadeState())
-}
 
 // handleBollFade serves the admin-only 布林重回 1h strategy tracker.
 func (s *Server) handleBollFade(w http.ResponseWriter, r *http.Request) {
@@ -629,11 +649,20 @@ func (s *Server) handleStratConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name string         `json:"name"`
-		Cfg  cache.StratCfg `json:"cfg"`
+		Name  string         `json:"name"`
+		Cfg   cache.StratCfg `json:"cfg"`
+		Reset bool           `json:"reset"` // true: 丟掉覆寫,回到程式預設
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" {
 		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if in.Reset {
+		if !s.store.ResetStrategyConfig(in.Name) {
+			http.Error(w, "unknown strategy", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 		return
 	}
 	if !s.store.SetStrategyConfig(in.Name, in.Cfg) {
@@ -647,6 +676,34 @@ func (s *Server) handleStratConfig(w http.ResponseWriter, r *http.Request) {
 // that the strategy pages render. Admin-only fields are not exposed here.
 func (s *Server) handleStratMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.StrategyMeta())
+}
+
+// handleTabPerms serves the PUBLIC tab→minimum-role map so the nav can hide what
+// the caller can't reach. Exposing the requirement is harmless; the data itself
+// is still gated server-side by gateTab.
+func (s *Server) handleTabPerms(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.VisibleTabs())
+}
+
+// handleAdminTabPerms lists (GET) or updates (POST) the tab permission table.
+func (s *Server) handleAdminTabPerms(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var in struct {
+			Tab  string `json:"tab"`
+			Role string `json:"role"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Tab == "" {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		if !s.store.SetTabRole(in.Tab, in.Role) {
+			http.Error(w, "unknown tab, bad role, or locked", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+	writeJSON(w, s.store.TabPerms())
 }
 
 // handleScoreLog serves the log of when coins crossed the ±20 signal line.

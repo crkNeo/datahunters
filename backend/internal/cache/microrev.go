@@ -10,15 +10,13 @@ import (
 	"datahunter/internal/exchange"
 )
 
-// microrev.go: three admin-only mean-reversion strategies, evaluated once per
+// microrev.go: admin-only mean-reversion strategies, evaluated once per
 // closed bar over the 銀河 (emaCoins) universe — same shape as convergence.go.
-//
-//	1. 逆勢超買空 (rsifade)  30m 只做空:RSI(3)>90 且收盤 < EMA200(空頭反彈)→ 放空。
-//	                        止損 +2.5 ATR,目標 −2.0 ATR,最多 16 根,冷卻 4 根。
-//	2. 布林重回 (bollfade)  1h 雙向:前一根收盤在布林(20,2σ)外、本根收回通道內(過度延伸
+
+//	1. 布林重回 (bollfade)  1h 雙向:前一根收盤在布林(20,2σ)外、本根收回通道內(過度延伸
 //	                        失敗)且方向與 EMA200 同側 → 朝中軌交易。止損 2.5 ATR,目標=中軌,
 //	                        RR 需 0.4–3.0。
-//	3. 乖離回歸 (meanrev)   1h 雙向:收盤偏離 EMA20 超過 2 ATR、且與 EMA200 同側(上方接多、
+//	2. 乖離回歸 (meanrev)   1h 雙向:收盤偏離 EMA20 超過 2 ATR、且與 EMA200 同側(上方接多、
 //	                        下方接空)→ 朝 EMA20 回歸。止損 3 ATR,目標=EMA20。
 //
 // All display-only (admin). Entry + TP/SL exit are both judged on the CLOSED bar;
@@ -26,7 +24,7 @@ import (
 
 // microBook is one strategy's config + simulated trade state.
 type microBook struct {
-	name     string // db book name + trade-id prefix (rsifade|bollfade|meanrev)
+	name     string // db book name + trade-id prefix (bollfade|meanrev|bgv2dev…)
 	tf       string // "30m" | "1h"
 	barSec   int64  // bar length in seconds (bucketing + expiry)
 	klimit   int
@@ -53,43 +51,6 @@ type microBook struct {
 }
 
 // ---- indicator helpers (aligned full-length series, like emaSeries/atrSeries) ----
-
-// rsiSeries is the Wilder RSI over period p.
-func rsiSeries(cs []exchange.Candle, p int) []float64 {
-	n := len(cs)
-	out := make([]float64, n)
-	if n < p+1 {
-		return out
-	}
-	rsi := func(ag, al float64) float64 {
-		if al == 0 {
-			return 100
-		}
-		return 100 - 100/(1+ag/al)
-	}
-	var gain, loss float64
-	for i := 1; i <= p; i++ {
-		if d := cs[i].Close - cs[i-1].Close; d >= 0 {
-			gain += d
-		} else {
-			loss -= d
-		}
-	}
-	ag, al := gain/float64(p), loss/float64(p)
-	out[p] = rsi(ag, al)
-	for i := p + 1; i < n; i++ {
-		g, l := 0.0, 0.0
-		if d := cs[i].Close - cs[i-1].Close; d >= 0 {
-			g = d
-		} else {
-			l = -d
-		}
-		ag = (ag*float64(p-1) + g) / float64(p)
-		al = (al*float64(p-1) + l) / float64(p)
-		out[i] = rsi(ag, al)
-	}
-	return out
-}
 
 // smaSeries is the p-bar simple moving average of closes.
 func smaSeries(cs []exchange.Candle, p int) []float64 {
@@ -135,23 +96,6 @@ func stdevSeries(cs []exchange.Candle, p int) []float64 {
 }
 
 // ---- strategy signals ----
-
-// rsiFadeSignal: 30m short — RSI(3)>90 and close below EMA200 (a bounce inside a
-// downtrend). SL +2.5 ATR, TP −2.0 ATR.
-func rsiFadeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	n := len(cs)
-	rsi := rsiSeries(cs, 3)[n-1]
-	ema200 := emaSeries(cs, 200)[n-1]
-	atr := atrSeries(cs, 14)[n-1]
-	if atr <= 0 || ema200 <= 0 {
-		return
-	}
-	price := cs[n-1].Close
-	if rsi > 90 && price < ema200 {
-		return "short", roundPx(price), roundPx(price + 2.5*atr), roundPx(price - 2.0*atr), true
-	}
-	return
-}
 
 // bollFadeSignal: 1h both — prior bar closed OUTSIDE the Bollinger band and this
 // bar closed back INSIDE (failed over-extension), aligned with the EMA200 side.
@@ -552,7 +496,10 @@ func (s *Store) microMarkTick(b *microBook) {
 		return
 	}
 	now := time.Now()
-	plan, beOn := s.tpFor(b.strat(), b.plan) // admin 分批止盈/保本 設定,讀在鎖外
+	// admin 出場設定,讀在鎖外:分批計畫 / 獨立保本 / 保本位提示,三者由 ExitMode 決定
+	plan, beOn := s.tpFor(b.strat(), b.plan)
+	beAt, beBuf := s.beFor(b.strat())
+	cueAt := s.beCueFor(b.strat(), b.beAt)
 	var dirty, beCues []*PaperTrade
 	b.mu.Lock()
 	for _, tr := range b.trades {
@@ -566,12 +513,16 @@ func (s *Store) microMarkTick(b *microBook) {
 		// 保本位 cue — 通知用,不動止損。刻意放在 stepTP 之前:若同一 tick 直接衝到
 		// 出場,仍要先記下曾經到過保本位,否則這筆單的紀錄會看不出它有走到過。
 		beFired := false
-		if b.beAt > 0 && !tr.BEHit && tr.TP != 0 {
-			lvl := tr.Entry + b.beAt*(tr.TP-tr.Entry) // 多空皆適用:TP−Entry 帶正負號
+		if cueAt > 0 && !tr.BEHit && tr.TP != 0 {
+			lvl := tr.Entry + cueAt*(tr.TP-tr.Entry) // 多空皆適用:TP−Entry 帶正負號
 			if (tr.Dir == "long" && p >= lvl) || (tr.Dir == "short" && p <= lvl) {
 				tr.BEHit, tr.BEPrice = true, roundPx(lvl)
 				beFired = true
 			}
+		}
+		// 獨立保本模式:真的把止損移到保本(與上面的純提示互斥,由 ExitMode 決定)
+		if applyBreakeven(tr, p, beAt, beBuf) {
+			beFired = true
 		}
 		before := tr.Legs
 		closed := stepTP(tr, p, plan, beOn, now) // books partial TPs, ratchets stop, closes at TP3/SL
@@ -644,14 +595,12 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) RSIFadeTick()  { s.microTick(s.rsiFadeBook) }
 func (s *Store) BollFadeTick() { s.microTick(s.bollFadeBook) }
 func (s *Store) MeanRevTick()  { s.microTick(s.meanRevBook) }
 func (s *Store) BGV2DevTick()  { s.microTick(s.bgv2Dev) }
 func (s *Store) BGV2BollTick() { s.microTick(s.bgv2Boll) }
 func (s *Store) BollEMATick()  { s.microTick(s.bollEMABook) }
 
-func (s *Store) RSIFadeMarkTick()  { s.microMarkTick(s.rsiFadeBook) }
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
 func (s *Store) BGV2MarkTick()     { s.microMarkTick(s.bgv2Dev); s.microMarkTick(s.bgv2Boll) }
@@ -676,10 +625,6 @@ func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
 // unknown book.
 func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 	switch book {
-	case "rsifade":
-		s.rsiFadeBook.mu.Lock()
-		s.rsiFadeBook.trades = keepIf(s.rsiFadeBook.trades, closedOnly)
-		s.rsiFadeBook.mu.Unlock()
 	case "bollfade":
 		s.bollFadeBook.mu.Lock()
 		s.bollFadeBook.trades = keepIf(s.bollFadeBook.trades, closedOnly)
@@ -754,9 +699,6 @@ func (s *Store) retrofitMultiTP() {
 			}
 		}
 	}
-	s.rsiFadeBook.mu.Lock()
-	fill("rsifade", s.rsiFadeBook.plan, s.rsiFadeBook.trades)
-	s.rsiFadeBook.mu.Unlock()
 	s.bollFadeBook.mu.Lock()
 	fill("bollfade", s.bollFadeBook.plan, s.bollFadeBook.trades)
 	s.bollFadeBook.mu.Unlock()
@@ -778,7 +720,6 @@ func (s *Store) retrofitMultiTP() {
 	}
 }
 
-func (s *Store) RSIFadeState() PaperState  { return s.microState(s.rsiFadeBook) }
 func (s *Store) BollFadeState() PaperState { return s.microState(s.bollFadeBook) }
 func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) }
 

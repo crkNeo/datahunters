@@ -1,7 +1,9 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import { router } from './router'
 
 const app = createApp(App)
+app.use(router)
 
 // White-screen safety net: a render/setup exception can leave Vue's DOM blank
 // with no way to recover on its own. Log it (so the cause is visible in the

@@ -429,8 +429,6 @@ func bookLabel(name string) string {
 		return "移動止損"
 	case "conv":
 		return "冥王星"
-	case "rsifade":
-		return "逆勢超買空"
 	case "bollfade":
 		return "布林重回"
 	case "meanrev":
@@ -447,7 +445,7 @@ func bookLabel(name string) string {
 // (TP1/TP2/TP3). Public books push to everyone; admin books to admins only. The
 // message is built synchronously (reads tr) and sent async so it never blocks the tick.
 func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int) {
-	if s.pushMgr == nil {
+	if s.pushMgr == nil || !s.notifyOn(name, "tp") { // 後台的「分段止盈通知」開關
 		return
 	}
 	lvl, stop := tr.TP, ""
@@ -476,7 +474,7 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 // ⚠️ Cue only — the stop is NOT moved (unlike the 分批止盈 ratchet). The trade keeps
 // its original TP/SL; this just tells the admin the position has covered its risk.
 func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
-	if s.pushMgr == nil || s.db == nil {
+	if s.pushMgr == nil || s.db == nil || !s.notifyOn(name, "be") { // 後台的「保本位通知」開關
 		return
 	}
 	title := fmt.Sprintf("🛡 %s 已達保本位", bookLabel(name))
@@ -492,7 +490,7 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "rsifade", "bollfade", "meanrev":
+	case "gamble", "emaonly", "conv", "bollfade", "meanrev":
 		return name
 	}
 	return "paper" // main
@@ -543,7 +541,7 @@ func abs2(f float64) float64 {
 // book has no radar fields (score/OI/CVD), so it gets its own signal-style
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
-	if b.adminOnly {
+	if b.adminOnly || !s.notifyOn(b.name, "open") { // 後台的「開倉通知」開關
 		return // admin A/B book: silent on open (mirrors 超新星's signals; only its 套保 alerts fire)
 	}
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
@@ -570,7 +568,7 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 }
 
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
-	if b.adminOnly {
+	if b.adminOnly || !s.notifyOn(b.name, "close") { // 後台的「平倉通知」開關
 		return // admin A/B book: silent on close (visible on its admin page)
 	}
 	// Web Push (independent of Telegram): fires for EVERY close outcome

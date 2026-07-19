@@ -1,5 +1,26 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import BattleField from './components/BattleField.vue'
+import TabPermissions from './components/admin/TabPermissions.vue'
+import StrategySettings from './components/admin/StrategySettings.vue'
+import LoginNotice from './components/admin/LoginNotice.vue'
+import PushBroadcast from './components/admin/PushBroadcast.vue'
+import SiteSettings from './components/admin/SiteSettings.vue'
+import UserManagement from './components/admin/UserManagement.vue'
+import { useRoute, useRouter } from 'vue-router'
+import { token, setToken, authFetch, setUnauthorizedHandler } from './lib/api'
+import { validImage, uploadImage } from './lib/upload'
+import { fmtPct, fmtPrice, fmtNum, fundClock, fmtClock, lvlPct, pctOf, outcomeCls, outcomeCN as convOutcome } from './lib/format'
+import SectorBoard from './components/SectorBoard.vue'
+import StrategyBook from './components/StrategyBook.vue'
+import FundingBoard from './components/FundingBoard.vue'
+import UnlockBoard from './components/UnlockBoard.vue'
+import LiquidationBoard from './components/LiquidationBoard.vue'
+import EventsBoard from './components/EventsBoard.vue'
+import UpbitBoard from './components/UpbitBoard.vue'
+import NewsBoard from './components/NewsBoard.vue'
+import RobinhoodBoard from './components/RobinhoodBoard.vue'
+import { ROUTE_TABS } from './router'
 
 // ---- shared data ----
 const home = ref(null)
@@ -12,7 +33,7 @@ const mainTab = ref('ranking')
 const marketSort = ref('vol') // vol | gainers | losers
 
 // ---- auth (public web build) ----
-const token = ref(localStorage.getItem('token') || '')
+// token 與 authFetch 已移到 src/lib/api.js(axios 實作),這裡只保留 UI 狀態。
 const role = ref('public')
 const username = ref('')
 const loginOpen = ref(false)
@@ -32,8 +53,7 @@ function can(min) {
   return (roleRank[role.value] || 0) >= (roleRank[min] || 0)
 }
 function clearAuth(msg) {
-  token.value = ''
-  localStorage.removeItem('token')
+  setToken('')
   role.value = 'public'
   status.value = ''
   username.value = ''
@@ -57,11 +77,6 @@ function validPw(v) {
   return v.length >= 4 && v.length <= 16 &&
     /[a-z]/.test(v) && /[A-Z]/.test(v) && /[0-9]/.test(v) &&
     /[^A-Za-z0-9]/.test(v) && /^[\x21-\x7e]+$/.test(v)
-}
-function authFetch(url, opts = {}) {
-  const headers = { ...(opts.headers || {}) }
-  if (token.value) headers.Authorization = 'Bearer ' + token.value
-  return fetch(url, { ...opts, headers })
 }
 async function loadMe() {
   if (!token.value) {
@@ -100,6 +115,13 @@ async function loadMe() {
   }
   authReady.value = true
 }
+// 關閉登入/註冊彈窗並清掉殘留訊息,免得下次打開還看到上次的錯誤
+function closeAuthModal() {
+  loginOpen.value = false
+  loginErr.value = ''
+  regErr.value = ''
+  regDone.value = ''
+}
 async function doLogin() {
   loginErr.value = ''
   if (!loginForm.value.u || !loginForm.value.p) {
@@ -119,8 +141,7 @@ async function doLogin() {
       return
     }
     const d = await res.json()
-    token.value = d.token
-    localStorage.setItem('token', d.token)
+    setToken(d.token)
     role.value = d.role
     status.value = 'active'
     username.value = d.username
@@ -139,7 +160,7 @@ async function doLogin() {
 const welcomeOpen = ref(false)
 function onRegFile(e) {
   const f = (e.target.files && e.target.files[0]) || null
-  if (f && !validImage(f)) { e.target.value = ''; regFile.value = null; return }
+  if (f && !validImage(f, (m) => showToast(m, 'err'))) { e.target.value = ''; regFile.value = null; return }
   regFile.value = f
 }
 async function doRegister() {
@@ -208,7 +229,6 @@ async function loadRanking() {
 // ---- admin: user management ----
 const users = ref([])
 const adminMsg = ref('')
-const newUser = ref({ u: '', p: '', role: 'member', status: 'active' })
 async function loadUsers() {
   if (!can('admin')) return
   try {
@@ -218,91 +238,7 @@ async function loadUsers() {
     /* ignore */
   }
 }
-async function createUser() {
-  adminMsg.value = ''
-  if (!newUser.value.u || !newUser.value.p) {
-    adminMsg.value = '帳號與密碼必填'
-    return
-  }
-  const res = await authFetch('/api/admin/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: newUser.value.u,
-      password: newUser.value.p,
-      role: newUser.value.role,
-      status: newUser.value.status,
-    }),
-  })
-  if (res.ok) {
-    adminMsg.value = '✓ 已新增 ' + newUser.value.u
-    newUser.value = { u: '', p: '', role: 'member', status: 'active' }
-    loadUsers()
-  } else {
-    adminMsg.value = '✗ ' + (await res.text())
-  }
-}
-async function updateUser(u) {
-  const res = await authFetch('/api/admin/users', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: u.username, role: u.role, status: u.status }),
-  })
-  adminMsg.value = res.ok ? '✓ 已更新 ' + u.username : '✗ 更新失敗'
-  loadUsers()
-}
 const proofView = ref('')
-const pendingUsers = computed(() => users.value.filter((u) => u.status === 'pending'))
-// ---- admin user-management filters ----
-const userRoleFilter = ref('all') // all | member | vip | admin
-const userFrom = ref('')          // YYYY-MM-DD (registration >= this day, inclusive)
-const userTo = ref('')            // YYYY-MM-DD (registration <= this day, inclusive)
-const userSort = ref('new')       // new | old (by registration time)
-function ymd(d) {
-  const p = (x) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-// quick shortcut: fill the date range to the last n days (0 = clear both)
-function setUserDays(n) {
-  if (!n) { userFrom.value = ''; userTo.value = ''; return }
-  userFrom.value = ymd(new Date(Date.now() - n * 86400000))
-  userTo.value = ymd(new Date())
-}
-const filteredUsers = computed(() => {
-  let list = users.value.slice()
-  if (userRoleFilter.value !== 'all') list = list.filter((u) => u.role === userRoleFilter.value)
-  if (userFrom.value) {
-    const from = new Date(userFrom.value + 'T00:00:00').getTime()
-    list = list.filter((u) => (u.created || 0) >= from)
-  }
-  if (userTo.value) {
-    const to = new Date(userTo.value + 'T23:59:59').getTime()
-    list = list.filter((u) => (u.created || 0) <= to)
-  }
-  list.sort((a, b) => (userSort.value === 'new' ? (b.created || 0) - (a.created || 0) : (a.created || 0) - (b.created || 0)))
-  return list
-})
-function fmtReg(ms) {
-  if (!ms) return '—'
-  const d = new Date(ms)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-async function approveUser(u) { u.status = 'active'; await updateUser(u) }
-async function rejectUser(u) { u.status = 'banned'; await updateUser(u) }
-async function toggleEnabled(u) { u.status = u.status === 'active' ? 'banned' : 'active'; await updateUser(u) }
-async function toggleVip(u) {
-  if (u.role === 'admin') return
-  u.role = u.role === 'vip' ? 'member' : 'vip'
-  await updateUser(u)
-}
-async function deleteUser(u) {
-  if (u.username === username.value) return
-  if (!confirm('確定刪除帳號「' + u.username + '」?此動作無法復原。')) return
-  const res = await authFetch('/api/admin/users?username=' + encodeURIComponent(u.username), { method: 'DELETE' })
-  adminMsg.value = res.ok ? '✓ 已刪除 ' + u.username : '✗ 刪除失敗'
-  loadUsers()
-}
 
 // ---- articles (Feature 3) ----
 const articles = ref([])
@@ -316,32 +252,6 @@ async function loadArticles() {
     /* secondary */
   }
 }
-// validImage: 3MB cap + common formats + iPhone photos (heic/heif). Shows a
-// toast and returns false when rejected (server enforces the same rules).
-const IMG_MAX = 3 * 1024 * 1024
-const IMG_EXT = /\.(png|jpe?g|webp|gif|heic|heif)$/i
-function validImage(f) {
-  if (!f) return false
-  if (!IMG_EXT.test(f.name)) {
-    showToast('僅接受圖片檔(png / jpg / webp / gif / heic)', 'err')
-    return false
-  }
-  if (f.size > IMG_MAX) {
-    showToast('圖片過大,上限 3MB', 'err')
-    return false
-  }
-  return true
-}
-async function uploadImage(file, sub) {
-  if (!validImage(file)) return ''
-  const fd = new FormData()
-  fd.append('file', file)
-  fd.append('sub', sub)
-  const res = await authFetch('/api/admin/upload', { method: 'POST', body: fd })
-  if (!res.ok) { showToast((await res.text()).trim() || '上傳失敗', 'err'); return '' }
-  return (await res.json()).path
-}
-function newArticle() { artEdit.value = { id: 0, title: '', cover: '', tags: [], blocks: [{ type: 'text', text: '' }] } }
 function editArticle(a) { artEdit.value = JSON.parse(JSON.stringify(a)); articleView.value = null }
 function addBlock(type) { artEdit.value.blocks.push(type === 'image' ? { type: 'image', image: '' } : { type: 'text', text: '' }) }
 function removeBlock(i) { artEdit.value.blocks.splice(i, 1) }
@@ -352,11 +262,11 @@ function moveBlock(i, d) {
 }
 async function onCoverPick(e) {
   const f = e.target.files && e.target.files[0]
-  if (f) artEdit.value.cover = await uploadImage(f, 'articles')
+  if (f) artEdit.value.cover = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
 }
 async function onBlockImg(e, i) {
   const f = e.target.files && e.target.files[0]
-  if (f) artEdit.value.blocks[i].image = await uploadImage(f, 'articles')
+  if (f) artEdit.value.blocks[i].image = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
 }
 function setArtTags(v) { artEdit.value.tags = v.split(',').map((t) => t.trim()).filter(Boolean) }
 async function saveArticle() {
@@ -412,27 +322,6 @@ async function loadConfig() {
   } catch (e) {
     /* secondary */
   }
-}
-const cfgSocial = ref([])
-function loadCfgEditor() { cfgSocial.value = socialLinks.value.map((s) => ({ ...s })) }
-function addSocial() { cfgSocial.value.push({ platform: 'youtube', url: '' }) }
-function removeSocial(i) { cfgSocial.value.splice(i, 1) }
-async function setConfig(key, value) {
-  const res = await authFetch('/api/admin/config', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  })
-  if (res.ok) { await loadConfig(); adminMsg.value = '✓ 已儲存設定' }
-  return res.ok
-}
-async function saveSocial() { await setConfig('social', JSON.stringify(cfgSocial.value.filter((s) => s.url))) }
-async function onLogoPick(e) {
-  const f = e.target.files && e.target.files[0]
-  if (f) { const p = await uploadImage(f, 'logo'); if (p) await setConfig('logo', p) }
-}
-async function onQrPick(e) {
-  const f = e.target.files && e.target.files[0]
-  if (f) { const p = await uploadImage(f, 'qr'); if (p) await setConfig('qr', p) }
 }
 
 // ---- login notice popup (公告彈窗) ----
@@ -510,7 +399,6 @@ async function approveReward(id) {
 
 const noticeShow = ref(false)
 const noticeDont = ref(false)
-const noticeForm = ref({ title: '', text: '', until: '' }) // admin editor
 async function loadNotice() {
   try {
     const res = await authFetch('/api/notice')
@@ -530,51 +418,6 @@ function closeNotice() {
   if (noticeDont.value && notice.value) localStorage.setItem('notice_seen', String(notice.value.ver))
   noticeShow.value = false
 }
-// admin editor helpers
-function localInput(ms) {
-  if (!ms) return ''
-  return new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-}
-function loadNoticeEditor() {
-  const n = notice.value || {}
-  noticeForm.value = { title: n.title || '', text: n.text || '', until: localInput(n.expiry) }
-}
-async function saveNotice() {
-  const f = noticeForm.value
-  if (!f.text.trim()) { showToast('內容必填', 'err'); return }
-  const expiry = f.until ? new Date(f.until).getTime() : 0
-  const res = await authFetch('/api/admin/notice', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: f.title, text: f.text, expiry }),
-  })
-  if (res.ok) { await loadNotice(); adminMsg.value = '✓ 已更新登入公告' } else { showToast((await res.text()).trim() || '儲存失敗', 'err') }
-}
-async function clearNotice() {
-  if (!confirm('確定停用登入公告?')) return
-  const res = await authFetch('/api/admin/notice', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: '', text: '', expiry: 0 }),
-  })
-  if (res.ok) { noticeForm.value = { title: '', text: '', until: '' }; await loadNotice(); adminMsg.value = '✓ 已停用登入公告' }
-}
-
-// ---- admin: instant push broadcast to a user group (optional article deep-link) ----
-const bcTitle = ref('')
-const bcBody = ref('')
-const bcGroup = ref('admin')
-const bcArticle = ref('') // '' = no jump; otherwise an article id → push opens that article
-async function sendBroadcast() {
-  if (!bcTitle.value.trim() || !bcBody.value.trim()) { showToast('標題與內容必填', 'err'); return }
-  const res = await authFetch('/api/admin/push-broadcast', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: bcTitle.value.trim(), body: bcBody.value.trim(), group: bcGroup.value, article: bcArticle.value }),
-  })
-  if (!res.ok) { showToast((await res.text()).trim() || '推播失敗', 'err'); return }
-  const d = await res.json()
-  showToast('已推播給 ' + d.sent + ' 個裝置', 'ok')
-  bcTitle.value = ''; bcBody.value = ''
-}
-
 // open a specific article by id (used by push deep-links → 文章專欄)
 async function openArticleById(id) {
   try {
@@ -637,21 +480,6 @@ async function loadConv() {
     /* secondary */
   }
 }
-function convOutcome(o) {
-  return o === 'tp' ? '止盈 TP' : o === 'tp3' ? 'TP3 完整'
-    : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
-    : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
-    : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
-    : o === 'momdead' ? '動能衰弱' : o === 'expired' ? '逾時' : o
-}
-// otag colour class for an outcome (reuses existing tp/sl/reversed/expired styles)
-function outcomeCls(o) {
-  if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
-  if (o === 'tp1sl') return 'reversed'
-  if (o === 'sl') return 'sl'
-  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'momdead') return 'reversed'
-  return 'expired'
-}
 // admin: force-close one open trade in any strategy (recorded as 動能衰弱)
 async function manualExitStrat(book, id, reload) {
   if (!confirm('確定手動出場此單?將以現價結算並標記「動能衰弱」。')) return
@@ -662,41 +490,17 @@ async function manualExitStrat(book, id, reload) {
   showToast('已手動出場(動能衰弱)', 'ok')
   if (reload) reload()
 }
-// admin: strategy on/off switches
-const stratStates = ref([])
-async function loadStratStates() {
-  try {
-    const res = await authFetch('/api/admin/strat-states')
-    if (res.ok) stratStates.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-async function toggleStrat(st) {
-  const res = await authFetch('/api/admin/strat-toggle', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: st.name, on: !st.enabled }),
-  })
-  if (res.ok) { st.enabled = !st.enabled; adminMsg.value = '✓ ' + st.label + (st.enabled ? ' 已開啟' : ' 已關閉(不再開新單)') }
-}
-// admin: per-strategy config (類型 / 風控警語 / 最大止損% / 保本 / 分批止盈)
-const STRAT_TAGS = ['激進', '保守', '高頻', '低頻', '長線', '短線']
-function toggleStratTag(st, tag) {
-  const tags = Array.isArray(st.tags) ? st.tags.slice() : []
-  const i = tags.indexOf(tag)
-  if (i >= 0) tags.splice(i, 1); else tags.push(tag)
-  st.tags = tags
-}
-async function saveStratCfg(st) {
-  const cfg = {
-    tags: st.tags || [], show_risk: !!st.show_risk,
-    max_sl_pct: Number(st.max_sl_pct) || 0, breakeven: !!st.breakeven, multi_tp: !!st.multi_tp,
-  }
-  const res = await authFetch('/api/admin/strat-config', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: st.name, cfg }),
-  })
-  adminMsg.value = res.ok ? '✓ ' + st.label + ' 設定已儲存(下一筆開單起生效)' : '✗ 儲存失敗'
-  if (res.ok) loadStratMeta()
-}
+// 後台的功能分頁。標籤權限與策略設定已抽成獨立元件,各自載自己的資料。
+const adminTab = ref('users')
+const ADMIN_TABS = [
+  ['users', '使用者'],
+  ['perms', '標籤權限'],
+  ['strat', '策略設定'],
+  ['site', '站台設定'],
+  ['notice', '登入公告'],
+  ['push', '即時推播'],
+]
+
 // public: 策略類型標籤 + 風控警語旗標(給各策略頁用)
 const stratMeta = ref({})
 async function loadStratMeta() {
@@ -709,26 +513,16 @@ async function loadStratMeta() {
 }
 function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
 function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
-// 分頁 → 策略 key。微策略分頁名本身就是 key(rsifade/bollfade/meanrev/bgv2…),
+// 分頁 → 策略 key。微策略分頁名本身就是 key(bollfade/meanrev/bgv2…),
 // 只有雷達三本的分頁名與 book 名不同。
 const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
 const curStrat = computed(() => STRAT_KEY_BY_TAB[mainTab.value] || mainTab.value)
-function pctOf(n, d) { return d > 0 ? Math.round((n / d) * 1000) / 10 : 0 }
 
-// ---- admin: mean-reversion strategies (逆勢超買空 / 布林重回 / 乖離回歸) ----
-const rsifade = ref(null)
+// ---- admin: mean-reversion strategies (布林重回 / 乖離回歸 / 布乖v2 / 布林EMA) ----
 const bollfade = ref(null)
 const meanrev = ref(null)
 const bgv2 = ref(null)
 const bollema = ref(null)
-async function loadRsifade() {
-  try {
-    const res = await authFetch('/api/admin/rsifade')
-    if (res.ok) rsifade.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 async function loadBollfade() {
   try {
     const res = await authFetch('/api/admin/bollfade')
@@ -775,10 +569,6 @@ async function clearStrat(book, loader, closedOnly) {
 const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }[mainTab.value]))
 // the three mean-reversion tabs share one layout; meta drives the unified section.
 const microMeta = {
-  rsifade: {
-    title: '逆勢超買空 · 30m', load: loadRsifade, get: () => rsifade.value,
-    help: '<b>進場</b>:RSI(3) &gt; 90 且收盤價 &lt; EMA200(空頭中的反彈)→ 收盤<b>放空</b>。<br><b>止損</b> +2.5×ATR,<b>最終止盈 TP3</b> −2.0×ATR。<br>最多 16 根(30m)、冷卻 4 根。只做空;進場以 30m 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
-  },
   bollfade: {
     title: '布林重回 · 1h', load: loadBollfade, get: () => bollfade.value,
     help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
@@ -936,18 +726,6 @@ function evSoon(e) {
   return h < 6 // highlight events firing within ~6h (minutes-only ⇒ h=0)
 }
 
-const liquidations = ref(null)
-async function loadFlow() {
-  try {
-    const lq = await authFetch('/api/liquidations')
-    if (lq.ok) liquidations.value = await lq.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-function liqClock(ms) {
-  return new Date(ms).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })
-}
 
 const upbitNotices = ref([])
 async function loadUpbit() {
@@ -957,12 +735,6 @@ async function loadUpbit() {
   } catch (e) {
     /* secondary */
   }
-}
-function upbitTime(s) {
-  if (!s) return ''
-  const d = new Date(s)
-  if (isNaN(d)) return s
-  return d.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 const news = ref([])
@@ -975,43 +747,6 @@ async function loadNews() {
   }
 }
 
-const funding = ref(null)
-async function loadFunding() {
-  try {
-    const res = await authFetch('/api/funding')
-    if (res.ok) funding.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-function fundClock(ms) {
-  if (!ms) return '—'
-  return new Date(ms).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-}
-const fundingSector = ref('')
-const fundingAbs = ref(false) // true: sort by |rate| (find both-side extremes)
-const fundingSectors = computed(() => {
-  if (!funding.value) return []
-  const counts = {}
-  for (const r of funding.value.rows) counts[r.sector] = (counts[r.sector] || 0) + 1
-  return Object.keys(counts).sort((a, b) => counts[b] - counts[a]) // most coins first
-})
-const fundingRows = computed(() => {
-  if (!funding.value) return []
-  let rows = fundingSector.value ? funding.value.rows.filter((r) => r.sector === fundingSector.value) : funding.value.rows
-  if (fundingAbs.value) rows = [...rows].sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate))
-  return rows
-})
-// 代幣解鎖 (DefiLlama emissions) — public tab
-const unlock = ref(null)
-async function loadUnlock() {
-  try {
-    const res = await authFetch('/api/unlock')
-    if (res.ok) unlock.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 // Robinhood 上架 (public)
 const robinhood = ref(null)
 async function loadRobinhood() {
@@ -1040,737 +775,8 @@ const maiBody = computed(() => {
   return i > 0 ? marketAI.value.text.slice(i + 1).trim() : marketAI.value.text
 })
 
-// ---- 戰場: BTC 多空交戰 (public, 首頁大盤分析上方) ----
-// 資料全部由「瀏覽器直連」Binance 公開 WS/REST(免 key;WS 不受 CORS 限制)。
-// 我們的後端只提供城牆位置 /api/btc-sr — 所以看的人再多也不會打爆自己的伺服器,
-// 流量算在每個訪客自己的 IP 額度上。
-//
-// 座標系: X 軸 = 價格。戰線=現價;右=壓力(空方要塞,賣單在上)、左=支撐(多方要塞,買單在下)。
-// 綠兵(主動買)往右衝要攻破壓力,紅兵(主動賣)往左衝要攻破支撐。
-const bfOpen = ref(true) // 收合(省電)
-const bfCanvas = ref(null)
-const bfSR = ref(null)
-const bfLive = ref({ price: 0, longPct: 50, oi: 0, liqLong: 0, liqShort: 0, buy: 0, sell: 0, conn: false })
-let bfWS = null, bfRAF = null, bfFarTimer = null, bfStatTimer = null, bfRetry = 0
-let bfSoldiers = [], bfBlasts = [], bfSparks = [], bfNear = { bids: [], asks: [] }, bfFar = { bids: [], asks: [] }
-// 戰場氛圍(純裝飾,不代表任何盤面數據):飄塵 + 戰線餘燼。
-// 平靜盤成交稀疏時,光靠真實成交撐不起畫面,這層讓場景不會死掉。
-let bfDust = [], bfEmbers = []
-// 戰場實體:砲彈(砲兵齊射)、飛機(巨鯨成交 / 清算空襲)、殘骸(陣亡堆積)
-let bfShells = [], bfPlanes = [], bfWrecks = [], bfBombs = []
-let bfArtyT = 0 // 砲兵齊射計時器
-// 士兵/坦克 icon:離屏預渲染一次,之後只 drawImage。220 個單位若每格重畫路徑會拖垮手機。
-let bfSprites = null
-function bfMakeSprites() {
-  const mk = (w, h, fn) => {
-    const c = document.createElement('canvas')
-    c.width = w; c.height = h
-    fn(c.getContext('2d'))
-    return c
-  }
-  // 一律畫成「面向右」,畫的時候用 scale(-1,1) 翻給空方用
-  const soldier = (col, dark) => mk(18, 25, (c) => {
-    c.fillStyle = dark
-    c.fillRect(5, 18, 3, 7); c.fillRect(10, 18, 3, 7)      // 腿
-    c.fillStyle = col
-    c.fillRect(5, 9, 8, 10)                                 // 軀幹
-    c.beginPath(); c.arc(9, 6.2, 3.2, 0, 7); c.fill()       // 頭
-    c.fillStyle = dark
-    c.beginPath(); c.arc(9, 5.6, 4.5, Math.PI, 0); c.fill() // 鋼盔
-    c.fillRect(11, 10.6, 7, 1.8)                            // 步槍
-    c.fillStyle = col
-    c.fillRect(9, 10, 4, 2.6)                               // 持槍手臂
-  })
-  const tank = (col, dark) => mk(34, 19, (c) => {
-    c.fillStyle = dark
-    c.fillRect(2, 11, 25, 6)                                // 履帶
-    c.fillStyle = 'rgba(0,0,0,0.35)'
-    for (let i = 0; i < 5; i++) { c.beginPath(); c.arc(5 + i * 5, 14, 1.6, 0, 7); c.fill() } // 輪
-    c.fillStyle = col
-    c.fillRect(4, 6, 22, 5.5)                               // 車體
-    c.fillRect(11, 2, 10, 5)                                // 砲塔
-    c.fillRect(20, 3.4, 13, 2.2)                            // 砲管
-  })
-  // 裝甲車:比坦克小、比步兵重 — 中等單量
-  const apc = (col, dark) => mk(26, 15, (c) => {
-    c.fillStyle = dark
-    c.fillRect(2, 9, 20, 4)
-    c.fillStyle = 'rgba(0,0,0,0.35)'
-    for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(6 + i * 6, 12, 2.1, 0, 7); c.fill() } // 輪
-    c.fillStyle = col
-    c.fillRect(3, 4, 17, 5.5)                               // 車體
-    c.beginPath(); c.moveTo(20, 4); c.lineTo(25, 7); c.lineTo(20, 9.5); c.closePath(); c.fill() // 斜前緣
-    c.fillStyle = dark
-    c.fillRect(14, 1.5, 5, 3)                               // 機槍塔
-  })
-  // 砲兵:駐守後方,朝敵方拋射 — 掛單量的具象化
-  // 砲兵。底下墊一塊深色陣地,否則綠砲兵擺在綠地上根本看不見(實測)。
-  const arty = (col, dark) => mk(26, 20, (c) => {
-    c.fillStyle = 'rgba(0,0,0,0.45)'                        // 陣地土堆 → 拉開與地面的對比
-    c.beginPath(); c.ellipse(12, 17, 12, 3.4, 0, 0, 7); c.fill()
-    c.fillStyle = dark
-    c.fillRect(3, 12, 15, 3.4)                              // 底座
-    c.beginPath(); c.arc(6, 15.4, 2.6, 0, 7); c.fill()
-    c.beginPath(); c.arc(13, 15.4, 2.6, 0, 7); c.fill()
-    c.fillStyle = col
-    c.fillRect(5, 8, 10, 4.8)                               // 機身
-    c.save(); c.translate(13, 9); c.rotate(-0.62)           // 仰角砲管
-    c.fillStyle = dark; c.fillRect(0, -2.1, 14, 4.2)        // 砲管外框(深色描邊)
-    c.fillStyle = col; c.fillRect(0, -1.1, 13, 2.2)
-    c.restore()
-  })
-  // 轟炸機:巨鯨成交 / 清算空襲 — 從天上飛過來投彈
-  const plane = (col, dark) => mk(42, 16, (c) => {
-    c.fillStyle = col
-    c.beginPath(); c.ellipse(20, 8, 19, 3.2, 0, 0, 7); c.fill() // 機身
-    c.fillStyle = dark
-    c.beginPath(); c.moveTo(18, 7); c.lineTo(8, 1); c.lineTo(14, 7); c.closePath(); c.fill()   // 上翼
-    c.beginPath(); c.moveTo(18, 9); c.lineTo(8, 15); c.lineTo(14, 9); c.closePath(); c.fill()  // 下翼
-    c.beginPath(); c.moveTo(2, 8); c.lineTo(0, 3); c.lineTo(6, 7); c.closePath(); c.fill()     // 尾翼
-    c.fillStyle = 'rgba(255,255,255,0.5)'
-    c.beginPath(); c.arc(31, 7.4, 2, 0, 7); c.fill()        // 駕駛艙
-  })
-  // 殘骸:陣亡留在戰場上,看得出剛剛哪一段打得最兇
-  const wreck = (dark) => mk(14, 7, (c) => {
-    c.fillStyle = dark
-    c.fillRect(1, 4, 11, 2.5)
-    c.fillRect(3, 2, 3, 2.5); c.fillRect(8, 1.5, 2.5, 3)
-  })
-  bfSprites = {
-    bull: soldier('#3ddb84', '#1a7a45'), bear: soldier('#ff6b6b', '#8f2f2f'),
-    bullApc: apc('#3ddb84', '#146b3c'), bearApc: apc('#ff6b6b', '#7d2a2a'),
-    bullTank: tank('#3ddb84', '#126034'), bearTank: tank('#ff6b6b', '#6f2424'),
-    bullArty: arty('#48c98a', '#125c33'), bearArty: arty('#e07a7a', '#6b2626'),
-    bullPlane: plane('#5fe3a0', '#1a7a45'), bearPlane: plane('#ff8a8a', '#8f2f2f'),
-    bullWreck: wreck('rgba(20,70,45,0.85)'), bearWreck: wreck('rgba(80,28,28,0.85)'),
-  }
-}
-let bfPrice = 0, bfLastT = 0, bfLastTrade = 0
-// aggTrade 串流在部分網路環境收不到(實測:depth20 正常、aggTrade 一筆都沒有,
-// 但 REST /aggTrades 正常)。沒有成交就沒有士兵 → 戰場只剩城堡。
-// 對策:看門狗偵測 WS 沒送成交就自動改用 REST 輪詢補上,WS 恢復就停掉輪詢。
-let bfWsTradeAt = 0, bfPoll = null, bfDog = null, bfLastAggId = 0, bfQueue = []
-
-async function loadBtcSR() {
-  try {
-    const res = await authFetch('/api/btc-sr')
-    if (res.ok) bfSR.value = await res.json()
-  } catch (e) { /* 城牆缺席不影響戰場其他部分 */ }
-}
-
-// 遠方城牆: depth20 只涵蓋現價附近很窄一帶,摸不到 SR 位置的大牆 → 每 20s 補一張深快照。
-async function bfLoadFar() {
-  try {
-    const r = await fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000')
-    if (!r.ok) return
-    const d = await r.json()
-    bfFar = { bids: d.bids.map((x) => [+x[0], +x[1]]), asks: d.asks.map((x) => [+x[0], +x[1]]) }
-  } catch (e) { /* CORS/限流 → 就只用近端 depth20,畫面仍可運作 */ }
-}
-
-// 兵力對比(多空帳戶比)+ 部隊規模(OI)
-async function bfLoadStats() {
-  try {
-    const [lsr, oir] = await Promise.all([
-      fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1'),
-      fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT'),
-    ])
-    if (lsr.ok) {
-      const a = await lsr.json()
-      if (a && a[0]) bfLive.value.longPct = +a[0].longAccount * 100
-    }
-    if (oir.ok) {
-      const o = await oir.json()
-      if (o && o.openInterest) bfLive.value.oi = +o.openInterest
-    }
-  } catch (e) { /* 非關鍵 */ }
-}
-
-function bfConnect() {
-  if (bfWS) return
-  const streams = ['btcusdt@aggTrade', 'btcusdt@forceOrder', 'btcusdt@depth20@100ms', 'btcusdt@markPrice@1s']
-  try {
-    bfWS = new WebSocket('wss://fstream.binance.com/stream?streams=' + streams.join('/'))
-  } catch (e) { return }
-  bfWS.onopen = () => { bfRetry = 0; bfLive.value.conn = true }
-  bfWS.onclose = () => {
-    bfLive.value.conn = false
-    bfWS = null
-    if (!bfOpen.value) return
-    bfRetry = Math.min(bfRetry + 1, 6)
-    setTimeout(bfConnect, 1000 * bfRetry) // 退避重連
-  }
-  bfWS.onerror = () => { try { bfWS && bfWS.close() } catch (e) {} }
-  bfWS.onmessage = (ev) => {
-    let m
-    try { m = JSON.parse(ev.data) } catch (e) { return }
-    const d = m.data
-    if (!d) return
-    if (d.e === 'aggTrade') { bfWsTradeAt = Date.now(); bfOnTrade(+d.p, +d.q, d.m) }
-    else if (d.e === 'forceOrder' && d.o) bfOnLiq(+d.o.ap || +d.o.p, +d.o.q, d.o.S)
-    else if (d.e === 'depthUpdate') {
-      if (d.b) bfNear.bids = d.b.map((x) => [+x[0], +x[1]])
-      if (d.a) bfNear.asks = d.a.map((x) => [+x[0], +x[1]])
-      // 戰線備援:aggTrade 若沒進來(冷門時段,或個別串流被網路/防火牆擋掉),
-      // 用最佳買賣中價當現價,免得整個戰場卡在「連線中…」。
-      const bb = bfNear.bids[0], ba = bfNear.asks[0]
-      if (bb && ba && Date.now() - bfLastTrade > 2000) {
-        bfPrice = (bb[0] + ba[0]) / 2
-        bfLive.value.price = bfPrice
-      }
-    } else if (d.e === 'markPriceUpdate') {
-      if (!bfPrice) { bfPrice = +d.p; bfLive.value.price = bfPrice }
-    }
-  }
-}
-function bfDisconnect() {
-  if (bfWS) { try { bfWS.onclose = null; bfWS.close() } catch (e) {} bfWS = null }
-  bfLive.value.conn = false
-}
-
-// 一筆主動成交 → 一個士兵。m=isBuyerMaker: true 代表主動方是「賣家」(紅兵)。
-// 高波動時每秒可達上百筆 → 小單聚合、總量設上限,免得中低階手機發燙掉幀。
-function bfOnTrade(px, qty, buyerMaker) {
-  bfPrice = px
-  bfLive.value.price = px
-  bfLastTrade = Date.now()
-  const bull = !buyerMaker
-  if (bull) bfLive.value.buy += qty
-  else bfLive.value.sell += qty
-  // 門檻實測校準:BTC 多數成交量都很小,原本 0.004(≈$260)會砍掉約 3/4 的兵,
-  // 戰場看起來空無一人;坦克門檻 1.5 BTC(≈$97k)更是幾乎不會觸發。
-  if (qty < 0.0008) return // 只濾真正的塵埃
-  if (bfSoldiers.length > 260) return // 上限保護:高波動時每秒上百筆,免得中低階手機發燙掉幀
-  // 兵種分級 ∝ 成交量:量級一眼看得出來,不再只有「兵/坦克」兩檔。
-  //   步兵 <0.05 ｜ 裝甲車 0.05–0.5 ｜ 坦克 0.5–2 ｜ 轟炸機 ≥2(巨鯨,走空中)
-  if (qty >= 2) { bfPlanes.push(bfMkPlane(bull, 'whale', qty)); return }
-  const kind = qty >= 0.5 ? 'tank' : qty >= 0.05 ? 'apc' : 'inf'
-  const tank = kind === 'tank'
-  // 一筆大單 = 一個班,不是一個兵:兵力 ∝ 成交量,大錢進場才看得出份量。
-  const squad = tank ? Math.min(3, 1 + Math.floor(Math.sqrt(qty / 0.5))) : kind === 'apc' ? 2 : 1
-  // 自穩定的停留時間。BTC 成交率忽高忽低(實測穩態在 2 兵到 54 兵之間跳),
-  // 固定壽命的結果就是冷清時空無一人、熱絡時糊成一坨色塊。改成「人少活久、
-  // 人多活短」把場上人數收斂到 ~28:每個兵仍然是一筆真實成交,只是停留時間隨場面調整。
-  const lifeMul = Math.max(0.5, Math.min(4.5, 26 / Math.max(4, bfSoldiers.length)))
-  for (let i = 0; i < squad; i++) {
-    bfSoldiers.push({
-      bull, tank, kind,
-      scale: tank ? Math.min(1.5, 0.85 + Math.sqrt(qty) * 0.5) : Math.min(1.15, 0.6 + Math.sqrt(qty) * 2.4),
-      u: bull ? BF_SUPX : BF_RESX, // 從自家城堡出發
-      state: 'march',
-      spd: (0.0055 + Math.random() * 0.004) * (tank ? 0.65 : 1), // 坦克較慢
-      // 交戰壽命。實測穩態只有 3–6 兵(不是註解原本說的 50–70):BTC 平靜時
-      // 每秒才 3–5 筆成交,舊的 1–2 秒壽命根本堆不出肉搏帶。拉長到 3–6 秒後
-      // 穩態約 15–30 兵,平靜盤也看得到交戰(上限 260 仍是效能保險絲)。
-      hp: (tank ? 220 + Math.random() * 160 : 140 + Math.random() * 170) * lifeMul,
-      ph: Math.random() * 6.28, // 刺擊動畫相位
-      lunge: 0,
-      lane: Math.random(), // 0..1 縱深車道
-    })
-  }
-}
-// bfMkPlane 造一架轟炸機。whale = 巨鯨成交(≥2 BTC),從自家方向飛入戰線投彈;
-// liq = 清算空襲,由「贏的那方」飛過來炸被強平的一方。
-function bfMkPlane(bull, kind, mag) {
-  return {
-    bull, kind,
-    u: bull ? -0.25 : 1.25,
-    sky: 0.28 + Math.random() * 0.34,          // 0..1:天空高度(0=地平線)
-    spd: 0.0042 + Math.random() * 0.002, // 慢一點才看得清楚:0.010 時整趟只有 3 秒
-    dropU: 0.5 + (Math.random() - 0.5) * 0.12, // 投彈點(接近戰線)
-    dropped: false,
-    mag: Math.min(60, 16 + Math.sqrt(mag) * 8), // 爆炸半徑
-  }
-}
-
-function bfOnLiq(px, qty, side) {
-  // side=SELL → 多單被清算(強制賣出);BUY → 空單被清算
-  const long = side === 'SELL'
-  const usd = px * qty
-  if (long) bfLive.value.liqLong += usd
-  else bfLive.value.liqShort += usd
-  // 爆炸打在戰線附近(帶點隨機偏移),不是絕對價格位置
-  bfBlasts.push({ long, off: (Math.random() - 0.5) * 0.1, r: 0, max: Math.min(52, 12 + Math.sqrt(usd) / 20), t: 0 })
-  // 夠大的清算 → 加派空襲:贏家(被清算方的對面)飛過來投彈,比原地爆一團有戲
-  if (usd > 20000 && bfPlanes.length < 4) bfPlanes.push(bfMkPlane(!long, 'liq', usd / 12000))
-}
-
-// REST 成交備援:WS 的 aggTrade 沒供應時改用輪詢。以 aggTrade id (a) 去重,
-// 新成交丟進佇列由畫格慢慢放兵,避免每 2 秒一次爆量湧現的脈衝感。
-async function bfPollTrades() {
-  try {
-    const r = await fetch('https://fapi.binance.com/fapi/v1/aggTrades?symbol=BTCUSDT&limit=100')
-    if (!r.ok) return
-    const arr = await r.json()
-    if (!Array.isArray(arr) || !arr.length) return
-    const seed = bfLastAggId === 0
-    for (const t of arr) {
-      if (t.a <= bfLastAggId) continue
-      bfLastAggId = t.a
-      if (!seed) bfQueue.push([+t.p, +t.q, t.m])
-    }
-    if (seed) for (const t of arr.slice(-12)) bfQueue.push([+t.p, +t.q, t.m]) // 首輪只放最後幾筆,不要一口氣倒 100 個兵
-    if (bfQueue.length > 300) bfQueue = bfQueue.slice(-300)
-  } catch (e) { /* 限流/離線 → 下一輪再試 */ }
-}
-function bfWatchdog() {
-  const wsAlive = Date.now() - bfWsTradeAt < 6000
-  if (!wsAlive && !bfPoll) { bfPoll = setInterval(bfPollTrades, 2000); bfPollTrades() }
-  else if (wsAlive && bfPoll) { clearInterval(bfPoll); bfPoll = null } // WS 恢復 → 收掉輪詢
-}
-
-// 戰場座標系。⚠️ X 軸「不是」絕對價格 — 那是第一版的致命錯誤:SR 城牆常離現價
-// ±1%,但訂單簿與成交都擠在 ±0.01% 內,尺度差近百倍 → 畫面 95% 是空的、城牆還會
-// 疊在戰線上。改成「價格在 支撐↔壓力 之間的相對位置」:城牆固定釘在畫面兩側,
-// 戰線在中間移動。畫面永遠是滿的,而且戰線位置直接回答「離攻破還有多遠」。
-const BF_SUPX = 0.14, BF_RESX = 0.86 // 兩座城牆的戰場座標 (0..1)
-
-function bfWalls() {
-  const p = bfPrice || bfLive.value.price
-  const sr = bfSR.value
-  let sup = sr && sr.sup_ok ? sr.support : 0
-  let res = sr && sr.res_ok ? sr.resistance : 0
-  const supReal = sup > 0, resReal = res > 0
-  if (!supReal) sup = p * 0.9965 // 沒有實測城牆時用假想防線,畫面才不會退化
-  if (!resReal) res = p * 1.0035
-  if (res <= sup) return { sup: p * 0.9965, res: p * 1.0035, supReal: false, resReal: false }
-  return { sup, res, supReal, resReal }
-}
-// 戰線 0..1(0=支撐牆、1=壓力牆);已攻破時允許溢出一小段以示突破
-function bfFrontU() {
-  const p = bfPrice || bfLive.value.price
-  const w = bfWalls()
-  if (!p) return 0.5
-  const n = (p - w.sup) / (w.res - w.sup)
-  return Math.max(-0.1, Math.min(1.1, BF_SUPX + n * (BF_RESX - BF_SUPX)))
-}
-// 城牆後方的「後備軍」= 該側掛單量(訂單簿 = 靜止的防禦工事)
-function bfReserves() {
-  const p = bfPrice || bfLive.value.price
-  const w = bfWalls()
-  let bid = 0, ask = 0
-  for (const [q, v] of bfFar.bids) if (q >= w.sup && q <= p) bid += v
-  for (const [q, v] of bfFar.asks) if (q <= w.res && q >= p) ask += v
-  if (!bid) for (const [, v] of bfNear.bids) bid += v
-  if (!ask) for (const [, v] of bfNear.asks) ask += v
-  return { bid, ask }
-}
-
-function bfDraw() {
-  const cv = bfCanvas.value
-  if (!cv) return
-  const ctx = cv.getContext('2d')
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  const W = cv.clientWidth, H = cv.clientHeight
-  if (!W || !H) return
-  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, W, H)
-  const p = bfPrice || bfLive.value.price
-  if (!p) { ctx.fillStyle = '#8b909a'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('連線中…', W / 2, H / 2); return }
-
-  const horizon = H * 0.26
-  const groundH = H - horizon
-  // 等距投影:u = 戰場橫向座標 (0..1),t = 縱深 (0=地平線, 1=最前緣)
-  const PX = (u, t) => W / 2 + (u - 0.5) * W * (0.5 + 0.5 * t)
-  const PY = (t) => horizon + groundH * t
-  // 車道 → 縱深。士兵、火花、餘燼共用同一條換算:火花的 lane 是從陣亡的士兵複製過來的,
-  // 兩邊若用不同公式,爆點就會跟屍體錯開。
-  const LT = (lane) => 0.58 + lane * 0.40
-
-  const w = bfWalls()
-  const fu = bfFrontU()
-  const now = performance.now()
-  const dt = bfLastT ? Math.min(64, now - bfLastT) : 16
-  bfLastT = now
-  const step = dt / 16
-  // REST 備援的成交佇列 → 每格放少量兵,避免每輪輪詢一次的脈衝感
-  for (let i = 0; i < 3 && bfQueue.length; i++) { const q = bfQueue.shift(); bfOnTrade(q[0], q[1], q[2]) }
-
-  // ---- 天空:依主動買賣優勢染色 ----
-  const tot = bfLive.value.buy + bfLive.value.sell
-  const dom = tot > 0 ? (bfLive.value.buy - bfLive.value.sell) / tot : 0
-  const sky = ctx.createLinearGradient(0, 0, 0, horizon)
-  sky.addColorStop(0, dom >= 0 ? `rgba(46,194,107,${0.06 + dom * 0.2})` : `rgba(226,74,74,${0.06 - dom * 0.2})`)
-  sky.addColorStop(1, 'rgba(13,15,20,0)')
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon)
-
-  // ---- 地面梯形:戰線左邊多方領土、右邊空方領土 ----
-  const band = (u0, u1, col) => {
-    ctx.beginPath()
-    ctx.moveTo(PX(u0, 0), PY(0)); ctx.lineTo(PX(u1, 0), PY(0))
-    ctx.lineTo(PX(u1, 1), PY(1)); ctx.lineTo(PX(u0, 1), PY(1))
-    ctx.closePath(); ctx.fillStyle = col; ctx.fill()
-  }
-  band(-0.15, fu, 'rgba(35,120,70,0.5)')
-  band(fu, 1.15, 'rgba(150,50,50,0.5)')
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1
-  for (let i = 1; i < 5; i++) { const y = PY(i / 5); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke() }
-
-  // ---- 飄塵(裝飾):讓大片空地不至於是死的色塊 ----
-  while (bfDust.length < 26) bfDust.push({ u: Math.random() * 1.3 - 0.15, t: 0.3 + Math.random() * 0.7, sp: 0.0004 + Math.random() * 0.0012, r: 0.6 + Math.random() * 1.6, a: 0.05 + Math.random() * 0.13 })
-  bfDust = bfDust.filter((d) => {
-    if (d.life) { d.t2 = (d.t2 || 0) + step; if (d.t2 > d.life) return false } // 衝鋒揚塵:有壽命
-    d.u += d.sp * step * (dom >= 0 ? 1 : -1) // 常駐飄塵:順著主動買賣的優勢方向飄
-    if (d.u > 1.2) d.u = -0.15
-    if (d.u < -0.2) d.u = 1.15
-    const a = d.life ? d.a * (1 - (d.t2 || 0) / d.life) : d.a
-    ctx.fillStyle = `rgba(200,208,220,${a})`
-    ctx.beginPath(); ctx.arc(PX(d.u, d.t), PY(d.t), d.r, 0, 7); ctx.fill()
-    return true
-  })
-
-  // ---- 城堡 ----
-  const rsv = bfReserves()
-  const rsvMax = Math.max(rsv.bid, rsv.ask, 1e-9)
-  const castle = (u, touches, bull, broken, real, price, reserve) => {
-    const t = 0.66
-    const x = PX(u, t), y = PY(t)
-    const th = Math.min(30, 12 + touches * 3.4) // 牆厚 ∝ 觸及次數
-    const hgt = groundH * 0.46
-    const body = broken ? '#5b6068' : bull ? '#1f7a45' : '#8f2f2f'
-    const face = broken ? '#767c86' : bull ? '#2ec26b' : '#d94a4a'
-    if (!real) ctx.globalAlpha = 0.45 // 假想防線 → 半透明
-    ctx.fillStyle = body
-    ctx.fillRect(x - th, y - hgt, th * 2, hgt)
-    ctx.fillStyle = face
-    ctx.fillRect(x - th, y - hgt, th * 2, 5)
-    for (let i = -2; i <= 2; i++) ctx.fillRect(x + i * th * 0.42 - 3, y - hgt - 7, 6, 8) // 城垛
-    if (broken) {
-      ctx.strokeStyle = '#ffbe50'; ctx.lineWidth = 2.5 // 裂縫
-      ctx.beginPath(); ctx.moveTo(x - 2, y); ctx.lineTo(x + 6, y - hgt * 0.45); ctx.lineTo(x - 5, y - hgt * 0.75); ctx.lineTo(x + 3, y - hgt); ctx.stroke()
-    } else { // 旗幟
-      ctx.strokeStyle = face; ctx.lineWidth = 1.5
-      ctx.beginPath(); ctx.moveTo(x, y - hgt - 7); ctx.lineTo(x, y - hgt - 20); ctx.stroke()
-      ctx.fillStyle = face; ctx.beginPath()
-      ctx.moveTo(x, y - hgt - 20); ctx.lineTo(x + (bull ? 12 : -12), y - hgt - 16); ctx.lineTo(x, y - hgt - 12)
-      ctx.closePath(); ctx.fill()
-    }
-    // 後備軍(掛單量)條:城牆的「血量」
-    const bw = th * 2, bh = 4
-    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x - th, y + 4, bw, bh)
-    ctx.fillStyle = face; ctx.fillRect(x - th, y + 4, bw * Math.min(1, reserve / rsvMax), bh)
-    ctx.globalAlpha = 1
-    ctx.textAlign = 'center'
-    ctx.fillStyle = broken ? '#ffbe50' : '#e8e9ec'
-    ctx.font = 'bold 11px sans-serif'
-    ctx.fillText(broken ? '⚔ 已攻破' : '×' + touches + ' 城牆', x, y - hgt - 26)
-    ctx.fillStyle = '#8b909a'; ctx.font = '10px sans-serif'
-    ctx.fillText('$' + Math.round(price).toLocaleString(), x, y + 18)
-  }
-  const sr = bfSR.value
-  castle(BF_SUPX, sr && sr.sup_ok ? sr.sup_touches : 0, true, !!(sr && sr.status === 'break_down'), w.supReal, w.sup, rsv.bid)
-  castle(BF_RESX, sr && sr.res_ok ? sr.res_touches : 0, false, !!(sr && sr.status === 'break_up'), w.resReal, w.res, rsv.ask)
-
-  if (!bfSprites) bfMakeSprites() // 殘骸/砲兵/飛機都要用,必須在它們之前備好
-
-  // ---- 殘骸:躺在地上慢慢淡掉,看得出剛剛哪一段打得最兇 ----
-  bfWrecks = bfWrecks.filter((k) => {
-    k.t += step
-    if (k.t > k.life) return false
-    const t = LT(k.lane)
-    const sp = k.bull ? bfSprites.bullWreck : bfSprites.bearWreck
-    const sc = (k.big ? 1.5 : 1) * (0.75 + t * 0.55)
-    ctx.globalAlpha = Math.min(0.7, (1 - k.t / k.life) * 1.4)
-    ctx.drawImage(sp, PX(k.u, t) - (sp.width * sc) / 2, PY(t) - sp.height * sc, sp.width * sc, sp.height * sc)
-    ctx.globalAlpha = 1
-    return true
-  })
-  if (bfWrecks.length > 70) bfWrecks = bfWrecks.slice(-70)
-
-  // ---- 砲兵:駐守自家城牆後方,朝戰線拋射。齊射頻率 ∝ 掛單量(後備軍力) ----
-  const artyDraw = (u, bull, reserve) => {
-    const t = 0.52
-    const sp = bull ? bfSprites.bullArty : bfSprites.bearArty
-    const k = 0.85 * (0.75 + t * 0.55)
-    const x = PX(u, t), y = PY(t)
-    ctx.save(); ctx.translate(x, y); if (!bull) ctx.scale(-1, 1)
-    ctx.drawImage(sp, (-sp.width * k) / 2, -sp.height * k, sp.width * k, sp.height * k)
-    ctx.restore()
-    return { x, y, t, ratio: reserve / rsvMax }
-  }
-  const aB = artyDraw(BF_SUPX - 0.06, true, rsv.bid)
-  const aR = artyDraw(BF_RESX + 0.06, false, rsv.ask)
-  bfArtyT += step
-  if (bfArtyT > 26 && bfShells.length < 14) { // 節流:齊射不能無限制,手機吃不消
-    bfArtyT = 0
-    const fire = (from, bull, ratio) => {
-      if (Math.random() > 0.35 + ratio * 0.5) return // 後備軍越厚,開火越勤
-      bfShells.push({ bull, u0: bull ? BF_SUPX - 0.06 : BF_RESX + 0.06, t0: 0.52,
-        u1: fu + (bull ? -1 : 1) * (0.02 + Math.random() * 0.06), t1: 0.72 + Math.random() * 0.2, k: 0, sp: 0.020 + Math.random() * 0.012 })
-    }
-    fire(aB, true, aB.ratio); fire(aR, false, aR.ratio)
-  }
-  bfShells = bfShells.filter((sh) => {
-    sh.k += sh.sp * step
-    const u = sh.u0 + (sh.u1 - sh.u0) * sh.k
-    const t = sh.t0 + (sh.t1 - sh.t0) * sh.k
-    const arc = Math.sin(Math.PI * Math.min(1, sh.k)) * 46 // 拋物線
-    const x = PX(u, t), y = PY(t) - arc
-    if (sh.k >= 1) { // 落地 → 小爆點 + 揚塵
-      bfSparks.push({ u, lane: (t - 0.58) / 0.40, t: 0, life: 16, bull: sh.bull, death: true })
-      for (let i = 0; i < 3; i++) bfEmbers.push({ u: u + (Math.random() - 0.5) * 0.02, lane: (t - 0.58) / 0.40, t: 0, life: 26 + Math.random() * 20, dx: (Math.random() - 0.5) * 0.4 })
-      return false
-    }
-    ctx.fillStyle = sh.bull ? 'rgba(150,255,200,0.95)' : 'rgba(255,180,180,0.95)'
-    ctx.beginPath(); ctx.arc(x, y, 2.1, 0, 7); ctx.fill()
-    ctx.fillStyle = sh.bull ? 'rgba(90,220,150,0.25)' : 'rgba(230,120,120,0.25)' // 彈道殘影
-    ctx.beginPath(); ctx.arc(x - (sh.u1 > sh.u0 ? 4 : -4), y + 3, 1.4, 0, 7); ctx.fill()
-    return true
-  })
-
-  // ---- 士兵:行軍 → 抵達戰線 → 停下對砍 → 陣亡 ----
-  // 兩軍都停在戰線上肉搏,所以中間會自然堆出一條交戰帶(這才是「多空交戰」)。
-  if (!bfSprites) bfMakeSprites()
-  bfSoldiers.sort((a, b) => a.lane - b.lane) // 遠的先畫,近的疊在上面
-  bfSoldiers = bfSoldiers.filter((s) => {
-    const dir = s.bull ? 1 : -1
-    if (s.state === 'march') {
-      // 衝鋒波:主動買賣極度失衡時,優勢方整批加速推進
-      const charge = Math.abs(dom) > 0.35 && ((dom > 0) === s.bull) ? 1.9 : 1
-      s.u += dir * s.spd * charge * step
-      if (charge > 1 && Math.random() < 0.06 * step) { // 衝鋒揚塵
-        bfDust.push({ u: s.u, t: LT(s.lane), sp: 0, r: 1.2 + Math.random(), a: 0.22, life: 30 + Math.random() * 20 })
-      }
-      // 觸及戰線 → 進入交戰(留一點點間隙,兩軍才會面對面而不是重疊)
-      // 交戰帶要有「厚度」:全部擠在同一條線上會糊成一坨色塊,散開才看得出是兩軍列陣
-      if ((s.bull && s.u >= fu - 0.014) || (!s.bull && s.u <= fu + 0.014)) {
-        s.state = 'fight'
-        s.u = fu - dir * (0.014 + Math.random() * 0.075)
-      }
-    } else {
-      s.hp -= step
-      if (s.hp <= 0) { // 陣亡 → 留下殘骸
-        bfSparks.push({ u: s.u, lane: s.lane, t: 0, life: 14, bull: s.bull, death: true })
-        bfWrecks.push({ u: s.u, lane: s.lane, bull: s.bull, t: 0, life: 520, big: s.kind !== 'inf' })
-        return false
-      }
-      s.u += (fu - dir * (0.016 + s.lane * 0.06) - s.u) * 0.05 * step // 戰線移動時交戰帶跟著推移(保留厚度)
-      s.ph += 0.34 * step
-      s.lunge = Math.sin(s.ph) * 0.005 * dir // 刺擊
-      if (Math.random() < 0.05 * step) { // 兵器碰撞火花
-        bfSparks.push({ u: s.u + dir * 0.008, lane: s.lane, t: 0, life: 8, bull: s.bull })
-      }
-    }
-    const t = LT(s.lane)
-    const x = PX(s.u + s.lunge, t), y = PY(t)
-    const sp = s.kind === 'tank' ? (s.bull ? bfSprites.bullTank : bfSprites.bearTank)
-      : s.kind === 'apc' ? (s.bull ? bfSprites.bullApc : bfSprites.bearApc)
-        : (s.bull ? bfSprites.bull : bfSprites.bear)
-    const k = s.scale * (0.75 + t * 0.55) // 近大遠小
-    const w = sp.width * k, h = sp.height * k
-    ctx.save()
-    ctx.translate(x, y)
-    if (!s.bull) ctx.scale(-1, 1) // sprite 一律面向右 → 空方翻面
-    ctx.drawImage(sp, -w / 2, -h, w, h)
-    ctx.restore()
-    return true
-  })
-
-  // ---- 交戰火花 / 陣亡 ----
-  bfSparks = bfSparks.filter((k) => {
-    k.t += step
-    if (k.t > k.life) return false
-    const t = LT(k.lane)
-    const x = PX(k.u, t), y = PY(t)
-    const a = 1 - k.t / k.life
-    if (k.death) {
-      ctx.fillStyle = k.bull ? `rgba(61,219,132,${a * 0.7})` : `rgba(255,107,107,${a * 0.7})`
-      ctx.beginPath(); ctx.arc(x, y - 4, 5 * (1 + k.t / k.life), 0, 7); ctx.fill()
-    } else {
-      ctx.fillStyle = `rgba(255,235,150,${a})`
-      ctx.fillRect(x - 1.5, y - 9 - k.t * 0.3, 3, 3)
-    }
-    return true
-  })
-  if (bfSparks.length > 140) bfSparks = bfSparks.slice(-140)
-
-  // ---- 清算爆炸(打在戰線上) ----
-  bfBlasts = bfBlasts.filter((b) => {
-    b.t += step; b.r += (b.max - b.r) * 0.16 * step
-    const a = Math.max(0, 1 - b.t / 40)
-    if (a <= 0) return false
-    const x = PX(fu + b.off, 0.8), y = PY(0.8)
-    const g = ctx.createRadialGradient(x, y - 8, 0, x, y - 8, Math.max(1, b.r))
-    g.addColorStop(0, `rgba(255,255,220,${a})`)
-    g.addColorStop(0.4, b.long ? `rgba(255,120,40,${a * 0.9})` : `rgba(90,200,255,${a * 0.9})`)
-    g.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y - 8, Math.max(1, b.r), 0, 7); ctx.fill()
-    return true
-  })
-  if (bfBlasts.length > 30) bfBlasts = bfBlasts.slice(-30)
-
-  // ---- 交戰帶光暈 + 餘燼:強度 ∝ 正在肉搏的兵力,所以打得越兇燒得越旺 ----
-  const melee = bfSoldiers.reduce((n, s) => n + (s.state === 'fight' ? 1 : 0), 0)
-  if (melee > 0) {
-    const heat = Math.min(1, melee / 26)
-    const gx = PX(fu, 0.8), gy = PY(0.8)
-    const gg = ctx.createRadialGradient(gx, gy - 6, 0, gx, gy - 6, 26 + heat * 74)
-    gg.addColorStop(0, `rgba(255,206,120,${0.10 + heat * 0.20})`)
-    gg.addColorStop(0.45, `rgba(255,150,60,${0.05 + heat * 0.10})`)
-    gg.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(gx, gy - 6, 26 + heat * 74, 0, 7); ctx.fill()
-    if (Math.random() < 0.55 * heat * step) {
-      bfEmbers.push({ u: fu + (Math.random() - 0.5) * 0.05, lane: Math.random(), t: 0, life: 40 + Math.random() * 40, dx: (Math.random() - 0.5) * 0.3 })
-    }
-  }
-  bfEmbers = bfEmbers.filter((e) => {
-    e.t += step
-    if (e.t > e.life) return false
-    const t = LT(e.lane)
-    const a = (1 - e.t / e.life) * 0.75
-    ctx.fillStyle = `rgba(255,${170 + Math.round(60 * (1 - e.t / e.life))},90,${a})`
-    ctx.beginPath(); ctx.arc(PX(e.u, t) + e.dx * e.t, PY(t) - 6 - e.t * 0.55, 1.3, 0, 7); ctx.fill()
-    return true
-  })
-  if (bfEmbers.length > 90) bfEmbers = bfEmbers.slice(-90)
-
-  // ---- 轟炸機:巨鯨成交 / 清算空襲。飛過戰線投彈,落地接爆炸 ----
-  bfPlanes = bfPlanes.filter((pl) => {
-    pl.u += (pl.bull ? 1 : -1) * pl.spd * step
-    if (pl.u > 1.45 || pl.u < -0.45) return false
-    const skyY = horizon * (1 - pl.sky) + 6
-    const x = W / 2 + (pl.u - 0.5) * W * 0.92
-    if (!pl.dropped && ((pl.bull && pl.u >= pl.dropU) || (!pl.bull && pl.u <= pl.dropU))) {
-      pl.dropped = true
-      bfBombs.push({ u: pl.u, y: skyY, bull: pl.bull, mag: pl.mag, kind: pl.kind })
-    }
-    const sp = pl.bull ? bfSprites.bullPlane : bfSprites.bearPlane
-    ctx.save(); ctx.translate(x, skyY); if (!pl.bull) ctx.scale(-1, 1)
-    ctx.drawImage(sp, -sp.width / 2, -sp.height / 2)
-    ctx.restore()
-    return true
-  })
-  if (bfPlanes.length > 5) bfPlanes = bfPlanes.slice(-5)
-  // 落下的炸彈 → 觸地變爆炸
-  bfBombs = bfBombs.filter((b) => {
-    b.y += 3.4 * step
-    const gy = PY(0.8)
-    const x = W / 2 + (b.u - 0.5) * W * 0.92
-    if (b.y >= gy - 8) {
-      bfBlasts.push({ long: !b.bull, off: b.u - fu, r: 0, max: b.mag, t: 0 })
-      return false
-    }
-    ctx.fillStyle = '#ffd479'
-    ctx.beginPath(); ctx.ellipse(x, b.y, 2.2, 4, 0, 0, 7); ctx.fill()
-    return true
-  })
-
-  // ---- 戰線(現價) ----
-  const x0 = PX(fu, 0), x1 = PX(fu, 1)
-  const grad = ctx.createLinearGradient(x0, horizon, x1, H)
-  grad.addColorStop(0, 'rgba(216,173,72,0.35)')
-  grad.addColorStop(1, 'rgba(216,173,72,1)')
-  ctx.strokeStyle = grad; ctx.lineWidth = 3
-  ctx.beginPath(); ctx.moveTo(x0, horizon); ctx.lineTo(x1, H); ctx.stroke()
-  ctx.fillStyle = '#d8ad48'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'
-  ctx.fillText('$' + p.toLocaleString(undefined, { maximumFractionDigits: 0 }), Math.max(34, Math.min(W - 34, x0)), horizon - 8)
-}
-function bfLoop() { bfDraw(); bfRAF = requestAnimationFrame(bfLoop) }
-function bfStart() {
-  if (bfRAF) return
-  bfConnect()
-  bfLoadFar(); bfLoadStats(); loadBtcSR()
-  bfFarTimer = setInterval(bfLoadFar, 20000)
-  bfStatTimer = setInterval(() => { bfLoadStats(); loadBtcSR() }, 60000)
-  bfDog = setInterval(bfWatchdog, 3000) // WS 沒送成交 → 自動切 REST 輪詢
-  setTimeout(bfWatchdog, 4000)          // 開場先給 WS 一點時間
-  bfLastT = 0
-  bfRAF = requestAnimationFrame(bfLoop)
-}
-function bfStop() {
-  if (bfRAF) { cancelAnimationFrame(bfRAF); bfRAF = null }
-  clearInterval(bfFarTimer); clearInterval(bfStatTimer); clearInterval(bfDog)
-  clearInterval(bfPoll); bfPoll = null
-  bfDisconnect()
-  bfSoldiers = []; bfBlasts = []; bfSparks = []; bfQueue = []; bfDust = []; bfEmbers = []
-  bfShells = []; bfPlanes = []; bfWrecks = []; bfBombs = []; bfArtyT = 0
-}
-function bfToggle() { bfOpen.value = !bfOpen.value; bfOpen.value ? bfStart() : bfStop() }
-const bfPressure = computed(() => {
-  const b = bfLive.value.buy, s = bfLive.value.sell
-  return b + s > 0 ? (b / (b + s)) * 100 : 50
-})
-function bfUsd(v) {
-  if (!v) return '0'
-  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
-  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K'
-  return v.toFixed(0)
-}
-
 // 板塊強弱/輪動 (public, hourly)
-const sectors = ref(null)
-async function loadSectors() {
-  try {
-    const res = await authFetch('/api/sectors')
-    if (res.ok) sectors.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const sectorSort = ref('strength') // 'strength' | 'rotation'
-const sectorVw = ref(false) // false=等權 avg, true=量權 vw
-const sectorOpen = ref('') // which sector row is expanded (drill-down)
-const sectorRows = computed(() => {
-  if (!sectors.value) return []
-  const rows = [...sectors.value.rows]
-  if (sectorSort.value === 'rotation') rows.sort((a, b) => b.delta - a.delta)
-  else rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
-  return rows
-})
-// deterministic one-line summary (no AI): leaders / laggards / this-hour rotation.
-// leaders/laggards follow the 等權/量權 toggle so the summary matches the table.
-const sectorByStrength = computed(() => {
-  const rows = [...(sectors.value?.rows || [])]
-  rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
-  return rows
-})
-const sectorLead = computed(() => sectorByStrength.value.slice(0, 2).map((x) => x.sector).join('、'))
-const sectorLag = computed(() => { const r = sectorByStrength.value; return r.length ? r[r.length - 1].sector : '' })
-const sectorHot = computed(() => {
-  let best = null
-  for (const x of sectors.value?.rows || []) if (x.delta >= 0.8 && x.vs_btc > 0 && (!best || x.delta > best.delta)) best = x
-  return best ? `${best.sector}(▲+${best.delta})` : ''
-})
 
-const unlockSort = ref('sell') // 'sell': 30d 佔流通% 大→小(賣壓); 'date': 最近懸崖優先
-const unlockRows = computed(() => {
-  if (!unlock.value) return []
-  const rows = [...unlock.value.rows]
-  if (unlockSort.value === 'date') {
-    rows.sort((a, b) => {
-      const ta = a.peak_date ? new Date(a.peak_date).getTime() : Infinity
-      const tb = b.peak_date ? new Date(b.peak_date).getTime() : Infinity
-      return ta - tb
-    })
-  }
-  return rows
-})
-function unlockDays(d) {
-  if (!d) return '—'
-  const days = Math.round((new Date(d).getTime() - Date.now()) / 86400000)
-  if (days <= 0) return '今日'
-  return days + ' 天'
-}
-function unlockDate(d) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' })
-}
-
-const newsCat = ref('')
-const newsCatList = [
-  { key: 'figure', label: '🗣 人物' },
-  { key: 'cb', label: '🏦 央行' },
-  { key: 'trade', label: '📉 貿易' },
-  { key: 'geo', label: '⚔️ 地緣' },
-  { key: 'reg', label: '⚖️ 監管' },
-  { key: 'hack', label: '🚨 爆雷' },
-  { key: 'inst', label: '🏛 機構' },
-  { key: 'whale', label: '🐋 巨鯨' },
-  { key: 'crypto', label: '🪙 加密' },
-  { key: 'misc', label: '📰 綜合' },
-]
-const newsF = computed(() => (newsCat.value ? news.value.filter((n) => n.category === newsCat.value) : news.value))
 
 const sr = ref(null)
 async function loadSR() {
@@ -1862,32 +868,7 @@ const market = computed(() => {
 })
 
 // ---- formatting helpers ----
-function fmtPrice(n) {
-  if (n == null) return '-'
-  if (n >= 1000) return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2 })
-  if (n >= 1) return '$' + n.toFixed(n >= 100 ? 2 : 4)
-  return '$' + n.toPrecision(4)
-}
-function fmtNum(n) {
-  const a = Math.abs(n)
-  if (a >= 1e9) return (n / 1e9).toFixed(2) + 'B'
-  if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K'
-  return n.toFixed(2)
-}
-function fmtPct(n) {
-  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
-}
 // 止盈位相對進場的幅度。順著單子方向算,所以空單的止盈(價格更低)一樣是正數。
-function lvlPct(t, lvl) {
-  if (!t || !lvl || !t.entry) return ''
-  const p = t.dir === 'short' ? ((t.entry - lvl) / t.entry) * 100 : ((lvl - t.entry) / t.entry) * 100
-  return fmtPct(p)
-}
-function fmtClock(iso) {
-  if (!iso) return '-'
-  return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-}
 function fmtDur(ms) {
   if (!isFinite(ms) || ms < 0) return '-'
   const m = Math.floor(ms / 60000)
@@ -1991,20 +972,20 @@ function scoreClass(n) {
 }
 
 // load everything the current role is allowed to see (gated endpoints 403 quietly)
+//
+// ⚠️ 這裡以前有一行 `if (!authed.value) return` —— 那是全站還鎖在登入牆後面時的寫法。
+// 首頁改成公開瀏覽之後,那行會讓「未登入訪客什麼資料都載不到」:排行、快訊、Upbit、
+// 財經事件、Robinhood、文章全部空白,而且畫面停在「載入中…」看起來像還在載。
+// 公開端點本來就允許匿名存取,受限的端點會自己回 403,不需要在這裡先擋一次。
 function loadAll() {
-  if (!authed.value) return // gated: nothing loads until an active member+ is in
   loadRanking()
   loadHome()
   loadRisk()
   loadEvents()
-  loadFlow()
   loadUpbit()
   loadNews()
-  loadFunding()
-  loadUnlock()
   loadRobinhood()
   loadMarketAI()
-  loadSectors()
   loadArticles()
   if (can('member')) {
     loadBoard()
@@ -2021,7 +1002,6 @@ function loadAll() {
     loadRefAdmin()
     // load every strategy each cycle so the nav badges show open counts without
     // having to open each tab first
-    loadRsifade()
     loadBollfade()
     loadMeanrev()
     loadBgv2()
@@ -2093,8 +1073,29 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'rsifade', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
+
+// ---- 網址 ↔ 分頁 雙向同步 ----
+// mainTab 仍是畫面的唯一依據(27 個 `mainTab = 'x'` 的呼叫點都不用改),
+// router 只負責把它反映到網址上,並讓深層連結/上一頁能還原分頁。
+const route = useRoute()
+const router = useRouter()
+let syncing = false // 防止兩個 watch 互相觸發成迴圈
+
+watch(() => route.params.tab, (t) => {
+  const next = ROUTE_TABS.includes(t) ? t : 'ranking'
+  if (next === mainTab.value) return
+  syncing = true
+  mainTab.value = next
+  syncing = false
+}, { immediate: true })
+
+watch(mainTab, (t) => {
+  if (syncing) return
+  const path = t === 'ranking' ? '/' : '/' + t
+  if (route.path !== path) router.push(path)
+})
 let onVisibility = null
 let onPageShow = null
 let onDocClick = null
@@ -2138,16 +1139,15 @@ onMounted(async () => {
   document.addEventListener('click', onDocClick)
   loadConfig()
   loadStratMeta() // 各策略類型標籤 + 風控警語
+  loadTabPerms()  // 各分頁所需最低身分(後台可調)
   await loadMe()
   loadAll()
   if (authed.value) loadNotice().then(maybeShowNotice) // 返回用戶(帶 token)登入時的公告彈窗
   timer = setInterval(tick, 15000)
-  // deep-link: notification opened the app cold with /?tab=gamble (and optionally
-  // &article=<id> to jump straight into a column post) → apply it
+  // deep-link:分頁本身(/conv 或舊格式 /?tab=conv)已由 router 處理,這裡只管
+  // 附加參數。注意不能再用 history.replaceState 清網址 —— 那會蓋掉 router 的狀態。
   const qs = new URLSearchParams(location.search)
-  const qtab = qs.get('tab')
   const qart = qs.get('article')
-  if (qtab) gotoTab(qtab)
   if (qart) openArticleById(qart)
   // 推薦連結 /?referralCode=XXXX → 記在記憶體、自動切到註冊頁。URL 隨即清掉,所以
   // 重新整理/關閉頁面推薦碼就消失(用戶指定的行為)。
@@ -2156,8 +1156,8 @@ onMounted(async () => {
     pendingRef.value = qref.trim().toUpperCase()
     authTab.value = 'register'
   }
-  if (qtab || qart || qref) history.replaceState({}, '', location.pathname)
-  if (bfOpen.value) bfStart() // 戰場:開 WS + 動畫迴圈
+  if (qart || qref) router.replace({ path: route.path }) // 只清 query,保留分頁路徑
+  // 戰場的 WS/動畫由 BattleField 元件自己起停,這裡不再插手
   // register service worker for PWA + push
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
@@ -2182,10 +1182,9 @@ onMounted(async () => {
   // On return to the foreground, re-sync immediately; after a long background,
   // reload to rebuild a clean state instead of risking the blank-resume screen.
   onVisibility = () => {
-    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); bfStop(); return } // 背景不燒電/不佔連線
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return } // 戰場自己會停
     if (hiddenAt && Date.now() - hiddenAt > 30 * 60 * 1000) { location.reload(); return }
     tick()
-    if (bfOpen.value) bfStart()
   }
   document.addEventListener('visibilitychange', onVisibility)
   // restored from the back/forward cache → reload to get a clean, current page
@@ -2194,7 +1193,6 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   clearInterval(timer)
-  bfStop()
   if (onVisibility) document.removeEventListener('visibilitychange', onVisibility)
   if (onPageShow) window.removeEventListener('pageshow', onPageShow)
   if (onDocClick) document.removeEventListener('click', onDocClick)
@@ -2205,16 +1203,50 @@ watch(mainTab, loadMe)
 // or a rotated token) drops the user below the current tab's requirement, fall
 // back to the public ranking tab — so the content area can never land on a gated
 // v-else-if branch that matches nothing and renders blank.
-const TAB_MIN_ROLE = {
+// 這份只是「後端還沒回來之前」的備援值,必須與後端 tabMeta 的預設一致。
+// 真正生效的是 /api/tab-perms(後台可調),而且後端自己也會擋 —— 前端這層只決定畫面。
+const TAB_MIN_ROLE_FALLBACK = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  rsifade: 'admin', bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin',
 }
-watch(role, () => {
-  const need = TAB_MIN_ROLE[mainTab.value]
-  if (need && !can(need)) mainTab.value = 'ranking'
+const tabPerms = ref({})
+async function loadTabPerms() {
+  try {
+    const res = await authFetch('/api/tab-perms')
+    if (res.ok) tabPerms.value = await res.json()
+  } catch (e) {
+    /* 拿不到就沿用備援值 */
+  }
+}
+// 某分頁需要的最低身分
+function tabNeed(tab) {
+  return tabPerms.value[tab] || TAB_MIN_ROLE_FALLBACK[tab] || 'public'
+}
+// 目前身分能不能看某分頁
+function canTab(tab) {
+  return can(tabNeed(tab))
+}
+// 這一列有沒有任何看得到的分頁(整列都看不到就不顯示標題)
+function anyTab(tabs) {
+  return tabs.some(canTab)
+}
+// 身分或權限設定變動時,若目前停留在看不到的分頁就退回公開首頁,
+// 否則內容區會落在一個都不成立的 v-else-if 分支上、整片空白。
+// 身分或權限設定變動時重新評估目前分頁。
+//
+// 這裡要以「網址」為準重新推導,不能只是把看不到的分頁踢回首頁 —— 因為登入狀態是
+// 非同步解析的:深連 /admin 時,route 會先把 mainTab 設成 admin,但那一刻 role 還是
+// public,若直接踢回 ranking,等 loadMe() 回來變成 admin 後也沒有東西會把它救回去,
+// 使用者就莫名其妙停在首頁。
+watch([role, tabPerms, authReady], () => {
+  // 登入狀態還沒解析完就先不要動:深連 /admin 時 route 會先把 mainTab 設成 admin,
+  // 但那一刻 role 仍是 public。若此時就踢回首頁,會連帶把網址改成 /,route 參數消失,
+  // 等 loadMe() 回來也救不回去 —— 使用者就莫名其妙停在首頁。
+  if (!authReady.value) return
+  if (!canTab(mainTab.value)) mainTab.value = 'ranking'
 })
 </script>
 
@@ -2224,57 +1256,6 @@ watch(role, () => {
     <div v-if="toastMsg" class="toast" :class="toastType">{{ toastMsg }}</div>
   </transition>
 
-  <!-- auth gate: shown until an APPROVED (active) member+ is logged in -->
-  <div v-if="!authed" class="authgate">
-    <div class="authcard">
-      <img src="/logo.png" class="authlogo" alt="JMCH" />
-      <p class="authslogan">Just MONEY Come Here</p>
-
-      <div v-if="!authReady" class="authmsg">驗證中…</div>
-      <template v-else>
-        <div class="authtabs">
-          <button :class="{ on: authTab === 'login' }" @click="authTab = 'login'; regErr = ''; regDone = ''">登入</button>
-          <button :class="{ on: authTab === 'register' }" @click="authTab = 'register'; loginErr = ''">註冊</button>
-        </div>
-
-        <div v-if="authMsg" class="authnote">{{ authMsg }}</div>
-
-        <template v-if="authTab === 'login'">
-          <input :value="loginForm.u" @input="loginForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英數)" @keyup.enter="doLogin" />
-          <input :value="loginForm.p" @input="loginForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼" @keyup.enter="doLogin" />
-          <button class="authbtn" @click="doLogin">登入</button>
-          <div v-if="loginErr" class="autherr">{{ loginErr }}</div>
-        </template>
-
-        <template v-else>
-          <div class="regcond">
-            <b>註冊條件</b>
-            <span>① 使用我們推薦碼註冊的 Bitunix 帳戶,持有 300U 以上</span>
-            <span>② 填寫交易所 UID 與 Email</span>
-            <span>③ 上傳資產證明圖片</span>
-          </div>
-          <a class="bitunix-cta" href="https://www.bitunix.com/register?vipCode=jmch" target="_blank" rel="noopener">
-            🚀 還沒有 Bitunix 帳戶?點此註冊(專屬推薦碼 jmch)
-          </a>
-          <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
-          <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
-          <input v-model="regForm.uid" class="authin" placeholder="UID" />
-          <input v-model="regForm.email" class="authin" type="email" placeholder="Email" />
-          <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註,選填)" />
-          <label class="authfile">
-            <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片(300U 以上)' }}</span>
-            <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
-          </label>
-          <!-- 好友推薦碼:刻意不叫「推薦碼」,上面的 Bitunix vipCode 也叫推薦碼,兩者不同 -->
-          <div v-if="pendingRef" class="refnote">🎁 已套用好友推薦碼 <b>{{ pendingRef }}</b><span>註冊完成後將自動綁定</span></div>
-          <button class="authbtn" @click="doRegister">註冊</button>
-          <div v-if="regErr" class="autherr">{{ regErr }}</div>
-          <div v-if="regDone" class="authok">{{ regDone }}</div>
-          <p class="authhint">註冊後為「審核中」狀態,需管理員審核通過才能登入。</p>
-        </template>
-      </template>
-    </div>
-  </div>
 
   <!-- top bar -->
   <header class="topbar">
@@ -2307,15 +1288,54 @@ watch(role, () => {
     </div>
   </header>
 
-  <!-- login modal -->
-  <div v-if="loginOpen" class="overlay" @click="loginOpen = false">
-    <div class="loginbox" @click.stop>
-      <h3>會員登入</h3>
-      <input v-model="loginForm.u" placeholder="帳號" autocomplete="username" @keyup.enter="doLogin" />
-      <input v-model="loginForm.p" type="password" placeholder="密碼" autocomplete="current-password" @keyup.enter="doLogin" />
-      <p v-if="loginErr" class="err">{{ loginErr }}</p>
-      <button class="loginbtn" @click="doLogin">登入</button>
-      <p class="loginhint">尚無帳號?請依公告填寫 Google 表單申請(附入金與 UID 證明)。</p>
+  <!-- 登入 / 註冊彈窗。首頁改為公開瀏覽後,這裡是進入會員/VIP 的唯一入口 ——
+       原本這兩份表單住在全屏登入牆裡,牆拿掉後整組搬進來,不能只留登入。 -->
+  <div v-if="loginOpen" class="overlay overlay-center" @click="closeAuthModal">
+    <div class="authcard authmodal" @click.stop>
+      <button class="xbtn authx" @click="closeAuthModal">✕</button>
+      <img src="/logo.png" class="authlogo" alt="JMCH" />
+      <p class="authslogan">Just MONEY Come Here</p>
+
+      <div class="authtabs">
+        <button :class="{ on: authTab === 'login' }" @click="authTab = 'login'; regErr = ''; regDone = ''">登入</button>
+        <button :class="{ on: authTab === 'register' }" @click="authTab = 'register'; loginErr = ''">註冊</button>
+      </div>
+
+      <div v-if="authMsg" class="authnote">{{ authMsg }}</div>
+
+      <template v-if="authTab === 'login'">
+        <input :value="loginForm.u" @input="loginForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英數)" autocomplete="username" @keyup.enter="doLogin" />
+        <input :value="loginForm.p" @input="loginForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼" autocomplete="current-password" @keyup.enter="doLogin" />
+        <button class="authbtn" @click="doLogin">登入</button>
+        <div v-if="loginErr" class="autherr">{{ loginErr }}</div>
+      </template>
+
+      <template v-else>
+        <div class="regcond">
+          <b>註冊條件</b>
+          <span>① 使用我們推薦碼註冊的 Bitunix 帳戶,持有 300U 以上</span>
+          <span>② 填寫交易所 UID 與 Email</span>
+          <span>③ 上傳資產證明圖片</span>
+        </div>
+        <a class="bitunix-cta" href="https://www.bitunix.com/register?vipCode=jmch" target="_blank" rel="noopener">
+          🚀 還沒有 Bitunix 帳戶?點此註冊(專屬推薦碼 jmch)
+        </a>
+        <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
+        <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
+        <input v-model="regForm.uid" class="authin" placeholder="UID" />
+        <input v-model="regForm.email" class="authin" type="email" placeholder="Email" />
+        <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註,選填)" />
+        <label class="authfile">
+          <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片(300U 以上)' }}</span>
+          <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
+        </label>
+        <!-- 好友推薦碼:刻意不叫「推薦碼」,上面的 Bitunix vipCode 也叫推薦碼,兩者不同 -->
+        <div v-if="pendingRef" class="refnote">🎁 已套用好友推薦碼 <b>{{ pendingRef }}</b><span>註冊完成後將自動綁定</span></div>
+        <button class="authbtn" @click="doRegister">註冊</button>
+        <div v-if="regErr" class="autherr">{{ regErr }}</div>
+        <div v-if="regDone" class="authok">{{ regDone }}</div>
+        <p class="authhint">註冊後為「審核中」狀態,需管理員審核通過才能登入。</p>
+      </template>
     </div>
   </div>
 
@@ -2476,39 +1496,8 @@ watch(role, () => {
   </div>
 
   <div class="wrap">
-    <!-- 戰場: BTC 多空交戰 (即時,瀏覽器直連交易所) -->
-    <div class="bf">
-      <div class="bf-top">
-        <span class="bf-title">
-          <span class="bf-dot" :class="{ off: !bfLive.conn }"></span>BTC 多空交戰
-          <span class="help" tabindex="0">?<span class="help-pop">
-            戰場即時反映真實買賣:<b>X 軸就是價格</b>。中央金線是<b>現價戰線</b>;
-            右邊紅色要塞是<b>壓力位</b>(空方堡壘)、左邊綠色要塞是<b>支撐位</b>(多方堡壘),
-            <b>牆的厚度 = 該價位被測試過幾次</b>,被跌破/突破時會裂開並標記「已攻破」。
-            地形起伏是<b>訂單簿掛單量</b>;綠兵向右衝=主動買、紅兵向左衝=主動賣;
-            爆炸是<b>強制平倉(清算)</b>。<br><br>
-            ⚠️ 這是盤面視覺化,僅供參考,不構成投資建議。
-          </span></span>
-        </span>
-        <button class="bf-fold" @click="bfToggle">{{ bfOpen ? '收合' : '展開' }}</button>
-      </div>
-      <template v-if="bfOpen">
-        <canvas ref="bfCanvas" class="bf-cv"></canvas>
-        <div class="bf-bar" :title="'主動買 ' + bfPressure.toFixed(0) + '%'">
-          <div class="bf-bar-fill" :style="{ width: bfPressure + '%' }"></div>
-          <span class="bf-bar-l">主動買 {{ bfPressure.toFixed(0) }}%</span>
-          <span class="bf-bar-r">{{ (100 - bfPressure).toFixed(0) }}% 主動賣</span>
-        </div>
-        <div class="bf-stats">
-          <span><i class="bf-k">多方帳戶</i>{{ bfLive.longPct.toFixed(0) }}%</span>
-          <span><i class="bf-k">未平倉</i>{{ bfUsd(bfLive.oi) }} BTC</span>
-          <span><i class="bf-k bull">多單陣亡</i>${{ bfUsd(bfLive.liqLong) }}</span>
-          <span><i class="bf-k bear">空單陣亡</i>${{ bfUsd(bfLive.liqShort) }}</span>
-          <span v-if="bfSR && bfSR.sup_ok"><i class="bf-k">支撐城牆</i>${{ Math.round(bfSR.support).toLocaleString() }}</span>
-          <span v-if="bfSR && bfSR.res_ok"><i class="bf-k">壓力城牆</i>${{ Math.round(bfSR.resistance).toLocaleString() }}</span>
-        </div>
-      </template>
-    </div>
+    <!-- 戰場: BTC 多空交戰(自給自足元件,自己連 WS、自己起停動畫) -->
+    <BattleField />
 
     <!-- 整點大盤分析 (live message, above the recs) -->
     <div v-if="marketAI && marketAI.text" class="mai-live">
@@ -2598,85 +1587,85 @@ watch(role, () => {
 
     <!-- nav -->
     <nav class="mainnav">
-      <div class="navrow">
+      <!-- 每顆分頁鈕各自依「標籤權限」設定顯示;整列都看不到時連列標題一起收掉。
+           分組只是視覺標籤 —— 後台把某頁調給別的身分組時,是按鈕自己出現/消失。 -->
+      <div class="navrow" v-if="anyTab(['ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles'])">
         <span class="navgroup">公開</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
-          <button :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
-          <button :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
+          <button v-if="canTab('ranking')" :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
+          <button v-if="canTab('list')" :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
+          <button v-if="canTab('events')" :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
             財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
-          <button :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
+          <button v-if="canTab('flow')" :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
+          <button v-if="canTab('upbit')" :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
             Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'news' }" @click="mainTab = 'news'; loadNews()">
+          <button v-if="canTab('news')" :class="{ active: mainTab === 'news' }" @click="mainTab = 'news'; loadNews()">
             市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'; loadFunding()">資金費率</button>
-          <button :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'; loadUnlock()">代幣解鎖</button>
-          <button :class="{ active: mainTab === 'sectors' }" @click="mainTab = 'sectors'; loadSectors()">板塊強弱</button>
-          <button :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
+          <button v-if="canTab('funding')" :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'">資金費率</button>
+          <button v-if="canTab('unlock')" :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'">代幣解鎖</button>
+          <button v-if="canTab('sectors')" :class="{ active: mainTab === 'sectors' }" @click="mainTab = 'sectors'">板塊強弱</button>
+          <button v-if="canTab('robinhood')" :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
             Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em>
           </button>
-          <button :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
+          <button v-if="canTab('articles')" :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
         </div>
       </div>
-      <div class="navrow" v-if="can('member')">
+      <div class="navrow" v-if="anyTab(['oi', 'signals', 'scorelog', 'radar'])">
         <span class="navgroup">會員</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
-          <button :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'">
+          <button v-if="canTab('oi')" :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
+          <button v-if="canTab('signals')" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'">
             數據訊號<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'scorelog' }" @click="mainTab = 'scorelog'">
+          <button v-if="canTab('scorelog')" :class="{ active: mainTab === 'scorelog' }" @click="mainTab = 'scorelog'">
             訊號紀錄<em v-if="scoreLog.length" class="navbadge">{{ scoreLog.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
+          <button v-if="canTab('radar')" :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
         </div>
       </div>
-      <div class="navrow" v-if="can('vip')">
+      <div class="navrow" v-if="anyTab(['paper', 'gamble', 'emaonly', 'conv', 'sr'])">
         <span class="navgroup">VIP</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
+          <button v-if="canTab('paper')" :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
             星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
+          <button v-if="canTab('gamble')" :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
             超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
+          <button v-if="canTab('emaonly')" :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
             銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'conv' }" @click="mainTab = 'conv'; loadConv()">
+          <button v-if="canTab('conv')" :class="{ active: mainTab === 'conv' }" @click="mainTab = 'conv'; loadConv()">
             冥王星<em v-if="conv && conv.open.length" class="navbadge">{{ conv.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'sr' }" @click="mainTab = 'sr'; loadSR()">支撐壓力</button>
+          <button v-if="canTab('sr')" :class="{ active: mainTab === 'sr' }" @click="mainTab = 'sr'; loadSR()">支撐壓力</button>
         </div>
       </div>
-      <div class="navrow" v-if="can('admin')">
+      <!-- 後台/推廣管理永遠鎖在管理員(後端也拒絕降級);策略觀察書則可調給 VIP。 -->
+      <div class="navrow" v-if="anyTab(['admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema'])">
         <span class="navgroup">管理</span>
         <div class="navbtns">
-          <button :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadCfgEditor(); loadNotice().then(loadNoticeEditor); loadStratStates()">
+          <button v-if="canTab('admin')" :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadNotice()">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
+          <button v-if="canTab('referral')" :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
             推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
           </button>
-          <button :class="{ active: mainTab === 'rsifade' }" @click="mainTab = 'rsifade'; loadRsifade()">
-            逆勢超買空<em v-if="rsifade && rsifade.open.length" class="navbadge">{{ rsifade.open.length }}</em>
-          </button>
-          <button :class="{ active: mainTab === 'bollfade' }" @click="mainTab = 'bollfade'; loadBollfade()">
+          <button v-if="canTab('bollfade')" :class="{ active: mainTab === 'bollfade' }" @click="mainTab = 'bollfade'; loadBollfade()">
             布林重回<em v-if="bollfade && bollfade.open.length" class="navbadge">{{ bollfade.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
+          <button v-if="canTab('meanrev')" :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
             乖離回歸<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
+          <button v-if="canTab('bgv2')" :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
             布乖v2<em v-if="bgv2 && bgv2.open.length" class="navbadge">{{ bgv2.open.length }}</em>
           </button>
-          <button :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
+          <button v-if="canTab('bollema')" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
             布林EMA<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
           </button>
         </div>
@@ -2726,7 +1715,7 @@ watch(role, () => {
     </section>
 
     <!-- 支撐壓力 (VIP) -->
-    <section v-else-if="mainTab === 'sr' && can('vip')">
+    <section v-else-if="mainTab === 'sr' && canTab('sr')">
       <div class="mk-head">
         <h2>支撐壓力<span class="help" tabindex="0">?<span class="help-pop">追蹤系統常駐的主流永續幣種(1h 週期)。用左右各 3 根的分形法找 swing low/high,價差 0.4% 內併為一群,取被測 ≥3 次的最近關卡。<b>僅提示,不進場、無止盈止損</b>:最新 1h 收盤跌破支撐或突破壓力時推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="sr && sr.levels">{{ sr.levels.length }} 檔有關卡 · 每根 1h 收盤更新</span>
@@ -2747,133 +1736,40 @@ watch(role, () => {
     </section>
 
     <!-- 冥王星 (動態ATR 4H 均線收斂) · VIP -->
-    <section v-else-if="mainTab === 'conv' && can('vip')">
+    <section v-else-if="mainTab === 'conv' && canTab('conv')">
       <div class="mk-head">
         <h2>冥王星<span class="help" tabindex="0">?<span class="help-pop">‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
-      <p v-if="stratRisky('conv')" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
-      <div v-if="conv" class="pstats">
-        <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf('conv').join('・') || '—' }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="conv.stats.win_rate >= 50 ? 'long' : 'short'">{{ conv.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="conv.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="conv.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(conv.stats.total_pnl) }}</div></div>
-      </div>
-      <div v-if="conv && conv.stats.closed" class="tpfunnel">
-        <div class="tpf-title">止盈達成漏斗 · 共 {{ conv.stats.closed }} 筆已結束</div>
-        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp1, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp1 }} 筆 · <b>{{ pctOf(conv.stats.tp1, conv.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp2, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp2 }} 筆 · <b>{{ pctOf(conv.stats.tp2, conv.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(conv.stats.tp3, conv.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ conv.stats.tp3 }} 筆 · <b>{{ pctOf(conv.stats.tp3, conv.stats.closed) }}%</b></span></div>
-      </div>
-
-      <h3 class="psub" v-if="conv && conv.open.length">進行中 ({{ conv.open.length }})</h3>
-      <table v-if="conv && conv.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th><th v-if="can('admin')" class="r">操作</th></tr></thead>
-        <tbody>
-          <tr v-for="t in conv.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ('止盈 ' + fmtPrice(t.tp))">
-              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span></template>
-              <span v-else class="tsmall">單一 · {{ fmtPrice(t.tp) }}</span>
-            </td>
-            <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
-            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-            <td v-if="can('admin')" class="r"><button class="exitbtn" @click.stop="manualExitStrat('conv', t.id, loadConv)">手動出場</button></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3 class="psub" v-if="conv && conv.closed.length">已結束 ({{ conv.closed.length }})</h3>
-      <table v-if="conv && conv.closed.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="(t, i) in conv.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <p v-if="conv && !conv.open.length && !conv.closed.length" class="loading">尚無訊號——需等 4H 收盤出現橫盤收斂 + 盈虧比達標(首次啟動需抓取歷史 K 線)。</p>
-      <p v-else-if="!conv" class="loading">載入中…</p>
+      <StrategyBook
+        :state="conv"
+        :risky="stratRisky('conv')"
+        :tags="stratTagsOf('conv')"
+        :stats-order="['type', 'win', 'avg', 'total']"
+        :can-exit="can('admin')"
+        empty-text="尚無訊號——需等 4H 收盤出現橫盤收斂 + 盈虧比達標(首次啟動需抓取歷史 K 線)。"
+        @coin="openDetail"
+        @exit="(id) => manualExitStrat('conv', id, loadConv)"
+      />
     </section>
 
     <!-- 均值回歸策略(逆勢超買空 / 布林重回 / 乖離回歸)· 分批止盈 · admin only -->
-    <section v-else-if="micro && can('admin')">
+    <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }} · 已結束 {{ microState.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
 
-      <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
-      <div v-if="microState" class="pstats">
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="microState.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.total_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="microState.stats.win_rate >= 50 ? 'long' : 'short'">{{ microState.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="microState.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(microState.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">策略類型<span class="help" tabindex="0">?<span class="help-pop">此策略的操作屬性:激進/保守(風險)、高頻/低頻(開單頻率)、長線/短線(持倉時間)。由管理端設定。</span></span></div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
-      </div>
-
-      <div v-if="microState && microState.stats.multi_tp && microState.stats.closed" class="tpfunnel">
-        <div class="tpf-title">止盈達成漏斗 · 共 {{ microState.stats.closed }} 筆已結束</div>
-        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp1, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp1 }} 筆 · <b>{{ pctOf(microState.stats.tp1, microState.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp2, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp2 }} 筆 · <b>{{ pctOf(microState.stats.tp2, microState.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(microState.stats.tp3, microState.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ microState.stats.tp3 }} 筆 · <b>{{ pctOf(microState.stats.tp3, microState.stats.closed) }}%</b></span></div>
-      </div>
-
-      <h3 class="psub" v-if="microState && microState.open.length">進行中 ({{ microState.open.length }})</h3>
-      <table v-if="microState && microState.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th><th class="r">操作</th></tr></thead>
-        <tbody>
-          <tr v-for="t in microState.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' (' + lvlPct(t, t.tp1) + ') · TP2 ' + fmtPrice(t.tp2) + ' (' + lvlPct(t, t.tp2) + ') · TP3 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')') : ('止盈 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')')">
-              <template v-if="t.tp1">
-                <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
-              </template>
-              <template v-else>
-                <span class="tsmall">單一 · {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span>
-                <!-- 保本位:純提示,止盈止損不變(布林EMA) -->
-                <span v-if="t.be_hit" class="betag" :title="'價格曾觸及保本位 ' + fmtPrice(t.be_price) + ';止盈止損維持不變'">🛡 已達保本位 {{ fmtPrice(t.be_price) }}</span>
-              </template>
-            </td>
-            <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
-            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-            <td class="r"><button class="exitbtn" @click.stop="manualExitStrat(mainTab, t.id, micro.load)">手動出場</button></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3 class="psub" v-if="microState && microState.closed.length">已結束 ({{ microState.closed.length }})</h3>
-      <table v-if="microState && microState.closed.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
-        <tbody>
-          <tr v-for="(t, i) in microState.closed" :key="i" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="outcomeCls(t.outcome)">{{ convOutcome(t.outcome) }}</span></td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <p v-if="microState && !microState.open.length && !microState.closed.length" class="loading">尚無訊號——需等收盤觸發進場訊號(首次啟動需抓取歷史 K 線)。</p>
-      <p v-else-if="!microState" class="loading">載入中…</p>
+      <StrategyBook
+        :state="microState"
+        :risky="stratRisky(curStrat)"
+        :tags="stratTagsOf(curStrat)"
+        :stats-order="['total', 'win', 'avg', 'type']"
+        :can-exit="true"
+        empty-text="尚無訊號——需等收盤觸發進場訊號(首次啟動需抓取歷史 K 線)。"
+        @coin="openDetail"
+        @exit="(id) => manualExitStrat(mainTab, id, micro.load)"
+      />
     </section>
 
     <!-- 後台管理 (admin only) -->
@@ -2952,243 +1848,27 @@ watch(role, () => {
     </section>
 
     <section v-else-if="mainTab === 'admin' && can('admin')">
-      <div class="mk-head"><h2>後台 · 使用者管理</h2><span class="mk-count">{{ users.length }} 位</span></div>
+      <div class="mk-head"><h2>後台</h2><span class="mk-count">{{ users.length }} 位使用者</span></div>
       <p v-if="adminMsg" class="admin-msg">{{ adminMsg }}</p>
 
-      <!-- 待審核 -->
-      <section v-if="pendingUsers.length" class="card adminbox">
-        <h3 class="psub">🟡 待審核 ({{ pendingUsers.length }})</h3>
-        <div class="reviewgrid">
-          <div v-for="u in pendingUsers" :key="u.username" class="reviewcard">
-            <div v-if="u.proof" class="reviewproof" @click="proofView = u.proof"><img :src="u.proof" alt="資產證明" /></div>
-            <div v-else class="reviewproof empty">無證明圖</div>
-            <div class="reviewinfo">
-              <div class="ri-name">{{ u.username }}</div>
-              <div class="ri-row">UID:<b>{{ u.uid || '—' }}</b></div>
-              <div class="ri-row">交易所:<b>{{ u.notes || '—' }}</b></div>
-              <div class="ri-row"><small>{{ u.created ? new Date(u.created).toLocaleString() : '' }}</small></div>
-              <div class="reviewact">
-                <button class="okbtn" @click="approveUser(u)">✓ 通過</button>
-                <button class="nobtn" @click="rejectUser(u)">✕ 駁回</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <!-- 後台各功能管理標籤 -->
+      <nav class="adminnav">
+        <button v-for="t in ADMIN_TABS" :key="t[0]" :class="{ on: adminTab === t[0] }" @click="adminTab = t[0]">{{ t[1] }}</button>
+      </nav>
 
-      <!-- 所有使用者 -->
-      <section class="card">
-        <h3 class="psub">所有使用者 <span class="mk-count">{{ filteredUsers.length }} / {{ users.length }}</span></h3>
-        <div class="userfilter">
-          <span class="tf-label">階級</span>
-          <button v-for="r in [['all','全部'],['member','會員'],['vip','VIP'],['admin','管理']]" :key="r[0]"
-            :class="{ on: userRoleFilter === r[0] }" @click="userRoleFilter = r[0]">{{ r[1] }}</button>
-          <span class="tf-label">註冊</span>
-          <input type="date" class="datein" v-model="userFrom" :max="userTo || undefined" title="起始日期" />
-          <span class="tf-sep">~</span>
-          <input type="date" class="datein" v-model="userTo" :min="userFrom || undefined" title="結束日期" />
-          <button v-for="t in [[7,'近7天'],[30,'近30天'],[90,'近90天']]" :key="t[0]" @click="setUserDays(t[0])">{{ t[1] }}</button>
-          <button v-if="userFrom || userTo" @click="setUserDays(0)">清除</button>
-          <span class="tf-label">排序</span>
-          <button :class="{ on: userSort === 'new' }" @click="userSort = 'new'">新→舊</button>
-          <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
-        </div>
-        <table class="grid">
-          <thead><tr><th>證明</th><th>帳號</th><th>UID / 交易所</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
-          <tbody>
-            <tr v-for="u in filteredUsers" :key="u.username">
-              <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="proofView = u.proof" /><span v-else>—</span></td>
-              <td class="coin"><button class="namebtn" @click="openRefOf(u.username)" title="查看推廣名單">{{ u.username }}</button>
-                <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
-                <em v-else-if="u.status === 'banned'" class="qtag bad">停用</em>
-              </td>
-              <td class="rl-text"><div>{{ u.uid || '—' }}</div><small>{{ u.notes || '—' }}</small></td>
-              <td>{{ u.role }}</td>
-              <td class="r tsmall">{{ fmtReg(u.created) }}</td>
-              <td class="r">
-                <button v-if="u.role !== 'admin'" class="regbtn" :class="{ on: u.role === 'vip' }" @click="toggleVip(u)">{{ u.role === 'vip' ? 'VIP ✓' : '設 VIP' }}</button>
-                <em v-else class="qtag">admin</em>
-              </td>
-              <td class="r">
-                <label v-if="u.username !== username && u.role !== 'admin'" class="switch">
-                  <input type="checkbox" :checked="u.status === 'active'" @change="toggleEnabled(u)" />
-                  <span class="sw-track"></span>
-                </label>
-                <em v-else class="qtag good">{{ u.username === username ? '本人' : '—' }}</em>
-              </td>
-              <td class="r">
-                <button v-if="u.username !== username" class="delbtn" @click="deleteUser(u)" title="刪除帳號">🗑</button>
-                <span v-else>—</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!users.length" class="empty">尚無使用者。</p>
-        <p v-else-if="!filteredUsers.length" class="empty">此條件下無符合的使用者。</p>
-      </section>
+      <UserManagement v-if="adminTab === 'users'" :users="users" :current-user="username"
+        @reload="loadUsers" @msg="(m) => (adminMsg = m)" @proof="(p) => (proofView = p)" @refof="openRefOf" />
 
-      <!-- 手動新增 -->
-      <section class="card adminbox">
-        <h3 class="psub">手動新增使用者</h3>
-        <div class="newuser">
-          <input v-model="newUser.u" placeholder="帳號" />
-          <input v-model="newUser.p" type="text" placeholder="密碼" />
-          <select v-model="newUser.role">
-            <option value="member">member</option>
-            <option value="vip">vip</option>
-            <option value="admin">admin</option>
-          </select>
-          <select v-model="newUser.status">
-            <option value="active">active</option>
-            <option value="pending">pending</option>
-            <option value="banned">banned</option>
-          </select>
-          <button class="loginbtn" @click="createUser">新增</button>
-        </div>
-      </section>
+      <!-- 標籤權限 / 策略設定:各自獨立元件,自己載資料 -->
+      <TabPermissions v-else-if="adminTab === 'perms'" @changed="loadTabPerms" @msg="(m) => (adminMsg = m)" />
+      <StrategySettings v-else-if="adminTab === 'strat'" @changed="loadStratMeta" @msg="(m) => (adminMsg = m)" />
+      <SiteSettings v-else-if="adminTab === 'site'" :config="config" :social-links="socialLinks"
+        @saved="loadConfig" @msg="(m) => (adminMsg = m)" @toast="(t, k) => showToast(t, k)" />
 
-      <!-- 策略開關 -->
-      <section class="card adminbox">
-        <h3 class="psub">策略開關 <button class="minibtn" @click="loadStratStates">刷新</button></h3>
-        <div class="strat-toggles">
-          <div v-for="st in stratStates" :key="st.name" class="stratcfg">
-            <div class="strat-row">
-              <span class="strat-name">{{ st.label }}</span>
-              <button class="toggle" :class="{ on: st.enabled }" @click="toggleStrat(st)">
-                <span class="toggle-knob"></span>
-              </button>
-              <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
-            </div>
-            <div class="stratcfg-line">
-              <span class="stratcfg-k">類型</span>
-              <button v-for="tg in STRAT_TAGS" :key="tg" class="tagchip" :class="{ on: (st.tags || []).includes(tg) }" @click="toggleStratTag(st, tg)">{{ tg }}</button>
-            </div>
-            <div class="stratcfg-line">
-              <span class="stratcfg-k">最大止損%</span>
-              <input v-model.number="st.max_sl_pct" type="number" min="0" max="100" step="0.5" class="stratcfg-num" />
-              <span class="stratcfg-hint">0 = 不限制;止損距離超過此% 不開新單</span>
-            </div>
-            <div class="stratcfg-line">
-              <label class="stratcfg-chk"><input v-model="st.show_risk" type="checkbox" /> 顯示風控建議</label>
-              <label class="stratcfg-chk"><input v-model="st.multi_tp" type="checkbox" /> 分批止盈</label>
-              <!-- 保本由 TP1 觸發,沒有分批止盈就沒有 TP1 → 關閉時停用,避免看起來像獨立開關 -->
-              <label class="stratcfg-chk" :class="{ dim: !st.multi_tp }" :title="st.multi_tp ? '' : '需先開啟分批止盈'">
-                <input v-model="st.breakeven" type="checkbox" :disabled="!st.multi_tp" /> 保本(TP1後移止損)
-              </label>
-              <button class="minibtn" @click="saveStratCfg(st)">儲存</button>
-            </div>
-            <p v-if="!st.multi_tp" class="stratcfg-dep">↳ 保本由 TP1 觸發,分批止盈關閉時<b>不會生效</b></p>
-          </div>
-        </div>
-        <p class="loginhint">
-          關閉 = 該策略<b>不再開新單</b>;進行中的單<b>不會被平掉</b>(照常跑到止盈止損)。<br />
-          「顯示風控建議」開啟後,該策略頁會出現<b>風險警語</b>提醒使用者謹慎操作。<br />
-          最大止損% / 保本 / 分批止盈 只影響<b>之後開的新單</b>,已進行中的單維持原本的止盈止損設定。<br />
-          <b>保本依附於分批止盈</b>:止損是在 TP1 觸及時才移到保本價(進場±0.05%),所以分批止盈關閉時保本無效。<br />
-          另:止盈距離不到 <b>0.8%</b> 的單會自動<b>不分批</b>(退回單段),那種單也不會有保本。
-        </p>
-      </section>
-
-      <!-- 站台設定:logo / 社群 / QR -->
-      <section class="card adminbox">
-        <h3 class="psub">站台設定</h3>
-        <div class="cfg-row">
-          <span class="cfg-k">品牌 Logo</span>
-          <img v-if="config.logo" :src="config.logo" class="cfg-logo" />
-          <label class="authfile cfg-file"><span>上傳 Logo</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onLogoPick" /></label>
-          <button v-if="config.logo" class="delbtn" @click="setConfig('logo', '')">清除</button>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">首頁 QR</span>
-          <img v-if="config.qr" :src="config.qr" class="cfg-qr" />
-          <label class="authfile cfg-file"><span>上傳 QR 圖</span><input type="file" accept="image/*,.heic,.heif" hidden @change="onQrPick" /></label>
-          <button v-if="config.qr" class="delbtn" @click="setConfig('qr', '')">清除</button>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">QR 點擊連結</span>
-          <input class="authin" :value="config.qr_link || ''" @change="setConfig('qr_link', $event.target.value)" placeholder="選填:點擊 QR 開啟的網址" />
-        </div>
-
-        <h4 class="cfg-sub">社群連結 <button class="minibtn" @click="loadCfgEditor">載入目前</button></h4>
-        <div v-for="(s, i) in cfgSocial" :key="i" class="cfg-social">
-          <span class="cfg-ico" :style="{ background: socialInfo(s.platform).color }"
-                v-html="socialSvg(s.platform) || socialInfo(s.platform).icon"></span>
-          <select v-model="s.platform">
-            <option value="youtube">YouTube</option>
-            <option value="telegram">Telegram</option>
-            <option value="instagram">Instagram</option>
-            <option value="facebook">Facebook</option>
-            <option value="line">LINE</option>
-            <option value="custom">其他連結</option>
-          </select>
-          <input class="authin" v-model="s.url" placeholder="https://…" />
-          <button class="minibtn del" @click="removeSocial(i)">✕</button>
-        </div>
-        <div class="ae-addrow">
-          <button class="regbtn" @click="addSocial">＋ 新增社群</button>
-          <button class="loginbtn" @click="saveSocial">儲存社群</button>
-        </div>
-        <p class="loginhint">社群會顯示在頁尾(logo 引導跳轉);QR 懸浮在首頁右下角。</p>
-      </section>
-
-      <!-- 登入公告彈窗 -->
-      <section class="card adminbox">
-        <h3 class="psub">登入公告彈窗 <button class="minibtn" @click="loadNoticeEditor">載入目前</button></h3>
-        <div class="cfg-row">
-          <span class="cfg-k">標題</span>
-          <input class="authin" v-model="noticeForm.title" maxlength="60" placeholder="例:系統更新公告(選填)" />
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">內容</span>
-          <textarea class="authin nb-edit" v-model="noticeForm.text" maxlength="2000" placeholder="輸入公告內容,例如更新事項、維護時間、活動通知…(支援換行)"></textarea>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">顯示到</span>
-          <input class="authin" type="datetime-local" v-model="noticeForm.until" />
-          <span class="loginhint" style="margin:0">留空=不設期限;到期後自動不再顯示</span>
-        </div>
-        <div class="ae-addrow">
-          <button class="loginbtn" @click="saveNotice">儲存並發佈</button>
-          <button class="delbtn" @click="clearNotice">停用</button>
-        </div>
-        <p class="loginhint">
-          會員登入時彈出;每位用戶可勾「不再顯示此則」關閉。
-          <span v-if="notice && notice.active">目前<b class="long">顯示中</b><span v-if="notice.expiry"> · 到 {{ fundClock(notice.expiry) }}</span>。</span>
-          <span v-else>目前<b class="short">未啟用</b>。</span>
-          修改內容後會重新對所有人顯示一次。
-        </p>
-      </section>
-
-      <!-- 即時推播 (Feature: broadcast) -->
-      <section class="card adminbox">
-        <h3 class="psub">即時推播</h3>
-        <div class="cfg-row">
-          <span class="cfg-k">標題</span>
-          <input class="authin" v-model="bcTitle" maxlength="20" placeholder="例:測試" />
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">內容</span>
-          <input class="authin" v-model="bcBody" maxlength="20" placeholder="20 字內,例:我只是個測試文" />
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">用戶組</span>
-          <select class="authin cfg-sel" v-model="bcGroup">
-            <option value="all">全部</option>
-            <option value="member">會員</option>
-            <option value="vip">VIP</option>
-            <option value="admin">管理員</option>
-          </select>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-k">點擊跳轉</span>
-          <select class="authin cfg-sel" v-model="bcArticle">
-            <option value="">不跳轉(開啟首頁)</option>
-            <option v-for="a in articles" :key="a.id" :value="String(a.id)">📄 {{ a.title }}</option>
-          </select>
-          <button class="loginbtn" @click="sendBroadcast">發送推播</button>
-        </div>
-        <p class="loginhint">立即發送 Web Push 給選定用戶組(標題/內容各上限 20 字);可選點擊後跳轉到指定文章。僅發給已開啟通知的裝置。</p>
-      </section>
+      <LoginNotice v-else-if="adminTab === 'notice'" :notice="notice"
+        @saved="loadNotice" @msg="(m) => (adminMsg = m)" @toast="(t, k) => showToast(t, k)" />
+      <PushBroadcast v-else-if="adminTab === 'push'" :articles="articles"
+        @toast="(t, k) => showToast(t, k)" />
 
     </section>
 
@@ -3428,219 +2108,28 @@ watch(role, () => {
     </section>
 
     <!-- 財經事件 (high-impact US economic calendar) -->
-    <section v-else-if="mainTab === 'events'">
-      <div class="mk-head">
-        <h2>財經事件(高影響 · 美國)<span class="help" tabindex="0">?<span class="help-pop">高影響美國經濟事件。這是唯一能「事前」的——<b>事件前可降風險、預期波動</b>。釋出後顯示「實際 vs 預期」(實際優於預期通常利多風險資產)。時間為你的本地時區。⚠️ 約 30 分鐘更新一次。</span></span></h2>
-        <span class="mk-count">CPI / FOMC / 非農… · 共 {{ eventList.length }} 筆</span>
-      </div>
-      <table v-if="eventList.length" class="grid">
-        <thead><tr><th>時間</th><th>事件</th><th class="r">狀態</th><th class="r">前值</th><th class="r">預期</th><th class="r">實際</th></tr></thead>
-        <tbody>
-          <tr v-for="(e, i) in eventList" :key="i" :class="{ 'ev-done': e.released, 'ev-soon': evSoon(e) }">
-            <td class="tsmall">{{ fmtClock(e.time) }}</td>
-            <td>{{ e.title }}</td>
-            <td class="r">
-              <span v-if="e.released" class="otag expired">已釋出</span>
-              <span v-else class="ev-cd">⏳ {{ e.countdown }}</span>
-            </td>
-            <td class="r tsmall">{{ e.previous || '—' }}</td>
-            <td class="r tsmall">{{ e.forecast || '—' }}</td>
-            <td class="r"><b v-if="e.actual" :class="e.actual === e.forecast ? '' : 'hot'">{{ e.actual }}</b><span v-else>—</span></td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="loading">載入經濟行事曆中…(若持續空白,可能本週無高影響美國事件)</p>
-    </section>
+    <EventsBoard v-else-if="mainTab === 'events'" :event-list="eventList" />
 
     <!-- 清算 (liquidation feed, OKX) -->
-    <section v-else-if="mainTab === 'flow'">
-      <div class="mk-head">
-        <h2>清算<span class="help" tabindex="0">?<span class="help-pop">即時清算事件(OKX 永續)。<b>即時監控、非回測訊號</b>;持續累積,日後可驗證是否領先。多單被洗=下殺、空單被軋=上拉。</span></span></h2>
-      </div>
-
-      <!-- liquidation summary + feed -->
-      <div v-if="liquidations" class="liqsum">
-        <div class="liqbox short"><div class="stat-k">近 1h 多單爆倉</div><div class="stat-v short">${{ (liquidations.long_usd_1h / 1e6).toFixed(2) }}M</div></div>
-        <div class="liqbox long"><div class="stat-k">近 1h 空單爆倉</div><div class="stat-v long">${{ (liquidations.short_usd_1h / 1e6).toFixed(2) }}M</div></div>
-        <div class="liqbox"><div class="stat-k">偏向</div><div class="stat-v" :class="liquidations.long_usd_1h > liquidations.short_usd_1h ? 'short' : 'long'">{{ liquidations.long_usd_1h > liquidations.short_usd_1h ? '多單被洗(下殺)' : '空單被軋(上拉)' }}</div></div>
-      </div>
-
-      <h3 class="psub" v-if="liquidations && liquidations.recent.length">近期清算事件 ({{ liquidations.recent.length }})</h3>
-      <table v-if="liquidations && liquidations.recent.length" class="grid">
-        <thead><tr><th>時間</th><th>幣種</th><th>被清算</th><th class="r">金額</th><th class="r">價格</th></tr></thead>
-        <tbody>
-          <tr v-for="(r, i) in liquidations.recent" :key="i" class="clickable" @click="openDetail(r.coin)">
-            <td class="tsmall">{{ liqClock(r.time) }}</td>
-            <td class="coin">{{ r.coin }}</td>
-            <td><span class="dir" :class="r.side === 'long' ? 'short' : 'long'">{{ r.side === 'long' ? '多單' : '空單' }}</span></td>
-            <td class="r"><b>${{ r.usd >= 1e6 ? (r.usd / 1e6).toFixed(2) + 'M' : (r.usd / 1e3).toFixed(1) + 'K' }}</b></td>
-            <td class="r">{{ fmtPrice(r.px) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    <LiquidationBoard v-else-if="mainTab === 'flow'" @coin="openDetail" />
 
     <!-- Upbit 公告 (韓文原文自動翻譯為繁體中文) -->
-    <section v-else-if="mainTab === 'upbit'">
-      <div class="mk-head">
-        <h2>Upbit 公告<span class="help" tabindex="0">?<span class="help-pop">韓國 Upbit 交易所官方公告。原文為韓文,已自動翻譯為繁體中文;點擊可開啟原公告。<b>「上架」標記代表新幣上架/交易支援類公告</b>,通常對該幣種有較大影響。</span></span></h2>
-        <span class="mk-count">共 {{ upbitNotices.length }} 筆</span>
-      </div>
-      <table v-if="upbitNotices.length" class="grid">
-        <thead><tr><th>時間</th><th>標題(繁中)</th><th class="r">類型</th></tr></thead>
-        <tbody>
-          <tr v-for="n in upbitNotices" :key="n.id" :class="{ 'ev-soon': n.listing }">
-            <td class="tsmall">{{ upbitTime(n.listed_at) }}</td>
-            <td>
-              <a :href="n.url" target="_blank" rel="noopener" class="upbit-link">{{ n.title_zh }}</a>
-              <div class="upbit-orig">{{ n.title }}</div>
-            </td>
-            <td class="r">
-              <span v-if="n.listing" class="otag tp">🚀 上架</span>
-              <span v-else class="otag expired">公告</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="loading">載入 Upbit 公告中…(首次載入需翻譯,請稍候)</p>
-    </section>
+    <UpbitBoard v-else-if="mainTab === 'upbit'" :upbit-notices="upbitNotices" />
 
     <!-- 市場快訊 (全球新聞事件) -->
-    <section v-else-if="mainTab === 'news'">
-      <div class="mk-head">
-        <h2>市場快訊<span class="help" tabindex="0">?<span class="help-pop">加密市場即時新聞頭條,依主題自動分類(人物/央行/貿易/地緣/監管/爆雷/機構/巨鯨/加密等)。英文原標題自動翻譯為繁中,點擊開原文。⚠️ 僅供風險參考,非投資建議。</span></span></h2>
-        <span class="mk-count">共 {{ news.length }} 則 · 每 5 分更新</span>
-      </div>
-      <div class="timefilter" v-if="news.length">
-        <button :class="{ on: newsCat === '' }" @click="newsCat = ''">全部</button>
-        <button v-for="c in newsCatList" :key="c.key" :class="{ on: newsCat === c.key }" @click="newsCat = c.key">{{ c.label }}</button>
-      </div>
-      <table v-if="newsF.length" class="grid">
-        <thead><tr><th>時間</th><th>類型</th><th>標題(繁中)</th><th>媒體</th></tr></thead>
-        <tbody>
-          <tr v-for="(n, i) in newsF" :key="i">
-            <td class="tsmall">{{ upbitTime(n.time) }}</td>
-            <td class="tsmall"><span class="newscat" :class="'nc-' + n.category">{{ n.label }}</span></td>
-            <td>
-              <a :href="n.url" target="_blank" rel="noopener" class="upbit-link">{{ n.title }}</a>
-              <div v-if="n.title_en" class="upbit-orig">{{ n.title_en }}</div>
-            </td>
-            <td class="tsmall">{{ n.domain }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else-if="news.length" class="empty">此分類暫無快訊</p>
-      <p v-else class="loading">載入市場快訊中…(首次載入需翻譯,請稍候)</p>
-    </section>
+    <NewsBoard v-else-if="mainTab === 'news'" :news="news" />
 
     <!-- 資金費率 (OKX) -->
-    <section v-else-if="mainTab === 'funding'">
-      <div class="mk-head">
-        <h2>資金費率<span class="help" tabindex="0">?<span class="help-pop">各永續合約的當期資金費率(資料來源 OKX)。<b>正費率</b>=多方付費給空方(市場偏多、多單擁擠),<b>負費率</b>=空方付費給多方。每 8 小時結算一次。費率極端常是情緒過熱/反轉的參考,⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="funding && funding.updated_at">來源 OKX · {{ fundingRows.length }} / {{ funding.rows.length }} 檔 · {{ fundClock(new Date(funding.updated_at).getTime()) }} 更新</span>
-      </div>
-      <div class="timefilter" v-if="funding && funding.rows.length">
-        <span class="tf-label">板塊</span>
-        <button :class="{ on: fundingSector === '' }" @click="fundingSector = ''">全部</button>
-        <button v-for="s in fundingSectors" :key="s" :class="{ on: fundingSector === s }" @click="fundingSector = s">{{ s }}</button>
-        <button class="tf-sort" :class="{ on: fundingAbs }" @click="fundingAbs = !fundingAbs" title="切換:費率高→低 / 絕對值大→小(找兩邊極端)">{{ fundingAbs ? '極端排序' : '費率排序' }}</button>
-      </div>
-      <table v-if="fundingRows.length" class="grid">
-        <thead><tr><th>幣種</th><th>板塊</th><th class="r">資金費率</th><th class="r">下次結算</th></tr></thead>
-        <tbody>
-          <tr v-for="f in fundingRows" :key="f.coin" class="clickable" @click="openDetail(f.coin)">
-            <td class="coin">{{ f.coin }}</td>
-            <td class="tsmall">{{ f.sector }}</td>
-            <td class="r" :class="f.rate >= 0 ? 'short' : 'long'"><b>{{ (f.rate * 100).toFixed(4) }}%</b></td>
-            <td class="r tsmall">{{ fundClock(f.next_ms) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="loading">載入資金費率中…</p>
-    </section>
+    <FundingBoard v-else-if="mainTab === 'funding'" @coin="openDetail" />
 
     <!-- 代幣解鎖 (DefiLlama) -->
-    <section v-else-if="mainTab === 'unlock'">
-      <div class="mk-head">
-        <h2>代幣解鎖<span class="help" tabindex="0">?<span class="help-pop">主流代幣的即將解鎖佔<b>流通供給</b>的比例=市場潛在賣壓;比例越高、越集中,拋壓風險越大。「下次懸崖」為未來 30 天內單日最大解鎖(佔最大供給%)。持續性的質押釋放不計入。⚠️ 非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="unlock && unlock.updated_at">來源 DefiLlama · {{ unlockRows.length }} 檔 · {{ fundClock(new Date(unlock.updated_at).getTime()) }} 更新</span>
-      </div>
-      <div class="timefilter" v-if="unlock && unlock.rows.length">
-        <span class="tf-label">排序</span>
-        <button :class="{ on: unlockSort === 'sell' }" @click="unlockSort = 'sell'">賣壓(30天%)</button>
-        <button :class="{ on: unlockSort === 'date' }" @click="unlockSort = 'date'">最近懸崖</button>
-      </div>
-      <table v-if="unlockRows.length" class="grid">
-        <thead><tr><th>代幣</th><th class="r" title="未來 7 天解鎖佔流通供給">7天</th><th class="r" title="未來 30 天解鎖佔流通供給 + 數量">30天</th><th class="r">30天估值</th><th class="r" title="30 天內單日最大解鎖(佔最大供給%)">下次懸崖</th><th>解鎖對象</th></tr></thead>
-        <tbody>
-          <tr v-for="u in unlockRows" :key="u.name">
-            <td class="coin">{{ u.coin }}<small class="vtag"> {{ u.name }}</small></td>
-            <td class="r tsmall">{{ u.next7_pct ? u.next7_pct.toFixed(2) + '%' : '—' }}</td>
-            <td class="r"><b :class="{ short: u.next30_pct >= 3 }">{{ u.next30_pct.toFixed(2) }}%</b><small class="vtag"> {{ fmtNum(u.next30_amt) }}<template v-if="!u.by_circ"> ⚠</template></small></td>
-            <td class="r tsmall">{{ u.usd30 ? '$' + fmtNum(u.usd30) : '—' }}</td>
-            <td class="r tsmall">{{ unlockDate(u.peak_date) }} <span class="vtag">{{ unlockDays(u.peak_date) }}</span> · {{ u.peak_pct_max ? u.peak_pct_max.toFixed(2) + '%' : '—' }}</td>
-            <td class="tsmall">{{ u.cats.join('、') }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="loading">載入代幣解鎖中…</p>
-    </section>
+    <UnlockBoard v-else-if="mainTab === 'unlock'" />
 
     <!-- Robinhood 上架 (currency-pair diff) -->
-    <section v-else-if="mainTab === 'robinhood'">
-      <div class="mk-head">
-        <h2>Robinhood 上架<span class="help" tabindex="0">?<span class="help-pop">監控 Robinhood 支援的加密幣清單,偵測到<b>新增可交易</b>的幣就即時推播(TG + 軟體)。Robinhood 上架常帶動幣價。清單即為目前可在 Robinhood 交易的幣;<b class="new-dot">新</b> 標記為近期新增。⚠️ 來源為 Robinhood 公開端點,僅供參考、非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="robinhood && robinhood.updated_at">來源 Robinhood · {{ robinhood.coins.length }} 檔可交易 · {{ fundClock(new Date(robinhood.updated_at).getTime()) }} 更新</span>
-      </div>
-      <div v-if="robinhood && robinhood.coins.length" class="rh-grid">
-        <div v-for="c in robinhood.coins" :key="c.code" class="rh-card" :class="{ isnew: c.new }">
-          <div class="rh-code">{{ c.code }}<span v-if="c.new" class="rh-new">新</span></div>
-          <div class="rh-name">{{ c.name }}</div>
-          <div class="rh-sym">{{ c.symbol }}</div>
-        </div>
-      </div>
-      <p v-else class="loading">載入 Robinhood 上架清單中…(首個週期後建立基準)</p>
-    </section>
+    <RobinhoodBoard v-else-if="mainTab === 'robinhood'" :robinhood="robinhood" />
 
     <!-- 板塊強弱/輪動 (hourly) -->
-    <section v-else-if="mainTab === 'sectors'">
-      <div class="mk-head">
-        <h2>板塊強弱<span class="help" tabindex="0">?<span class="help-pop">把全市場 24h 漲跌依板塊聚合,排出強弱。<b>相對BTC</b>=板塊平均 − BTC 24h(&gt;0 = 跑贏大盤、資金流入)。<b>本小時輪動</b>=相對BTC 較上小時的變化(▲ 資金轉入、▼ 轉出)。<b>上漲比例</b>=板塊內上漲檔數占比。<br><b>等權</b>=板塊內每檔幣一票(小幣大漲也算);<b>量權</b>=用成交量加權(大市值/主流幣主導)。<br>點板塊可展開看是哪幾檔在拉。每整點更新。⚠️ 僅供參考,非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="sectors && sectors.updated_at">BTC 24h {{ fmtPct(sectors.btc_chg) }} · {{ sectorRows.length }} 板塊 · {{ fundClock(new Date(sectors.updated_at).getTime()) }} 更新</span>
-      </div>
-      <div v-if="sectorRows.length" class="sec-summary">
-        🏆 領頭 <b class="long">{{ sectorLead }}</b> · 🐢 落後 <b class="short">{{ sectorLag }}</b><template v-if="sectorHot"> · 🔥 本小時轉強 <b class="long">{{ sectorHot }}</b></template>
-      </div>
-      <div class="timefilter" v-if="sectors && sectors.rows.length">
-        <span class="tf-label">排序</span>
-        <button :class="{ on: sectorSort === 'strength' }" @click="sectorSort = 'strength'">強弱</button>
-        <button :class="{ on: sectorSort === 'rotation' }" @click="sectorSort = 'rotation'">本小時輪動</button>
-        <button class="tf-sort" :class="{ on: !sectorVw }" @click="sectorVw = false" title="板塊內每檔幣一票(小幣大漲也算)">等權</button>
-        <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = true" title="用成交量加權(大市值主導)">量權</button>
-      </div>
-      <table v-if="sectorRows.length" class="grid">
-        <thead><tr><th>板塊</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
-        <tbody>
-          <template v-for="r in sectorRows" :key="r.sector">
-            <tr class="clickable" @click="sectorOpen = sectorOpen === r.sector ? '' : r.sector">
-              <td class="coin">{{ sectorOpen === r.sector ? '▾' : '▸' }} {{ r.sector }}</td>
-              <td class="r" :class="(sectorVw ? r.vw_chg : r.avg_chg) >= 0 ? 'long' : 'short'"><b>{{ fmtPct(sectorVw ? r.vw_chg : r.avg_chg) }}</b></td>
-              <td class="r" :class="r.vs_btc >= 0 ? 'long' : 'short'">{{ fmtPct(r.vs_btc) }}</td>
-              <td class="r tsmall">{{ r.breadth }}%</td>
-              <td class="r" :class="r.delta > 0 ? 'long' : r.delta < 0 ? 'short' : ''">{{ r.delta > 0 ? '▲' : r.delta < 0 ? '▼' : '' }}{{ r.delta >= 0 ? '+' : '' }}{{ r.delta }}</td>
-              <td class="r tsmall">{{ r.count }}</td>
-            </tr>
-            <tr v-if="sectorOpen === r.sector" class="sec-detail">
-              <td colspan="6">
-                <span class="sec-detail-lbl">板塊成員(24h 由強到弱):</span>
-                <span v-for="c in r.coins" :key="c.coin" class="sec-chip" :class="c.chg >= 0 ? 'up' : 'down'">{{ c.coin }} {{ fmtPct(c.chg) }}</span>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-      <p v-else class="loading">計算板塊強弱中…(每整點更新;首個整點後建立)</p>
-    </section>
+    <SectorBoard v-else-if="mainTab === 'sectors'" ref="sectorBoard" />
 
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
@@ -4136,11 +2625,28 @@ body::before {
 .stratcfg-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .stratcfg-k { font-size: 11px; color: #8b909a; min-width: 56px; }
 .stratcfg-num { width: 66px; background: #1b1d23; border: 1px solid #363943; border-radius: 6px; color: #e6e8ec; padding: 3px 6px; font-size: 12px; }
+.stratcfg-num.sm { width: 52px; }
+.stratcfg-mini { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #8b909a; }
+.stratcfg .minibtn, .stratcfg .roleopt { white-space: nowrap; } /* 窄螢幕下按鈕文字不要斷行 */
+.stratcfg-hint.warn { color: #d8ad48; }
 .stratcfg-hint { font-size: 10px; color: #71767f; }
 .stratcfg-chk { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #cdd0d6; cursor: pointer; }
 .stratcfg-chk.dim { color: #62666e; cursor: not-allowed; }
 .stratcfg-chk.dim input { cursor: not-allowed; }
 .stratcfg-dep { font-size: 10px; color: #b4642a; margin: -3px 0 0 4px; }
+/* 標籤權限 */
+.tabperms { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; margin: 4px 0 8px; }
+/* 後台功能分頁 */
+.adminnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+.adminnav button { background: #1b1e26; border: 1px solid #2b2f3a; color: #b9bdc4; border-radius: 8px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+.adminnav button.on { background: #2f4a7a33; border-color: #4a7ad4; color: #9dc0ff; font-weight: 700; }
+.tabperm-row { display: flex; align-items: center; gap: 8px; }
+.tabperm-name { flex: 1; font-size: 13px; color: #cdd0d6; display: inline-flex; align-items: center; gap: 4px; }
+.tabperm-lock { font-style: normal; font-size: 11px; opacity: .7; }
+.tabperm-opts { display: inline-flex; gap: 3px; }
+.roleopt { background: #24262c; border: 1px solid #363943; color: #8b909a; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+.roleopt.on { background: #2f4a7a33; border-color: #4a7ad4; color: #9dc0ff; font-weight: 700; }
+.roleopt.dim { opacity: .45; cursor: not-allowed; }
 .tagchip { background: #24262c; border: 1px solid #363943; color: #8b909a; border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; transition: all .12s; }
 .tagchip.on { background: #2ea86a22; border-color: #2ea86a; color: #57d495; }
 .stat-tags { font-size: 12px !important; color: #cdd0d6 !important; line-height: 1.35; }
@@ -4152,27 +2658,6 @@ body::before {
 .toggle.on { background: #2ea86a; }
 .toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
 .toggle.on .toggle-knob { left: 20px; }
-/* 戰場 (BTC 多空交戰) */
-.bf { background: #14161c; border: 1px solid #23262f; border-radius: 12px; padding: 11px 12px 12px; margin-bottom: 14px; }
-.bf-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.bf-title { font-size: 14px; font-weight: 700; color: #d8ad48; display: inline-flex; align-items: center; gap: 7px; }
-.bf-dot { width: 8px; height: 8px; border-radius: 50%; background: #2ec26b; animation: maipulse 1.8s infinite; }
-.bf-dot.off { background: #6b7280; animation: none; }
-.bf-fold { background: #1b1e26; border: 1px solid #2b2f3a; color: #b9bdc4; border-radius: 7px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
-.bf-cv { display: block; width: 100%; height: 260px; border-radius: 9px; background: linear-gradient(#0d0f14, #101319); }
-.bf-bar { position: relative; height: 22px; background: linear-gradient(90deg, rgba(226,74,74,0.20), rgba(226,74,74,0.42)); border-radius: 6px; margin-top: 9px; overflow: hidden; }
-/* 推進條:漸層 + 前緣發光,讓「誰在推」一眼看得出來,不是一塊死色 */
-.bf-bar-fill { position: relative; height: 100%; background: linear-gradient(90deg, rgba(46,194,107,0.30), rgba(46,194,107,0.62)); box-shadow: 0 0 12px rgba(46,194,107,0.45); transition: width .5s ease; }
-.bf-bar-fill::after { content: ''; position: absolute; top: 0; right: -1px; width: 2px; height: 100%; background: #7defb0; box-shadow: 0 0 8px #2ec26b; animation: bfedge 1.6s ease-in-out infinite; }
-@keyframes bfedge { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
-.bf-bar-l, .bf-bar-r { position: absolute; top: 0; line-height: 22px; font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
-.bf-bar-l { left: 8px; } .bf-bar-r { right: 8px; }
-/* 數據列:改成小卡片,數字放大,不再是一排灰字 */
-.bf-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; font-size: 13px; color: #e8e9ec; }
-.bf-stats span { display: inline-flex; align-items: baseline; gap: 6px; background: #1a1d24; border: 1px solid #262a33; border-radius: 7px; padding: 4px 9px; font-weight: 700; }
-.bf-k { font-style: normal; font-size: 11px; color: #8b909a; font-weight: 600; }
-.bf-k.bull { color: #3ddb84; } .bf-k.bear { color: #ff6b6b; }
-@media (max-width: 560px) { .bf-cv { height: 200px; } .bf-stats { font-size: 11px; gap: 5px 10px; } }
 
 .mai-live { background: #14161c; border: 1px solid #3a3320; border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; }
 .mai-live-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
@@ -4261,13 +2746,13 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 </style>
 
 <style>
-/* ---- JMCH auth gate (login / register) ---- */
-.authgate {
-  position: fixed; inset: 0; z-index: 9999;
-  display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(1200px 600px at 50% -10%, #1a1710, #0b0c0f 70%);
-  padding: 20px;
-}
+/* ---- JMCH 登入 / 註冊 ----
+   首頁已改為公開瀏覽,原本的全屏登入牆(.authgate)已移除;這組樣式現在
+   改用於登入/註冊彈窗(.authmodal),掛在既有的 .overlay 底下。 */
+/* .overlay 原本是給右側抽屜用的(justify-content:flex-end),彈窗要置中 */
+.overlay-center { justify-content: center; align-items: center; padding: 16px; }
+.authmodal { position: relative; max-height: 88vh; overflow-y: auto; }
+.authx { position: absolute; top: 8px; right: 10px; }
 .authcard {
   width: 100%; max-width: 380px;
   background: #14161c; border: 1px solid #2a2620;

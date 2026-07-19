@@ -1,30 +1,58 @@
 # HANDOFF — datahunter 交接分析(給後續 AI/開發者)
 
-> 2026-07-08 整理。本文件是給接手者的完整交接:系統現況、**已用真實數據驗證過的結論(不要重新發明)**、技術債、與建議路線圖。
+> 2026-07-08 首版,**2026-07-19 大幅更新**(權限層、策略設定層、前端 SPA 化與元件拆分)。
+> 本文件是給接手者的完整交接:系統現況、**已用真實數據驗證過的結論(不要重新發明)**、技術債、與建議路線圖。
+>
+> 另有兩份細節文件:策略規格看 [STRATEGIES.md](STRATEGIES.md),前端架構看
+> [frontend/ARCHITECTURE.md](frontend/ARCHITECTURE.md)(含拆檔時踩過的坑)。
 
 ---
 
 ## 1. 系統速覽
 
 - **後端** Go(`backend/`):單一進程,serve SPA + `/api` + `/uploads`。MySQL 持久化(users / paper_trades / articles / push_subs / site_config / score_events / liquidations)。
-- **前端** Vue 3(`frontend/src/App.vue`,**單檔 ~2600 行**)。PWA + Service Worker(`frontend/public/sw.js`)。
+- **前端** Vue 3 + Vite。**已從單檔巨石拆分中**:`App.vue`(~3100 行)+ `lib/`(api/upload/format)
+  + `router.js`(SPA 路由)+ `components/`(戰場、8 個公開看板、策略表)+ `components/admin/`(6 個後台元件)。
+  API 統一走 `lib/api.js`(axios,token 與 401 集中處理)。PWA + Service Worker(`frontend/public/sw.js`)。
 - **資料管線**:Binance WS feed(`internal/exchange/wsfeed.go`)常駐 ~36 顆幣、每顆 260 根 1h 已收盤 K 線在記憶體 → 大多數功能**零 REST**。REST 僅作 seed/fallback,曾因 per-coin 輪詢被 418 ban,**任何新功能都應優先吃 WS feed 記憶體資料**。
 - **通知**:Telegram(`internal/notify`)+ Web Push VAPID(`internal/push`,金鑰存 site_config)。推播可分群:全體 `PushSend`、依角色 `PushBroadcast`、admin `adminSubs()`。
 
 ### 功能地圖(分頁 → 後端)
-| 分頁 | 權限 | 後端 |
-|---|---|---|
-| 綜合排行/幣種一覽/財經事件/清算/Upbit公告/市場快訊/文章專欄 | 公開 | ranking/home/events/liquidations/upbit/news/articles |
-| OI儀表板/數據訊號/訊號紀錄/爆發雷達 | member | oi-cache/signals/scorelog/radar |
-| 星軌(main)/超新星(gamble)/銀河(emaonly)/支撐壓力(sr) | VIP | paper/gamble/ema-only/sr |
-| 後台/超新星·保本(gamblehedge) | admin | admin/*、gamble-hedge |
+⚠️ **權限不再寫死在程式裡** —— 下表是「預設值」,實際由後台「標籤權限」決定(見第 1.5 節)。
 
-### 策略書(paper books,`internal/cache/paper.go`)
-- **星軌 main**:門檻55、requireCross(等回檔突破)。實測 **+45%** — 最強的一本。
-- **超新星 gamble**:門檻**50**(原45,依實測改)、追高型、1h冷卻。
-- **銀河 emaonly**:1h EMA5/20 金叉/死叉 + EMA50 側,SL=20根極值、TP=1:1;每小時收盤評估一次(`paper_ema.go` refreshEMA);admin 可手動出場(記為「逾時」)。
-- **超新星·保本 gamblehedge**:admin 專屬 A/B — gamble 進場 + `maxSLPct=12`(SL>12% 不進)+ 保本停損(獲利達 TP 1/3 → SL 上移進場±0.05%,TP 不變,觸發推播 admin)。開/平倉靜音(`adminOnly`),避免與公開超新星重複推播。
-- Bitunix 實盤鏡像(`trader.go`):**只有開倉**,靠交易所端 TP/SL 出場;Phase 2(平倉/查持倉/減倉)未做。
+| 分頁 | 預設權限 | 後端 |
+|---|---|---|
+| 綜合排行/幣種一覽/財經事件/清算/Upbit公告/市場快訊/資金費率/代幣解鎖/板塊強弱/Robinhood/文章專欄 | 公開 | ranking/events/liquidations/upbit/news/funding/unlock/sectors/robinhood/articles |
+| OI儀表板/數據訊號/訊號紀錄/爆發雷達 | member | oi-cache/signals/scorelog/radar |
+| 星軌/超新星/銀河/冥王星/支撐壓力 | VIP | paper/gamble/ema-only/conv/sr |
+| 布林重回/乖離回歸/布乖v2/布林EMA | admin | admin/bollfade·meanrev·bgv2·bollema |
+| 後台/推廣管理 | admin(**鎖定,不可調降**) | admin/* |
+
+首頁另有三個常駐區塊(不分頁):**BTC 多空交戰戰場**(瀏覽器直連交易所 WS)、**整點大盤 AI 分析**、多空推薦卡。
+
+### 策略書(共 8 本;規格詳見 STRATEGIES.md)
+- **星軌 main**:門檻55、requireCross。實測 **+45%** — 最強的一本。
+- **超新星 gamble**:門檻**50**(原45,依實測改)、追高型、1h冷卻、`maxSLPct=12`。
+- **銀河 emaonly**:1h EMA5/20 交叉 + 15m EMA200 側;admin 可手動出場(記為「逾時」)。
+- **冥王星 conv**:4H 動態ATR均線收斂,VRVP 找止盈,RR≥1.5。
+- **均值回歸組**(admin):布林重回 1h / 乖離回歸 1h。
+- **布乖v2**(admin):1h乖離 + 4h布林 雙腿家族,同幣互斥,只做空,單段止盈。
+- **布林EMA**(admin):4H 突破蓄勢,1:3 RR,單段止盈 + 保本位「純通知」。
+- ~~超新星·保本~~、~~gambleA/gambleB~~、~~30幣掃描池~~、~~逆勢超買空 rsifade~~:**均已移除**。
+- Bitunix 實盤鏡像(`trader.go`):**只有開倉**,預設關閉(`BITUNIX_AUTOTRADE=1` 才啟用)。
+
+### 1.5 兩個「後台可調」的設定層(2026-07-19 新增)
+這是接手時最該先理解的部分 —— **很多以前要改程式的東西,現在改設定就好**:
+
+1. **標籤權限**(`internal/cache/tabperm.go`,site_config `tab_perms`)
+   每個分頁的最低身分可調。**後端一起擋**(路由走 `gateTab()`),不是只把前端分頁藏起來。
+   護欄:後台/推廣管理鎖死;**未知分頁 fail closed 退回 admin**。
+2. **策略設定**(`internal/cache/strategy_ctl.go`,site_config `strat_cfg`)
+   每個策略可調:類型標籤、風控警語、最大止損%、**出場模式(分批/保本/單段三選一)**、
+   分段位置與比例、保本觸發點、保本位提示、四種通知開關。附「恢復預設」。
+   **預設值鏡射程式碼**,且有測試 `TestDefaultsReproducePresetPlans` 保證沒動過就行為不變。
+
+> ⚠️ 改 `NewStore` 的 book 參數或 `multitp.go` 的 preset 時,**必須同步 `stratDefaults`**,否則測試會紅。
 
 ---
 
@@ -44,9 +72,17 @@
 
 ## 3. 高優先技術債 / 風險
 
-1. **`App.vue` 巨石**(~2600行):所有頁面、狀態、樣式在一個檔。加功能成本越來越高,建議拆 components + composables(純重構、不改行為)。
+1. **`App.vue` 仍偏大(~3100 行)**:已從 4760 行拆掉三分之一(戰場、8 個公開看板、6 個後台元件、
+   策略表、api/format/upload lib、router)。**未拆**:雷達三本的策略表(多了時間篩選與 CSV 匯出,
+   且是使用者實際下單的主畫面,刻意不合併)、排行/幣種一覽/雷達/訊號、文章編輯器、推廣管理、幣種詳情抽屜。
+   拆檔的模式與踩過的坑寫在 `frontend/ARCHITECTURE.md`,**動手前先看**。
+2. **⚠️ 前端零測試**:vite build 過**不代表能跑** —— 模板呼叫了元件沒定義的函式,build 不會報錯,
+   執行時才整塊空白。拆完一定要真的開那一頁看,而且**要用未登入的乾淨分頁看一次公開頁**
+   (曾因 `loadAll()` 有一行 `if (!authed) return`,導致公開訪客所有資料都載不到,用 admin 測完全看不出來)。
 2. **記憶體狀態重啟即失**:Upbit 翻譯快取、GDELT news feed/去重、SR 關卡與突破狀態、`etfSeen`、套保 Hedged 旗標(註:保本停損價寫進 `tr.SL` 有持久化,保護還在;但 Hedged 旗標重啟後會重觸發一次推播)。影響=重啟後短暫重複推播/空白板,可接受但可優化(建議:一張 kv 快取表)。
-3. **無自動化測試**:策略數學(swingLows/cluster/entryLevels/EMA)完全靠手測。建議至少為 `internal/cache/support.go`、`paper_ema.go`、`radar.go entryLevels` 補單元測試。
+3. **後端測試只涵蓋設定層**:`strategy_ctl_test.go` / `tabperm_test.go`(13 個測試,守著權限預設、
+   出場模式互斥、分批比例正規化、切換模式不清空設定、保本觸發、鎖定分頁不可降級)。
+   **策略數學仍零測試**(swingLows/cluster/entryLevels/EMA/ATR),建議優先補。
 4. **外部脆弱依賴**:
    - Google 免金鑰翻譯端點(Upbit 韓→繁、GDELT 英→繁):可能被限流/停,壞了會退回原文(已容錯),但要留意。
    - **Farside ETF 爬取**(`internal/etf`):HTML 改版就失效(已容錯,壞了只是不更新)。
@@ -71,15 +107,24 @@
 
 ## 5. 策略面下一步(按證據強度)
 
-1. **forward 驗證 gamblehedge**(保本+FILTER@12%)vs gamble:兩本並行就是為了這個,累積 2–4 週後匯出 CSV 對比,決定 12% 濾網要不要進公開書。
-2. **pos∈[0.5,0.9] 進場 gate**:模擬顯示期望值 ~3 倍,尚未實作;建議做成 per-book 可開關參數,先掛 gamblehedge 觀察。
-3. **銀河診斷**:重播分析找出 −14.3% 的結構性原因(SL 定義?1:1 RR?時段?)。
+0. **⚠️ 尚未驗證的新功能**(2026-07-19 上線,測試庫是空的,沒跑過真實交易):
+   保本模式(`applyBreakeven`)、策略設定生效(最大止損%/出場模式/分批比例)、四種通知開關、
+   手動出場與清空策略。**上線後先觀察一輪**,確認新單的止盈止損位置符合後台設定。
+1. ~~forward 驗證 gamblehedge~~:已移除;`maxSLPct=12` 已直接進 gamble 本體。
+2. **pos∈[0.5,0.9] 進場 gate**:模擬顯示期望值 ~3 倍,**尚未實作**(gambleB 觀察書已移除,
+   要做的話建議做成 `StratCfg` 的一個欄位,跟其他設定一起後台可調)。
+3. **銀河診斷**:重播分析找出 −14.3% 的結構性原因(SL 定義?1:1 RR?時段?)。**仍未做**。
 4. **風險化倉位**:各書 SL 距離不一(3%~15%+)但 UI 建議固定槓桿——建議每單顯示「依 SL 距離反推的建議倉位/槓桿」,把停損變真的。
 5. 統計欄位考慮改以 **R 為單位**(像支撐壓力頁那樣),讓績效反映策略本身而非槓桿。
 
 ## 6. 營運提醒
 
 - 部署 = build frontend(`npm run build`)+ 重啟 Go(無 CI/CD、無 migration 工具;schema 改動靠啟動時 `CREATE TABLE IF NOT EXISTS`+手動)。
+- **`frontend/dist/` 有進版控**(Go 的 `withStatic` 直接服務它),所以 build 產物要一起提交。
+- **`frontend/node_modules/` 也在版控裡(862 檔,誤入)** —— 建議 `git rm -r --cached frontend/node_modules`
+  清掉(`frontend/.gitignore` 已備好),但會產生上千檔的 diff,挑時機做。
+- **本機開發**:`backend/.env`(已 gitignore)可設本機 DB + `ADMIN_USER/ADMIN_PASS` 自動種管理員;
+  前端用 `VITE_API_TARGET` 覆蓋 proxy 目標(預設 8080)。**絕不要把正式站 DSN 寫進去。**
 - 無結構化日誌/監控;出問題只能看 stdout。可考慮加 `/healthz` 擴充(feed 健康度、DB 連線、各 ticker 心跳)。
 - 記得檢查 `.env`(JWT_SECRET、DB、TG、DOMAINS);`JWT_SECRET` 未設會隨機生成 → 重啟全登出。
 

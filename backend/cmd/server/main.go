@@ -195,7 +195,6 @@ func main() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
-			store.RSIFadeMarkTick()
 			store.BollFadeMarkTick()
 			store.MeanRevMarkTick()
 			store.BGV2MarkTick()
@@ -203,14 +202,6 @@ func main() {
 		}
 	}()
 
-	// admin mean-reversion strategies (microrev.go), each evaluated per closed bar.
-	go func() {
-		store.RSIFadeTick()
-		ticker := time.NewTicker(1 * time.Minute) // 30m bars → 1min bucket check is plenty
-		for range ticker.C {
-			store.RSIFadeTick()
-		}
-	}()
 	go func() {
 		store.BollFadeTick()
 		ticker := time.NewTicker(2 * time.Minute)
