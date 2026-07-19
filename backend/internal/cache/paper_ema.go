@@ -235,7 +235,8 @@ func (s *Store) ManualCloseEMA(id string) bool {
 	closeTrade(target, exit, "expired", now) // outcome "expired" → UI shows 逾時
 	s.paperMu.Unlock()
 
-	s.notifyTradeClose(s.paperEMA, target, now) // TG + Web Push, same as an auto close
+	// 手動出場一律通知(force),與其他策略的 ManualExit 一致 —— 不受「平倉通知」開關影響
+	s.notifyCloseBook("emaonly", target, now, true)
 	if s.db != nil {
 		s.db.upsertTrade("emaonly", target)
 	}

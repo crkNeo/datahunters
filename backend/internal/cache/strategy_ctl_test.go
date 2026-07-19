@@ -235,3 +235,26 @@ func TestSwitchingModeKeepsSplitSettings(t *testing.T) {
 		t.Errorf("切回分批後計畫不正確: %+v", p)
 	}
 }
+
+// 手動出場必須發通知,而且要繞過「平倉通知」開關 —— 管理員專屬觀察書預設是關的,
+// 若不繞過,手動平倉會像沒發生過一樣安靜(這正是原本的災情)。
+func TestManualExitAlwaysNotifies(t *testing.T) {
+	s := &Store{stratCfg: map[string]StratCfg{}, tabPerms: map[string]string{}, notifier: nil}
+	tr := &PaperTrade{Coin: "BTC", Dir: "long", Entry: 100, Cur: 101, PnLPct: 1, Outcome: "momdead", OpenTime: time.Now()}
+
+	// bollfade 預設 NotifyClose=false → 自動平倉不通知
+	if s.notifyOn("bollfade", "close") {
+		t.Fatal("前提錯了:bollfade 預設應該是不發平倉通知")
+	}
+	if s.notifyCloseBook("bollfade", tr, time.Now(), false) {
+		t.Error("自動平倉不該通知(開關是關的)")
+	}
+	// 手動出場 force=true → 一律通知
+	if !s.notifyCloseBook("bollfade", tr, time.Now(), true) {
+		t.Error("手動出場沒有發通知")
+	}
+	// 家族分腿(bgv2dev)要能解析回家族 key,不能因為查不到設定而漏發
+	if !s.notifyCloseBook("bgv2dev", tr, time.Now(), true) {
+		t.Error("布乖v2 分腿的手動出場沒有發通知")
+	}
+}

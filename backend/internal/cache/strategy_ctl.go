@@ -418,5 +418,8 @@ func (s *Store) ManualExit(book, id string) bool {
 	if s.db != nil {
 		s.db.upsertTrade(dbBook, done)
 	}
+	// 手動出場也要通知 —— 對使用者來說這跟自動平倉一樣是「單子關了」,
+	// 沒有通知會讓人以為還在場內。銀河的 ManualCloseEMA 本來就有發,這裡補齊其餘策略。
+	s.notifyCloseBook(dbBook, done, now, true) // force:手動出場一律通知
 	return true
 }

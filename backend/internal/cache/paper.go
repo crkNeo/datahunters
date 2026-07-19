@@ -567,6 +567,45 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 		fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
 }
 
+// notifyCloseBook is the 平倉 notification keyed by BOOK NAME, so it works for
+// every strategy — including 冥王星 and the micro books, which have no paperBook.
+// 手動出場走的就是這條(以前只有自動平倉會通知,手動平倉靜悄悄地關掉)。
+//
+// 推播對象依該策略「目前的分頁權限」決定,而不是寫死的 adminOnly 旗標:
+// 管理員專屬的策略只推給管理員;若後台把它開放給 VIP/公開,通知就跟著開放。
+// force=true 時忽略「平倉通知」開關 —— 給手動出場用。那是管理員按下按鈕的明確動作,
+// 而且若該策略對使用者可見,跟單的人必須知道單子被關了;開關是用來抑制「自動平倉」
+// 的噪音,不該連手動操作一起吃掉。
+// 回傳是否真的發出通知,方便測試驗證「force 會繞過開關」這條規則。
+func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, force bool) bool {
+	strat := stratKeyOf(book)
+	if !force && !s.notifyOn(strat, "close") { // 後台的「平倉通知」開關
+		return false
+	}
+	title := bookLabel(book) + " 平倉"
+	if force {
+		title = bookLabel(book) + " 手動平倉"
+	}
+	body := fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
+		tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur))
+	url := "/?tab=" + bookTab(book)
+	if s.TabRole(strat) == "admin" { // 只有管理員看得到的策略 → 只推給管理員
+		if s.db != nil && s.pushMgr != nil {
+			if subs := s.db.adminSubs(); len(subs) > 0 {
+				go s.pushMgr.SendTo(subs, title, body, url)
+			}
+		}
+	} else {
+		s.PushSend(title, body, url)
+	}
+	if s.notifier.Enabled() {
+		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s",
+			bookLabel(book), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct,
+			fmtDur(now.Sub(tr.OpenTime)), fmtPx(tr.Entry), fmtPx(tr.Cur)))
+	}
+	return true
+}
+
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	if b.adminOnly || !s.notifyOn(b.name, "close") { // 後台的「平倉通知」開關
 		return // admin A/B book: silent on close (visible on its admin page)

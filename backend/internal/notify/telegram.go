@@ -26,7 +26,8 @@ func NewTelegram() *Telegram {
 }
 
 // Enabled reports whether a token + chat id are configured.
-func (t *Telegram) Enabled() bool { return t.token != "" && t.chatID != "" }
+// nil-safe:未設定 Telegram 時呼叫端不必先判空(Send 也是靠這個把關)。
+func (t *Telegram) Enabled() bool { return t != nil && t.token != "" && t.chatID != "" }
 
 // Send posts a message (HTML parse mode). Safe to call when disabled (no-op).
 // Best-effort: errors are swallowed so a failed alert never affects the app.
