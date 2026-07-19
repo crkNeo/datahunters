@@ -3,7 +3,16 @@
   分頁沒開的時候也得算得出來,所以不搬進元件。
 -->
 <script setup>
+import { fmtClock } from '../lib/format'
+
 defineProps({ eventList: { type: Array, default: () => [] } })
+
+// 6 小時內要發布的事件加高亮(倒數只有分鐘時 parseInt 得 0,一樣算「快到了」)
+function evSoon(e) {
+  if (e.released || !e.countdown) return false
+  const h = e.countdown.includes('h') ? parseInt(e.countdown) : 0
+  return h < 6
+}
 </script>
 
 <template>

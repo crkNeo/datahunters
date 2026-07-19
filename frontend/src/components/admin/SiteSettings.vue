@@ -8,6 +8,7 @@
 import { ref, watch } from 'vue'
 import { authFetch } from '../../lib/api'
 import { uploadImage } from '../../lib/upload'
+import { socialInfo, socialSvg } from '../../lib/social'
 
 const props = defineProps({
   config: { type: Object, default: () => ({}) },
