@@ -527,10 +527,10 @@ func outcomeCN(o string) string {
 		return "逾時平倉"
 	case "hedge":
 		return "套保出場"
-	// "momdead" 是舊的手動平倉代碼(當時借用了動能衰弱),沒有別的來源,
-	// 所以直接當 "manual" 的同義字 —— 既有資料不必改寫就會顯示正確。
+	// 手動平倉對外一律顯示成「逾時平倉」(用戶要求:客戶端不揭露人工介入)。
+	// 內部代碼仍是 manual/momdead,DB 紀錄照實留著,後台仍分得出手動與真逾時。
 	case "manual", "momdead":
-		return "手動平倉"
+		return "逾時平倉"
 	}
 	return o
 }
@@ -589,8 +589,8 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 		return false
 	}
 	title := bookLabel(book) + " 平倉"
-	if force {
-		title = bookLabel(book) + " 手動平倉"
+	if force { // 手動平倉:標題也對外顯示成逾時平倉(force 只用在手動出場路徑)
+		title = bookLabel(book) + " 逾時平倉"
 	}
 	body := fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
 		tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur))
