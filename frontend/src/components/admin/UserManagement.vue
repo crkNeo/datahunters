@@ -5,8 +5,11 @@
   這個元件負責畫面與各種異動,改完 emit('reload') 讓外層重抓。
 -->
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { authFetch } from '../../lib/api'
+
+// App 提供的 in-app 確認框(手機/PWA 相容);拿不到時退回原生 confirm。
+const askConfirm = inject('askConfirm', (m) => Promise.resolve(window.confirm(m)))
 
 const props = defineProps({
   users: { type: Array, default: () => [] },
@@ -53,7 +56,7 @@ async function toggleVip(u) {
 }
 async function deleteUser(u) {
   if (u.username === props.currentUser) return // 不讓管理員刪掉自己
-  if (!confirm('確定刪除帳號「' + u.username + '」?此動作無法復原。')) return
+  if (!(await askConfirm('確定刪除帳號「' + u.username + '」?此動作無法復原。'))) return
   const res = await authFetch('/api/admin/users?username=' + encodeURIComponent(u.username), { method: 'DELETE' })
   emit('msg', res.ok ? '✓ 已刪除 ' + u.username : '✗ 刪除失敗')
   emit('reload')

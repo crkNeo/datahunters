@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, provide } from 'vue'
 import BattleField from './components/BattleField.vue'
 import TabPermissions from './components/admin/TabPermissions.vue'
 import StrategySettings from './components/admin/StrategySettings.vue'
@@ -71,6 +71,23 @@ function showToast(msg, type = 'ok') {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastMsg.value = '' }, 3200)
 }
+// ---- in-app 確認框 ----
+// 取代原生 confirm():手機/PWA webview 常常封鎖或吃掉原生對話框(直接回 false),
+// 導致「刪除」「手動出場」這種要按確定的動作點了沒反應。這個是 app 自己畫的彈窗,
+// 回傳 Promise<boolean>,用法跟 confirm 幾乎一樣:if (!(await askConfirm(...))) return
+const confirmBox = ref(null) // { msg, danger } 或 null(關閉)
+let confirmResolve = null
+function askConfirm(msg, opts = {}) {
+  confirmBox.value = { msg, danger: opts.danger !== false } // 預設當危險操作(紅色)
+  return new Promise((resolve) => { confirmResolve = resolve })
+}
+function closeConfirm(ok) {
+  confirmBox.value = null
+  if (confirmResolve) { confirmResolve(ok); confirmResolve = null }
+}
+// 讓子元件(UserManagement / LoginNotice…)也能用同一個確認框
+provide('askConfirm', askConfirm)
+
 // ---- account/password input rules (英數/特殊符號) ----
 function sanitizeAcct(v) { return v.replace(/[^A-Za-z0-9]/g, '').slice(0, 16) }        // 帳號:只留英數
 function sanitizePw(v) { return v.replace(/[^\x21-\x7e]/g, '').slice(0, 16) }          // 密碼:只留可見 ASCII(英數+特殊,無空白/中文)
@@ -269,12 +286,24 @@ function moveBlock(i, d) {
   ;[b[i], b[j]] = [b[j], b[i]]
 }
 async function onCoverPick(e) {
-  const f = e.target.files && e.target.files[0]
-  if (f) artEdit.value.cover = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
+  const inp = e.target
+  const f = inp.files && inp.files[0]
+  // 先把 input 清空:手機相簿常回傳同名檔(image.jpg),不清空的話「再選同一張」
+  // 不會觸發 change,使用者就以為換不了圖。清空要在 await 之前抓好 file。
+  inp.value = ''
+  if (f) {
+    const url = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
+    if (url) artEdit.value.cover = url // 上傳失敗回空字串 → 保留原圖,不要清掉
+  }
 }
 async function onBlockImg(e, i) {
-  const f = e.target.files && e.target.files[0]
-  if (f) artEdit.value.blocks[i].image = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
+  const inp = e.target
+  const f = inp.files && inp.files[0]
+  inp.value = '' // 同上:允許重選同名檔
+  if (f) {
+    const url = await uploadImage(f, 'articles', (m) => showToast(m, 'err'))
+    if (url) artEdit.value.blocks[i].image = url
+  }
 }
 function setArtTags(v) { artEdit.value.tags = v.split(',').map((t) => t.trim()).filter(Boolean) }
 async function saveArticle() {
@@ -286,9 +315,12 @@ async function saveArticle() {
   if (res.ok) { artEdit.value = null; loadArticles() }
 }
 async function removeArticle(a) {
-  if (!confirm('確定刪除「' + a.title + '」?')) return
-  await authFetch('/api/admin/articles?id=' + a.id, { method: 'DELETE' })
+  if (!(await askConfirm('確定刪除「' + a.title + '」?'))) return
+  const res = await authFetch('/api/admin/articles?id=' + a.id, { method: 'DELETE' })
+  if (!res.ok) { showToast((await res.text()).trim() || '刪除失敗', 'err'); return }
   articleView.value = null
+  artEdit.value = null // 從編輯器裡刪的話,也要把編輯器關掉
+  showToast('已刪除')
   loadArticles()
 }
 async function togglePin(a) {
@@ -508,7 +540,7 @@ async function loadConv() {
 }
 // admin: force-close one open trade in any strategy (recorded as 動能衰弱)
 async function manualExitStrat(book, id, reload) {
-  if (!confirm('確定手動出場此單?將以現價結算並標記「動能衰弱」。')) return
+  if (!(await askConfirm('確定手動出場此單?將以現價結算並標記「逾時平倉」。'))) return
   const res = await authFetch('/api/admin/manual-exit', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ book, id }),
   })
@@ -587,7 +619,7 @@ async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
     ? '確定清除此策略「已結束」的單?進行中的開倉單會保留(並沿用新規則)。'
     : '確定清空此策略的全部模擬單(含進行中)?此動作無法復原。'
-  if (!confirm(msg)) return
+  if (!(await askConfirm(msg))) return
   const url = '/api/admin/strat-clear?book=' + book + (closedOnly ? '&scope=closed' : '')
   const res = await authFetch(url, { method: 'POST' })
   if (res.ok && loader) loader()
@@ -636,7 +668,7 @@ const book = computed(() =>
 // admin-only: force-close an open 銀河 trade at market (recorded as 逾時), then
 // refresh the book. Pushes to TG + admin the same as an automatic close.
 async function manualExit(t) {
-  if (!confirm(`確定手動出場 ${t.coin}？將以現價結算並標記「逾時」。`)) return
+  if (!(await askConfirm(`確定手動出場 ${t.coin}?將以現價結算並標記「逾時平倉」。`))) return
   try {
     const res = await authFetch('/api/admin/ema-close', {
       method: 'POST',
@@ -1300,6 +1332,17 @@ watch([role, tabPerms, authReady], () => {
   <transition name="toastfade">
     <div v-if="toastMsg" class="toast" :class="toastType">{{ toastMsg }}</div>
   </transition>
+
+  <!-- in-app 確認框(取代原生 confirm;手機/PWA 相容)。z-index 要壓過所有抽屜/彈窗 -->
+  <div v-if="confirmBox" class="cfm-mask" @click.self="closeConfirm(false)">
+    <div class="cfm-box">
+      <p class="cfm-msg">{{ confirmBox.msg }}</p>
+      <div class="cfm-btns">
+        <button class="cfm-cancel" @click="closeConfirm(false)">取消</button>
+        <button class="cfm-ok" :class="{ danger: confirmBox.danger }" @click="closeConfirm(true)">確定</button>
+      </div>
+    </div>
+  </div>
 
 
   <!-- top bar -->
@@ -3030,6 +3073,17 @@ footer { padding: 18px 0 30px; text-align: center; }
 
 <style>
 /* ---- toast prompt ---- */
+/* in-app 確認框:z-index 高於 toast(10000)以外的所有層,確保永遠點得到 */
+.cfm-mask { position: fixed; inset: 0; z-index: 10001; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; padding: 24px; }
+.cfm-box { background: #161a21; border: 1px solid #2a2f3a; border-radius: 14px;
+  padding: 22px 20px 16px; max-width: 340px; width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.cfm-msg { margin: 0 0 18px; font-size: 15px; line-height: 1.6; color: #e8eaee; text-align: center; }
+.cfm-btns { display: flex; gap: 10px; }
+.cfm-btns button { flex: 1; padding: 11px 0; border-radius: 9px; font-size: 14px; font-weight: 700; cursor: pointer; border: 1px solid #2a2f3a; }
+.cfm-cancel { background: #21262f; color: #b8bcc4; }
+.cfm-ok { background: #2f6ad9; color: #fff; border-color: transparent; }
+.cfm-ok.danger { background: linear-gradient(180deg, #d24444, #a52a2a); }
 .toast { position: fixed; top: 22px; left: 50%; transform: translateX(-50%); z-index: 10000;
   padding: 12px 22px; border-radius: 10px; font-weight: 700; font-size: 14px; color: #fff;
   box-shadow: 0 8px 30px rgba(0,0,0,.45); max-width: 88vw; text-align: center; }

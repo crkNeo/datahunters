@@ -5,8 +5,11 @@
   存檔後 emit('saved') 讓外層重新載入。
 -->
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, inject } from 'vue'
 import { authFetch } from '../../lib/api'
+
+// App 提供的 in-app 確認框(手機/PWA 相容);拿不到時退回原生 confirm。
+const askConfirm = inject('askConfirm', (m) => Promise.resolve(window.confirm(m)))
 
 const props = defineProps({ notice: { type: Object, default: null } })
 const emit = defineEmits(['saved', 'msg', 'toast'])
@@ -40,7 +43,7 @@ async function saveNotice() {
   else emit('toast', (await res.text()).trim() || '儲存失敗', 'err')
 }
 async function clearNotice() {
-  if (!confirm('確定停用登入公告?')) return
+  if (!(await askConfirm('確定停用登入公告?'))) return
   const res = await authFetch('/api/admin/notice', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: '', text: '', expiry: 0 }),
