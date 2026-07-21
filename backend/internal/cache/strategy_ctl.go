@@ -239,6 +239,17 @@ func (s *Store) ResetStrategyConfig(name string) bool {
 
 // stratMaxSL is the entry-time SL-distance cap for a strategy: the admin override
 // when set, else the book's own hard-coded value.
+// slWithinCap 回傳「這筆的止損距離是否在後台設定的最大止損% 之內」。
+// cap<=0(不限制)或 entry<=0(算不出百分比)都視為通過。
+// 進場路徑統一用這支,避免像銀河/冥王星那樣漏掉濾網、後台設了卻沒作用。
+func (s *Store) slWithinCap(strat string, entry, sl float64) bool {
+	cap := s.stratMaxSL(strat, 0)
+	if cap <= 0 || entry <= 0 {
+		return true
+	}
+	return math.Abs(entry-sl)/entry*100 <= cap
+}
+
 func (s *Store) stratMaxSL(name string, bookDefault float64) float64 {
 	s.stratMu.RLock()
 	defer s.stratMu.RUnlock()

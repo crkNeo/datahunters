@@ -230,7 +230,9 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
-	} else if dir, entry, sl, tp, ok := convSignal(cs); ok && s.StrategyEnabled("conv") {
+		// slWithinCap:後台「最大止損%」濾網。冥王星的 SL 本來就刻意放寬、預設不設限,
+		// 但管理員在後台設了就必須生效。不能在這裡 return —— convMu 還鎖著。
+	} else if dir, entry, sl, tp, ok := convSignal(cs); ok && s.StrategyEnabled("conv") && s.slWithinCap("conv", entry, sl) {
 		tr := &PaperTrade{
 			ID:       fmt.Sprintf("conv|%s|%d", coin, now.UnixMilli()),
 			Coin:     coin,

@@ -354,6 +354,13 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 			}
 			tp = p - risk
 		}
+		// 後台「最大止損%」濾網。20 根極值當停損時,低市值幣可能拉出 40%+ 的距離,
+		// 這裡照 paper.go / microrev.go 同一套規則擋掉(0 = 不限制)。
+		if cap := s.stratMaxSL("emaonly", b.maxSLPct); cap > 0 {
+			if slDist := math.Abs(p-sl) / p * 100; slDist > cap {
+				continue
+			}
+		}
 		tr := &PaperTrade{
 			ID:   fmt.Sprintf("emaonly|%s|%s|%d", coin, dir, now.UnixMilli()),
 			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),
