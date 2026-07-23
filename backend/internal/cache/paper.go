@@ -612,6 +612,41 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 	return true
 }
 
+// notifyOpenBook is the 開倉 counterpart of notifyCloseBook, keyed by BOOK NAME
+// so strategies WITHOUT a paperBook — 冥王星(conv)與微策略(bollfade/meanrev/
+// bgv2/bollema)— can also fire an open notification. 這些策略原本只發 TP/保本,
+// 開倉與平倉完全不通知,後台把開關打開也沒反應。routing 與 notifyCloseBook 一致:
+// 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
+// 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
+func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
+	strat := stratKeyOf(book)
+	if !s.notifyOn(strat, "open") { // 後台的「開倉通知」開關
+		return false
+	}
+	title := bookLabel(book) + " 開倉"
+	body := fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry))
+	url := "/?tab=" + bookTab(book)
+	if s.TabRole(strat) == "admin" {
+		if s.db != nil && s.pushMgr != nil {
+			if subs := s.db.adminSubs(); len(subs) > 0 {
+				go s.pushMgr.SendTo(subs, title, body, url)
+			}
+		}
+	} else {
+		s.PushSend(title, body, url)
+	}
+	if s.notifier.Enabled() {
+		rr := 0.0
+		if risk := math.Abs(tr.Entry - tr.SL); risk > 0 {
+			rr = math.Abs(tr.TP-tr.Entry) / risk
+		}
+		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%) · 盈虧比 1:%.2f",
+			bookLabel(book), tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry),
+			fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), rr))
+	}
+	return true
+}
+
 func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	if b.adminOnly || !s.notifyOn(b.name, "close") { // 後台的「平倉通知」開關
 		return // admin A/B book: silent on close (visible on its admin page)

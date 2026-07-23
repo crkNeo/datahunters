@@ -347,6 +347,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		}
 	}
 	var dirty *PaperTrade
+	opened, closed := false, false
 	if open != nil {
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
@@ -372,6 +373,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				open.Legs = 3
 			}
 			closeTrade(open, px, outcome, now) // blends any realized tranches
+			closed = true
 		} else {
 			open.Cur = roundPx(last.Close)
 			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
@@ -394,6 +396,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
 			b.trades = append(b.trades, tr)
 			dirty = tr
+			opened = true
 			microTrim(b)
 		}
 	}
@@ -403,6 +406,14 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	}
 	if dirty != nil && s.db != nil {
 		s.db.upsertTrade(b.name, dirty)
+	}
+	// 開倉/平倉通知(原本只有 TP/保本會通知)。解鎖後才發,避免持鎖查訂閱者。
+	// notifyOpenBook/CloseBook 內部用 stratKeyOf 把 bgv2dev/bgv2boll 併回 bgv2 讀開關。
+	if opened {
+		s.notifyOpenBook(b.name, dirty)
+	}
+	if closed {
+		s.notifyCloseBook(b.name, dirty, now, false) // force=false → 吃「平倉通知」開關
 	}
 }
 

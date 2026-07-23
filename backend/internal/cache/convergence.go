@@ -200,6 +200,7 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 		}
 	}
 	var dirty *PaperTrade
+	opened, closed := false, false
 	if open != nil {
 		// bar-close backstop (partial TP1/TP2 booked on the live ConvMarkTick).
 		// Full-close only: final target / current stop / expiry.
@@ -225,13 +226,14 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 				open.Legs = 3
 			}
 			closeTrade(open, px, outcome, now) // blends any realized tranches
+			closed = true
 		} else {
 			open.Cur = roundPx(last.Close)
 			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
 		}
 		dirty = open
 		// slWithinCap:後台「最大止損%」濾網。冥王星的 SL 本來就刻意放寬、預設不設限,
-		// 但管理員在後台設了就必須生效。不能在這裡 return —— convMu 還鎖著。
+		// 但管理員在後台設了就必須生效。放在 else-if 的守衛,不能在鎖內 return。
 	} else if dir, entry, sl, tp, ok := convSignal(cs); ok && s.StrategyEnabled("conv") && s.slWithinCap("conv", entry, sl) {
 		tr := &PaperTrade{
 			ID:       fmt.Sprintf("conv|%s|%d", coin, now.UnixMilli()),
@@ -248,11 +250,19 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 		setupTP(tr, convPlan) // 分批止盈: TP1/TP2 at 40%/70% of entry→POC target
 		s.convTrades = append(s.convTrades, tr)
 		dirty = tr
+		opened = true
 		s.convTrim()
 	}
 	s.convMu.Unlock()
 	if dirty != nil && s.db != nil {
 		s.db.upsertTrade("conv", dirty)
+	}
+	// 通知在解鎖後發(避免持鎖做 DB 查訂閱者)。開倉/平倉原本完全不通知,只有 TP 有。
+	if opened {
+		s.notifyOpenBook("conv", dirty)
+	}
+	if closed {
+		s.notifyCloseBook("conv", dirty, now, false) // force=false → 吃「平倉通知」開關
 	}
 }
 
