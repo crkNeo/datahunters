@@ -159,8 +159,8 @@ function fmtReg(ms) {
       <div v-else class="reviewproof empty">無證明圖</div>
       <div class="reviewinfo">
         <div class="ri-name">{{ u.username }}</div>
+        <div class="ri-row">UID:<b>{{ u.uid || '—' }}</b></div>
         <div class="ri-row">Email:<b>{{ u.notes || '—' }}</b></div>
-        <div class="ri-row"><small>UID 見證明截圖</small></div>
         <div class="ri-row"><small>{{ u.created ? new Date(u.created).toLocaleString() : '' }}</small></div>
         <div class="reviewact">
           <button class="okbtn" @click="approveUser(u)">✓ 通過</button>
@@ -189,7 +189,7 @@ function fmtReg(ms) {
     <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
   </div>
   <table class="grid">
-    <thead><tr><th>證明</th><th>帳號</th><th>Email</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
+    <thead><tr><th>證明</th><th>帳號</th><th>UID / Email</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
     <tbody>
       <tr v-for="u in filteredUsers" :key="u.username">
         <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="$emit('proof', u.proof)" /><span v-else>—</span></td>
@@ -197,7 +197,7 @@ function fmtReg(ms) {
           <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
           <em v-else-if="u.status === 'banned'" class="qtag bad">停用</em>
         </td>
-        <td class="rl-text"><div>{{ u.notes || '—' }}</div></td>
+        <td class="rl-text"><div>{{ u.uid || '—' }}</div><small>{{ u.notes || '—' }}</small></td>
         <td>{{ u.role }}</td>
         <td class="r tsmall">{{ fmtReg(u.created) }}</td>
         <td class="r">

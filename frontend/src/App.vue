@@ -195,22 +195,22 @@ async function doRegister() {
     showToast(regErr.value, 'err')
     return
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regForm.value.email.trim())) {
-    regErr.value = '請填寫有效的 Email'
+  if (!regForm.value.uid.trim()) {
+    regErr.value = '請填寫註冊帳號 UID'
     showToast(regErr.value, 'err')
     return
   }
-  if (!regFile.value) {
-    regErr.value = '請上傳「註冊帳號 UID 截圖」'
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regForm.value.email.trim())) {
+    regErr.value = '請填寫有效的 Email'
     showToast(regErr.value, 'err')
     return
   }
   const fd = new FormData()
   fd.append('username', regForm.value.u)
   fd.append('password', regForm.value.p)
+  fd.append('uid', regForm.value.uid.trim())
   // Email 存進 notes(備註)欄,後台審核卡看得到 —— 不動後端 schema
   fd.append('exchange', regForm.value.email.trim())
-  fd.append('proof', regFile.value) // 註冊帳號 UID 截圖
   if (pendingRef.value) fd.append('referralCode', pendingRef.value) // 註冊是唯一的綁定時機
   try {
     const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
@@ -1460,7 +1460,7 @@ watch([role, tabPerms, authReady], () => {
         <div class="regcond">
           <b>註冊條件</b>
           <span>① 使用我們推薦碼註冊的 Bitunix 帳戶</span>
-          <span>② 填寫 Email、上傳「註冊帳號 UID 截圖」一張</span>
+          <span>② 填寫註冊帳號 UID 與 Email</span>
           <span>③ 送出後由管理員審核,通過即為會員</span>
         </div>
         <a class="bitunix-cta" href="https://www.bitunix.com/register?vipCode=jmch" target="_blank" rel="noopener">
@@ -1468,11 +1468,8 @@ watch([role, tabPerms, authReady], () => {
         </a>
         <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
         <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
+        <input v-model="regForm.uid" class="authin" placeholder="註冊帳號 UID" />
         <input v-model="regForm.email" class="authin" type="email" placeholder="Email" />
-        <label class="authfile">
-          <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳「註冊帳號 UID 截圖」' }}</span>
-          <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
-        </label>
         <!-- 好友推薦碼:刻意不叫「推薦碼」,上面的 Bitunix vipCode 也叫推薦碼,兩者不同 -->
         <div v-if="pendingRef" class="refnote">🎁 已套用好友推薦碼 <b>{{ pendingRef }}</b><span>註冊完成後將自動綁定</span></div>
         <button class="authbtn" @click="doRegister">註冊</button>
@@ -1606,9 +1603,9 @@ watch([role, tabPerms, authReady], () => {
     </div>
   </div>
 
-  <!-- 申請 VIP modal(疊在我的推廣之上)-->
-  <div v-if="vipShow" class="overlay rulesover" @click="vipShow = false">
-    <div class="refbox" @click.stop>
+  <!-- 申請 VIP modal(疊在我的推廣之上;較小、往下推,手機才點得到 ✕)-->
+  <div v-if="vipShow" class="overlay vipover" @click="vipShow = false">
+    <div class="vipbox" @click.stop>
       <div class="refhead"><h3>⭐ 申請 VIP</h3><button class="xbtn" @click="vipShow = false">✕</button></div>
       <p class="refhint">上傳<b>入金證明</b>與<b>交易量證明</b>各一張,送出後由管理員審核,通過即升級為 VIP。</p>
       <label class="authfile vipfile">
@@ -2635,6 +2632,10 @@ body::before {
 .vipfile { margin-bottom: 10px; }
 /* 疊在我的推廣 modal 之上 —— 同樣是 .overlay,不加這行會被蓋住 */
 .rulesover { z-index: 60; }
+/* 申請 VIP modal:置中、往下推,避免 ✕ 頂到手機瀏覽器列/瀏海按不到 */
+.vipover { z-index: 60; justify-content: center; align-items: flex-start; }
+.vipbox { background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px;
+  width: min(400px, 90vw); max-height: 78vh; overflow-y: auto; margin-top: 14vh; }
 .rulesbody { padding: 2px 0 8px; }
 /* pre-line:段落內的單一換行保留(規則常是條列),段落間距靠 <p> */
 .rulespara { margin: 0 0 12px; font-size: 13px; line-height: 1.85; color: #c8ccd4; white-space: pre-line; }
