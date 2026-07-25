@@ -5,11 +5,34 @@
   這個元件負責畫面與各種異動,改完 emit('reload') 讓外層重抓。
 -->
 <script setup>
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import { authFetch } from '../../lib/api'
 
 // App 提供的 in-app 確認框(手機/PWA 相容);拿不到時退回原生 confirm。
 const askConfirm = inject('askConfirm', (m) => Promise.resolve(window.confirm(m)))
+
+// ---- VIP 申請審核 ----
+const vipApps = ref([])
+async function loadVipApps() {
+  try {
+    const res = await authFetch('/api/admin/vip-apps')
+    if (res.ok) vipApps.value = (await res.json()) || []
+  } catch (e) { /* secondary */ }
+}
+onMounted(loadVipApps)
+const vipPending = computed(() => vipApps.value.filter((a) => a.status === 'pending'))
+async function reviewVip(a, approve) {
+  if (!approve && !(await askConfirm('確定駁回 ' + a.username + ' 的 VIP 申請?'))) return
+  const res = await authFetch('/api/admin/vip-review', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: a.id, approve }),
+  })
+  if (res.ok) {
+    emit('msg', approve ? '✓ 已通過 ' + a.username + ' 的 VIP(已升級)' : '✓ 已駁回 ' + a.username)
+    await loadVipApps()
+    emit('reload') // 升級後刷新使用者名單
+  } else emit('msg', '✗ ' + ((await res.text()).trim() || '審核失敗'))
+}
 
 const props = defineProps({
   users: { type: Array, default: () => [] },
@@ -103,6 +126,31 @@ function fmtReg(ms) {
 </script>
 
 <template>
+<!-- VIP 申請審核 -->
+<section v-if="vipPending.length" class="card adminbox">
+  <h3 class="psub">⭐ VIP 申請待審核 ({{ vipPending.length }})</h3>
+  <div class="reviewgrid">
+    <div v-for="a in vipPending" :key="a.id" class="reviewcard">
+      <div class="vipproofs">
+        <div class="vipproof" @click="$emit('proof', a.deposit)">
+          <img v-if="a.deposit" :src="a.deposit" alt="入金證明" /><span class="vplabel">入金證明</span>
+        </div>
+        <div class="vipproof" @click="$emit('proof', a.volume)">
+          <img v-if="a.volume" :src="a.volume" alt="交易量證明" /><span class="vplabel">交易量證明</span>
+        </div>
+      </div>
+      <div class="reviewinfo">
+        <div class="ri-name">{{ a.username }}</div>
+        <div class="ri-row"><small>{{ a.applied ? new Date(a.applied).toLocaleString() : '' }}</small></div>
+        <div class="reviewact">
+          <button class="okbtn" @click="reviewVip(a, true)">✓ 通過升級</button>
+          <button class="nobtn" @click="reviewVip(a, false)">✕ 駁回</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section v-if="pendingUsers.length" class="card adminbox">
   <h3 class="psub">🟡 待審核 ({{ pendingUsers.length }})</h3>
   <div class="reviewgrid">
@@ -111,8 +159,8 @@ function fmtReg(ms) {
       <div v-else class="reviewproof empty">無證明圖</div>
       <div class="reviewinfo">
         <div class="ri-name">{{ u.username }}</div>
-        <div class="ri-row">UID:<b>{{ u.uid || '—' }}</b></div>
-        <div class="ri-row">交易所:<b>{{ u.notes || '—' }}</b></div>
+        <div class="ri-row">Email:<b>{{ u.notes || '—' }}</b></div>
+        <div class="ri-row"><small>UID 見證明截圖</small></div>
         <div class="ri-row"><small>{{ u.created ? new Date(u.created).toLocaleString() : '' }}</small></div>
         <div class="reviewact">
           <button class="okbtn" @click="approveUser(u)">✓ 通過</button>
@@ -141,7 +189,7 @@ function fmtReg(ms) {
     <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
   </div>
   <table class="grid">
-    <thead><tr><th>證明</th><th>帳號</th><th>UID / 交易所</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
+    <thead><tr><th>證明</th><th>帳號</th><th>Email</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
     <tbody>
       <tr v-for="u in filteredUsers" :key="u.username">
         <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="$emit('proof', u.proof)" /><span v-else>—</span></td>
@@ -149,7 +197,7 @@ function fmtReg(ms) {
           <em v-if="u.status === 'pending'" class="qtag warn">審核中</em>
           <em v-else-if="u.status === 'banned'" class="qtag bad">停用</em>
         </td>
-        <td class="rl-text"><div>{{ u.uid || '—' }}</div><small>{{ u.notes || '—' }}</small></td>
+        <td class="rl-text"><div>{{ u.notes || '—' }}</div></td>
         <td>{{ u.role }}</td>
         <td class="r tsmall">{{ fmtReg(u.created) }}</td>
         <td class="r">

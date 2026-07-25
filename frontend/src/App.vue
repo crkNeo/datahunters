@@ -195,24 +195,22 @@ async function doRegister() {
     showToast(regErr.value, 'err')
     return
   }
-  if (!regForm.value.uid.trim()) {
-    regErr.value = '請填寫 UID'
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regForm.value.email.trim())) {
+    regErr.value = '請填寫有效的 Email'
     showToast(regErr.value, 'err')
     return
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regForm.value.email.trim())) {
-    regErr.value = '請填寫有效的 Email'
+  if (!regFile.value) {
+    regErr.value = '請上傳「註冊帳號 UID 截圖」'
     showToast(regErr.value, 'err')
     return
   }
   const fd = new FormData()
   fd.append('username', regForm.value.u)
   fd.append('password', regForm.value.p)
-  fd.append('uid', regForm.value.uid)
-  // email goes into the notes(備註) field alongside the optional exchange name,
-  // so the admin review card shows it without any backend schema change
-  fd.append('exchange', [regForm.value.email.trim(), regForm.value.exchange.trim()].filter(Boolean).join(' · '))
-  if (regFile.value) fd.append('proof', regFile.value)
+  // Email 存進 notes(備註)欄,後台審核卡看得到 —— 不動後端 schema
+  fd.append('exchange', regForm.value.email.trim())
+  fd.append('proof', regFile.value) // 註冊帳號 UID 截圖
   if (pendingRef.value) fd.append('referralCode', pendingRef.value) // 註冊是唯一的綁定時機
   try {
     const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
@@ -360,7 +358,43 @@ async function loadReferral() {
     if (res.ok) refData.value = await res.json()
   } catch (e) { /* secondary */ }
 }
-function openReferral() { refShow.value = true; loadReferral(); loadRefRules() }
+function openReferral() { refShow.value = true; loadReferral(); loadRefRules(); loadVIPStatus() }
+
+// ---- 申請 VIP(會員在「我的推廣」內)----
+const vipStatus = ref(null)   // { status: 'pending'|'approved'|'rejected'|'' }
+const vipShow = ref(false)    // 申請 modal 開關
+const vipDeposit = ref(null)  // 入金證明檔
+const vipVolume = ref(null)   // 交易量證明檔
+const vipBusy = ref(false)
+async function loadVIPStatus() {
+  if (role.value !== 'member') { vipStatus.value = null; return }
+  try {
+    const res = await authFetch('/api/vip/status')
+    if (res.ok) vipStatus.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+function onVipFile(e, which) {
+  const f = (e.target.files && e.target.files[0]) || null
+  if (f && !validImage(f, (m) => showToast(m, 'err'))) { e.target.value = ''; return }
+  if (which === 'deposit') vipDeposit.value = f; else vipVolume.value = f
+}
+async function submitVIP() {
+  if (vipBusy.value) return
+  if (!vipDeposit.value || !vipVolume.value) { showToast('入金證明與交易量證明都要上傳', 'err'); return }
+  vipBusy.value = true
+  try {
+    const fd = new FormData()
+    fd.append('deposit', vipDeposit.value)
+    fd.append('volume', vipVolume.value)
+    const res = await authFetch('/api/vip/apply', { method: 'POST', body: fd })
+    if (res.ok) {
+      showToast('已送出 VIP 申請,待管理員審核')
+      vipShow.value = false; vipDeposit.value = null; vipVolume.value = null
+      await loadVIPStatus()
+    } else showToast((await res.text()).trim() || '送出失敗', 'err')
+  } catch (e) { showToast('送出失敗', 'err') }
+  vipBusy.value = false
+}
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); showToast('已複製') }
   catch (e) { showToast('複製失敗,請長按選取', 'err') }
@@ -1425,20 +1459,18 @@ watch([role, tabPerms, authReady], () => {
       <template v-else>
         <div class="regcond">
           <b>註冊條件</b>
-          <span>① 使用我們推薦碼註冊的 Bitunix 帳戶,持有 300U 以上</span>
-          <span>② 填寫交易所 UID 與 Email</span>
-          <span>③ 上傳資產證明圖片</span>
+          <span>① 使用我們推薦碼註冊的 Bitunix 帳戶</span>
+          <span>② 填寫 Email、上傳「註冊帳號 UID 截圖」一張</span>
+          <span>③ 送出後由管理員審核,通過即為會員</span>
         </div>
         <a class="bitunix-cta" href="https://www.bitunix.com/register?vipCode=jmch" target="_blank" rel="noopener">
           🚀 還沒有 Bitunix 帳戶?點此註冊(專屬推薦碼 jmch)
         </a>
         <input :value="regForm.u" @input="regForm.u = sanitizeAcct($event.target.value)" class="authin" placeholder="帳號(4–16 英文或數字)" />
         <input :value="regForm.p" @input="regForm.p = sanitizePw($event.target.value)" class="authin" type="password" placeholder="密碼(4–16,含大小寫+數字+特殊符號)" />
-        <input v-model="regForm.uid" class="authin" placeholder="UID" />
         <input v-model="regForm.email" class="authin" type="email" placeholder="Email" />
-        <input v-model="regForm.exchange" class="authin" placeholder="交易所名稱(備註,選填)" />
         <label class="authfile">
-          <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳資產證明圖片(300U 以上)' }}</span>
+          <span>{{ regFile ? '📎 ' + regFile.name : '＋ 上傳「註冊帳號 UID 截圖」' }}</span>
           <input type="file" accept="image/*,.heic,.heif" @change="onRegFile" hidden />
         </label>
         <!-- 好友推薦碼:刻意不叫「推薦碼」,上面的 Bitunix vipCode 也叫推薦碼,兩者不同 -->
@@ -1486,6 +1518,14 @@ watch([role, tabPerms, authReady], () => {
       <button v-if="refRules.text" class="rulesbtn" @click="refRulesShow = true">
         📜 推廣規則與獎勵制度<span class="rulesgo">查看 ›</span>
       </button>
+      <!-- 申請 VIP:只有會員看得到(VIP/管理員不需要)。已申請則顯示審核中/已通過 -->
+      <template v-if="role === 'member'">
+        <div v-if="vipStatus && vipStatus.status === 'pending'" class="vipnote pending">⭐ VIP 申請審核中…</div>
+        <div v-else-if="vipStatus && vipStatus.status === 'approved'" class="vipnote ok">✅ VIP 申請已通過</div>
+        <button v-else class="vipbtn" @click="vipShow = true">
+          ⭐ 申請 VIP<span class="rulesgo">{{ vipStatus && vipStatus.status === 'rejected' ? '(上次未通過,可重新申請)›' : '›' }}</span>
+        </button>
+      </template>
       <template v-if="refData">
         <!-- 1. 推薦碼 + 2. 網址 -->
         <div class="refcode">
@@ -1563,6 +1603,23 @@ watch([role, tabPerms, authReady], () => {
       <div class="rulesbody">
         <p v-for="(para, i) in refRuleParas" :key="i" class="rulespara">{{ para }}</p>
       </div>
+    </div>
+  </div>
+
+  <!-- 申請 VIP modal(疊在我的推廣之上)-->
+  <div v-if="vipShow" class="overlay rulesover" @click="vipShow = false">
+    <div class="refbox" @click.stop>
+      <div class="refhead"><h3>⭐ 申請 VIP</h3><button class="xbtn" @click="vipShow = false">✕</button></div>
+      <p class="refhint">上傳<b>入金證明</b>與<b>交易量證明</b>各一張,送出後由管理員審核,通過即升級為 VIP。</p>
+      <label class="authfile vipfile">
+        <span>{{ vipDeposit ? '📎 ' + vipDeposit.name : '＋ 上傳「入金證明」' }}</span>
+        <input type="file" accept="image/*,.heic,.heif" hidden @change="onVipFile($event, 'deposit')" />
+      </label>
+      <label class="authfile vipfile">
+        <span>{{ vipVolume ? '📎 ' + vipVolume.name : '＋ 上傳「交易量證明」' }}</span>
+        <input type="file" accept="image/*,.heic,.heif" hidden @change="onVipFile($event, 'volume')" />
+      </label>
+      <button class="authbtn" :disabled="vipBusy || !vipDeposit || !vipVolume" @click="submitVIP">送出申請</button>
     </div>
   </div>
 
@@ -2564,6 +2621,18 @@ body::before {
 }
 .rulesbtn:hover { background: linear-gradient(90deg, #3a3216, #2a2618); border-color: #6a5a20; }
 .rulesgo { font-size: 12px; opacity: .75; font-weight: 400; }
+/* 申請 VIP 按鈕 / 狀態:紫金色系,和推廣規則的金色區隔 */
+.vipbtn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; margin: 0 0 14px; padding: 11px 14px; cursor: pointer;
+  background: linear-gradient(90deg, #2a1a3a, #1c1428);
+  border: 1px solid #4a2f6a; border-radius: 10px; color: #d3b3ff; font-size: 13px; font-weight: 600;
+}
+.vipbtn:hover { background: linear-gradient(90deg, #3a2450, #2a1c38); border-color: #6a45a0; }
+.vipnote { width: 100%; margin: 0 0 14px; padding: 11px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; text-align: center; }
+.vipnote.pending { background: #2a2410; color: #f4d774; border: 1px solid #4a3f18; }
+.vipnote.ok { background: #103a24; color: #2ec26b; border: 1px solid #1f5a34; }
+.vipfile { margin-bottom: 10px; }
 /* 疊在我的推廣 modal 之上 —— 同樣是 .overlay,不加這行會被蓋住 */
 .rulesover { z-index: 60; }
 .rulesbody { padding: 2px 0 8px; }
@@ -3024,6 +3093,11 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .reviewproof { width: 92px; height: 92px; flex: none; border-radius: 8px; overflow: hidden; cursor: zoom-in; background: #05060a; border: 1px solid #23262d; }
 .reviewproof img { width: 100%; height: 100%; object-fit: cover; }
 .reviewproof.empty { display: flex; align-items: center; justify-content: center; font-size: 11px; color: #6b7078; cursor: default; }
+/* VIP 申請的兩張證明縮圖 */
+.vipproofs { display: flex; gap: 6px; flex: none; }
+.vipproof { position: relative; width: 92px; height: 92px; border-radius: 8px; overflow: hidden; cursor: zoom-in; background: #05060a; border: 1px solid #23262d; }
+.vipproof img { width: 100%; height: 100%; object-fit: cover; }
+.vplabel { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; text-align: center; padding: 2px 0; background: rgba(0,0,0,.6); color: #c8ccd4; }
 .reviewinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ri-name { font-weight: 800; color: #e8e9ec; }
 .ri-row { font-size: 12px; color: #9aa0ac; }

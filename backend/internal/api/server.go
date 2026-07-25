@@ -171,6 +171,10 @@ func (s *Server) Routes() http.Handler {
 	// 推薦系統
 	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
 	mux.HandleFunc("/api/referral/apply", s.gate(M, s.handleReferralApply))           // 申請下一檔獎勵
+	mux.HandleFunc("/api/vip/apply", s.gate(M, s.handleVIPApply))                     // 會員申請升級 VIP(上傳兩張證明)
+	mux.HandleFunc("/api/vip/status", s.gate(M, s.handleVIPStatus))                   // 會員查自己的 VIP 申請狀態
+	mux.HandleFunc("/api/admin/vip-apps", s.gate(A, s.handleAdminVIPApps))            // 後台:所有 VIP 申請
+	mux.HandleFunc("/api/admin/vip-review", s.gate(A, s.handleAdminVIPReview))        // 後台:通過/駁回 VIP 申請
 	mux.HandleFunc("/api/admin/referrals", s.gate(A, s.handleAdminReferrals))         // 推廣管理:名單 + 申請
 	mux.HandleFunc("/api/admin/referral-ok", s.gate(A, s.handleAdminReferralOK))      // 切換「合格」
 	mux.HandleFunc("/api/admin/referral-approve", s.gate(A, s.handleAdminRefApprove)) // 審核獎勵:通過
@@ -275,6 +279,87 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.store.NotifyNewRegister(username, uid, exchange) // alert admins to review
 	writeJSON(w, map[string]any{"ok": true, "status": "pending"})
+}
+
+// handleVIPApply: 會員上傳入金證明 + 交易量證明兩張圖 → 送出 VIP 升級申請。
+func (s *Server) handleVIPApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	user := s.userOf(r)
+	if user == "" {
+		http.Error(w, "未登入", http.StatusUnauthorized)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2*maxUploadBytes+512<<10) // 兩張圖 + 表單餘裕
+	if err := r.ParseMultipartForm(2 * maxUploadBytes); err != nil {
+		http.Error(w, "圖片過大(每張上限 3MB)或表單格式錯誤", http.StatusBadRequest)
+		return
+	}
+	// 存兩張圖到 /uploads/vip/。任一張失敗就整個回錯,不留半套。
+	saveOne := func(field string) (string, error) {
+		f, hdr, err := r.FormFile(field)
+		if err != nil {
+			return "", fmt.Errorf("缺少%s", field)
+		}
+		defer f.Close()
+		if hdr.Size > maxUploadBytes {
+			return "", errImageTooLarge
+		}
+		return saveUpload("vip", user, hdr.Filename, f)
+	}
+	deposit, err := saveOne("deposit")
+	if err != nil {
+		http.Error(w, "入金證明:"+err.Error(), http.StatusBadRequest)
+		return
+	}
+	volume, err := saveOne("volume")
+	if err != nil {
+		http.Error(w, "交易量證明:"+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.store.ApplyVIP(user, deposit, volume); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleVIPStatus: 會員查自己的 VIP 申請狀態。
+func (s *Server) handleVIPStatus(w http.ResponseWriter, r *http.Request) {
+	user := s.userOf(r)
+	if user == "" {
+		http.Error(w, "未登入", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, s.store.VIPStatus(user))
+}
+
+// handleAdminVIPApps: 後台列出所有 VIP 申請(含兩張圖 URL)。
+func (s *Server) handleAdminVIPApps(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.VIPApplications())
+}
+
+// handleAdminVIPReview: 後台通過/駁回一筆 VIP 申請。POST {id, approve}。
+func (s *Server) handleAdminVIPReview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		ID      int64 `json:"id"`
+		Approve bool  `json:"approve"`
+	}
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.ID == 0 {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.ReviewVIP(in.ID, in.Approve) {
+		http.Error(w, "審核失敗(申請不存在或已處理)", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleMe returns the caller's LIVE role + status (from the DB, not just the

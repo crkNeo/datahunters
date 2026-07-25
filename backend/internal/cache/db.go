@@ -106,6 +106,20 @@ CREATE TABLE IF NOT EXISTS push_subs (
   username VARCHAR(191),
   sub      LONGTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 會員申請升級 VIP:上傳入金證明 + 交易量證明,後台審核通過即升級為 vip。
+-- UNIQUE(username) → 每人一列;駁回後可重新申請(upsert 覆蓋回 pending)。
+CREATE TABLE IF NOT EXISTS vip_applications (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username      VARCHAR(191) NOT NULL,
+  deposit_proof VARCHAR(512) NOT NULL DEFAULT '',  -- 入金證明圖 URL
+  volume_proof  VARCHAR(512) NOT NULL DEFAULT '',  -- 交易量證明圖 URL
+  status        VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  applied       BIGINT,
+  reviewed      BIGINT,
+  UNIQUE KEY uk_vip_user (username),
+  KEY idx_vip_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
 // DB wraps the SQL handle for persistence.
