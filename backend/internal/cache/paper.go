@@ -434,11 +434,13 @@ func bookLabel(name string) string {
 	case "bollfade":
 		return "布林重回"
 	case "meanrev":
-		return "乖離回歸"
+		return "火星"
 	case "bgv2dev", "bgv2boll", "bgv2": // 兩腿的 DB book 名 + 家族開關 key
 		return "布乖v2" // 兩腿共用一個對外名稱
 	case "bollema":
-		return "布林EMA"
+		return "海王星"
+	case "smc":
+		return "SMC教練"
 	}
 	return "星軌"
 }
@@ -492,7 +494,7 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "bollfade", "meanrev":
+	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "smc":
 		return name
 	}
 	return "paper" // main

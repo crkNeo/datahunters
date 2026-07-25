@@ -55,9 +55,10 @@ var tabMeta = []struct {
 	{"sr", "支撐壓力", "vip", false},
 	// 策略觀察書(預設管理員,可視需要開放給 VIP)
 	{"bollfade", "布林重回", "admin", false},
-	{"meanrev", "乖離回歸", "admin", false},
+	{"meanrev", "火星", "admin", false},
 	{"bgv2", "布乖v2", "admin", false},
-	{"bollema", "布林EMA", "admin", false},
+	{"bollema", "海王星", "admin", false},
+	{"smc", "SMC教練", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -161,6 +162,7 @@ var tabOfRoute = map[string]string{
 	"/api/conv": "conv", "/api/sr": "sr",
 	"/api/admin/bollfade": "bollfade",
 	"/api/admin/meanrev": "meanrev", "/api/admin/bgv2": "bgv2", "/api/admin/bollema": "bollema",
+	"/api/smc": "smc",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

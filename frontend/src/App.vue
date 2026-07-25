@@ -614,6 +614,15 @@ async function loadBollema() {
     /* secondary */
   }
 }
+const smc = ref(null)
+async function loadSMC() {
+  try {
+    const res = await authFetch('/api/smc')
+    if (res.ok) smc.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
 async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
@@ -633,16 +642,20 @@ const microMeta = {
     help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
   },
   bollema: {
-    title: '布林EMA · 4H 突破蓄勢 · 多空', load: loadBollema, get: () => bollema.value,
-    help: "<b>4H 突破蓄勢</b>,多空雙向。賭的是<b>突破後盤整、再啟動</b>,不是追突破。<br><br><b>【指標】</b>全部 4H、收盤判斷:布林(20, 2σ)中軌 = SMA20 ｜ EMA50(趨勢過濾)｜ ATR(14)<br><br><b>【進場・做多】</b>(空單完全鏡像)依序四條全成立:<br>① <b>順大勢</b>:K2 收盤 &gt; 4H EMA50<br>② <b>突破K</b>:某根收盤由下往上站上中軌(前一根收盤 ≤ 中軌、這根 &gt; 中軌)<br>③ <b>蓄勢K1</b>:下一根收盤守在中軌上方,且 ≤ 突破K收盤 × 1.02<br>④ <b>蓄勢K2</b>:再下一根收盤守在中軌上方,且 ≤ 突破K收盤 × 1.02(<b>累計漲幅 ≤ 2%</b>)<br>→ <b>K2 收盤市價進場</b><br><br><b>【出場】</b>(先到先出)<br>・<b>止損</b>:中軌 − 1.5 × ATR<br>・<b>止盈</b>:進場價 + 3 ×(進場價 − 止損價),即 <b>1:3 盈虧比</b><br>・<b>時間出場</b>:持滿 <b>180 根</b>(30 天)未解決 → 收盤平倉(極少觸發)<br><br><b>【保本位・僅通知】</b>價格首次觸及「進場 + 0.3 ×(止盈 − 進場)」時,標記 <b>🛡 已達保本位</b> 並發通知。<br>⚠️ <b>止盈止損不會被修改</b> —— 這只是提示這筆單已覆蓋風險,倉位仍照原本的 TP/SL 運作。<br><br><b>【節流】</b>同幣冷卻 3 根(4H)。<br><br>單段止盈,不分批。管理員專屬模擬單,⚠️ 非投資建議。",
+    title: '海王星 · 4H 突破蓄勢 · 多空', load: loadBollema, get: () => bollema.value,
+    help: "‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」",
   },
   bgv2: {
     title: '布乖v2 · 1h乖離 + 4h布林 · 只做空', load: loadBgv2, get: () => bgv2.value,
     help: "<b>只做空的雙腿策略</b>——1h「乖離腿」與 4h「布林腿」共用一個分頁、一個開關。<br><br><b>【通用設定】</b><br>・<b>市場過濾</b>:收盤 &lt; EMA200(各腿用自己週期的 EMA200)<br>・<b>止損</b>:進場 + <b>4.0×ATR(14)</b>(寬止損,扛插針)<br>・<b>時間出場</b>:持滿 <b>64 根</b>收盤平倉<br>・<b>盈虧比閘門</b>:RR 落在 0.4–3.0 才進場<br>・<b>冷卻</b>:訊號後 4 根內不重複進場<br>・<b>同幣互斥</b>:同一幣種同時只允許本家族<b>一個</b>倉位(兩腿誰先觸發誰佔位,另一腿跳過)<br>・所有條件以 <b>K 棒收盤</b>判斷,收盤市價進場;同根同觸止損與目標 → 一律算<b>止損</b>(保守)<br><br><b>【腿 1:乖離回歸 v2 · 1h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② <b>(收盤 − EMA50) / ATR &gt; +2.0</b>(反彈高出 EMA50 兩個 ATR)③ 以「目標 EMA50、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的 <b>EMA50</b> 值 ｜ <b>時間</b>:64 根 ≈ <b>2.7 天</b><br><br><b>【腿 2:布林重回 v2 · 4h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② 前一根收盤 <b>&gt; 布林(50, 2σ) 上軌</b>(衝出通道)③ 本根收盤<b>跌回上軌內、且仍在中軌(SMA50)上方</b>(收回但未跌過頭)④ 以「目標中軌、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的<b>中軌(SMA50)</b>值 ｜ <b>時間</b>:64 根 ≈ <b>10.7 天</b><br><br><b>【倉位】</b>每筆風險 ≤ <b>0.5%</b> 資金(歷史 maxDD 約 20–35R)。<br><br><b>單段止盈,不分批</b> — 照回測規格原樣上線。<br><br>管理員專屬模擬單,⚠️ 非投資建議。",
   },
   meanrev: {
-    title: '乖離回歸 · 1h', load: loadMeanrev, get: () => meanrev.value,
-    help: '<b>進場</b>:收盤價偏離 EMA20 超過 2.0×ATR,且與 EMA200 趨勢同側(上方接多、下方接空)→ 朝 EMA20 回歸。<br><b>止損</b> 3.0×ATR,<b>最終止盈 TP3</b>=EMA20。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+    title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
+    help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
+  },
+  smc: {
+    title: 'SMC 教練 · 15M 多單', load: loadSMC, get: () => smc.value,
+    help: "<b>只做多的 SMC 結構策略</b>——三週期:4H+1H 定方向、1H 選區域、15M 執行。每個幣種同時只有一個 setup。<br><br><b>【方向】</b>1H 與 4H 結構趨勢<b>同時為多</b>(嚴格,缺一不可);只看 4H 的模式回測全滅。<br><br><b>【七步狀態機】</b>(全部 15M 收盤判斷)<br>① 方向成立 → ② 觸碰 1H 多方需求區(FVG)→ ③ <b>IDM 掃蕩</b>:插針掃過下方流動性、收盤收回 → ④ <b>MSS</b>:收盤突破掃蕩前的高點 → ⑤ <b>BOS</b>:突破 MSS 後新形成的高點 → ⑥ 回踩區:BOS 後新生成的 15M 多方 FVG → ⑦ <b>進場</b>:掛限價在區域上緣,觸碰即成交。<br><br><b>【出場】</b><br>・<b>止損</b>:掃蕩保護低點(結構點,<b>無緩衝</b>,進場後不動)<br>・<b>止盈</b>:<b>固定 1:2</b>(entry + 2×風險);同棒同觸 SL/TP 一律算止損(保守)<br><br><b>【失效】</b>方向轉弱、逾時 80 根(20h)、跌破 1H 區/保護低點/掛單區 → 依規則重置或退回前一步。<br><br><b>【風控】</b>固定風險倉位:數量 = 單筆風險 ÷(entry−SL);單筆風險 ≤ 0.5%。勝率 42–47%,<b>連虧 5–8 筆是常態</b>。<br><br><b>單段止盈,不分批。</b>與空單家族方向互補。⚠️ 未經實盤驗證,管理員專屬模擬單,非投資建議。",
   },
 }
 const micro = computed(() => microMeta[mainTab.value] || null)
@@ -1062,6 +1075,7 @@ function loadAll() {
   if (canTab('meanrev')) loadMeanrev()
   if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
+  if (canTab('smc')) loadSMC()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
     loadUsers()
@@ -1133,7 +1147,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1300,7 +1314,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema',
+  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc',
 ]
 // 這個標籤該不該出現在這一列:看得到,而且它的設定身分正好是這一組。
 function inGroup(tab, grp) {
@@ -1766,13 +1780,16 @@ watch([role, tabPerms, authReady], () => {
             布林重回<em v-if="bollfade && bollfade.open.length" class="navbadge">{{ bollfade.open.length }}</em>
           </button>
           <button v-if="inGroup('meanrev', grp[0])" :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
-            乖離回歸<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
+            火星<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
           </button>
           <button v-if="inGroup('bgv2', grp[0])" :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
             布乖v2<em v-if="bgv2 && bgv2.open.length" class="navbadge">{{ bgv2.open.length }}</em>
           </button>
           <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
-            布林EMA<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
+            海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
+          </button>
+          <button v-if="inGroup('smc', grp[0])" :class="{ active: mainTab === 'smc' }" @click="mainTab = 'smc'; loadSMC()">
+            SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>
           </button>
         </div>
       </div>

@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -77,6 +77,9 @@ var stratDefaults = map[string]StratCfg{
 	"bgv2": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single"},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
+	// SMC 教練:15M 多單狀態機,固定 1:2 RR、結構止損。單段止盈(不分批)。
+	// MaxSLPct 預設 0(結構止損距離不定,靠固定風險倉位控管,見 smc.go 規格 §6)。
+	"smc": {Tags: []string{"保守", "低頻", "短線"}, ExitMode: "single", NotifyOpen: true, NotifyClose: true},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -422,6 +425,13 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)
 		s.convMu.Unlock()
+	case "smc":
+		s.smcBook.mu.Lock()
+		done = closeIn(s.smcBook.trades)
+		if done != nil {
+			delete(s.smcBook.states, done.Coin) // 手動平倉後狀態機也要重置
+		}
+		s.smcBook.mu.Unlock()
 	default:
 		return false
 	}
