@@ -132,11 +132,11 @@ function fmtReg(ms) {
   <div class="reviewgrid">
     <div v-for="a in vipPending" :key="a.id" class="reviewcard">
       <div class="vipproofs">
-        <div class="vipproof" @click="$emit('proof', a.deposit)">
-          <img v-if="a.deposit" :src="a.deposit" alt="入金證明" /><span class="vplabel">入金證明</span>
+        <div class="vipproof" :class="{ empty: !a.deposit }" @click="a.deposit && $emit('proof', a.deposit)">
+          <img v-if="a.deposit" :src="a.deposit" alt="入金證明" /><span v-else class="vpnone">未提供</span><span class="vplabel">入金證明</span>
         </div>
-        <div class="vipproof" @click="$emit('proof', a.volume)">
-          <img v-if="a.volume" :src="a.volume" alt="交易量證明" /><span class="vplabel">交易量證明</span>
+        <div class="vipproof" :class="{ empty: !a.volume }" @click="a.volume && $emit('proof', a.volume)">
+          <img v-if="a.volume" :src="a.volume" alt="交易量證明" /><span v-else class="vpnone">未提供</span><span class="vplabel">交易量證明</span>
         </div>
       </div>
       <div class="reviewinfo">

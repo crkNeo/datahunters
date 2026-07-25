@@ -297,11 +297,12 @@ func (s *Server) handleVIPApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "圖片過大(每張上限 3MB)或表單格式錯誤", http.StatusBadRequest)
 		return
 	}
-	// 存兩張圖到 /uploads/vip/。任一張失敗就整個回錯,不留半套。
+	// 兩張圖各自選填(但至少一張,由 ApplyVIP 把關)。缺檔 → 空字串;有檔但格式/
+	// 大小錯 → 回錯。存到 /uploads/vip/。
 	saveOne := func(field string) (string, error) {
 		f, hdr, err := r.FormFile(field)
 		if err != nil {
-			return "", fmt.Errorf("缺少%s", field)
+			return "", nil // 這張沒上傳,略過(不是錯)
 		}
 		defer f.Close()
 		if hdr.Size > maxUploadBytes {

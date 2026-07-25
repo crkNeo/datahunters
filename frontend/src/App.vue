@@ -380,12 +380,12 @@ function onVipFile(e, which) {
 }
 async function submitVIP() {
   if (vipBusy.value) return
-  if (!vipDeposit.value || !vipVolume.value) { showToast('入金證明與交易量證明都要上傳', 'err'); return }
+  if (!vipDeposit.value && !vipVolume.value) { showToast('入金證明或交易量證明,至少上傳一張', 'err'); return }
   vipBusy.value = true
   try {
     const fd = new FormData()
-    fd.append('deposit', vipDeposit.value)
-    fd.append('volume', vipVolume.value)
+    if (vipDeposit.value) fd.append('deposit', vipDeposit.value)
+    if (vipVolume.value) fd.append('volume', vipVolume.value)
     const res = await authFetch('/api/vip/apply', { method: 'POST', body: fd })
     if (res.ok) {
       showToast('已送出 VIP 申請,待管理員審核')
@@ -1607,7 +1607,7 @@ watch([role, tabPerms, authReady], () => {
   <div v-if="vipShow" class="overlay vipover" @click="vipShow = false">
     <div class="vipbox" @click.stop>
       <div class="refhead"><h3>⭐ 申請 VIP</h3><button class="xbtn" @click="vipShow = false">✕</button></div>
-      <p class="refhint">上傳<b>入金證明</b>與<b>交易量證明</b>各一張,送出後由管理員審核,通過即升級為 VIP。</p>
+      <p class="refhint"><b>入金證明</b>或<b>交易量證明</b>,至少上傳一張(兩張都上傳更快通過),送出後由管理員審核,通過即升級為 VIP。</p>
       <label class="authfile vipfile">
         <span>{{ vipDeposit ? '📎 ' + vipDeposit.name : '＋ 上傳「入金證明」' }}</span>
         <input type="file" accept="image/*,.heic,.heif" hidden @change="onVipFile($event, 'deposit')" />
@@ -1616,7 +1616,7 @@ watch([role, tabPerms, authReady], () => {
         <span>{{ vipVolume ? '📎 ' + vipVolume.name : '＋ 上傳「交易量證明」' }}</span>
         <input type="file" accept="image/*,.heic,.heif" hidden @change="onVipFile($event, 'volume')" />
       </label>
-      <button class="authbtn" :disabled="vipBusy || !vipDeposit || !vipVolume" @click="submitVIP">送出申請</button>
+      <button class="authbtn" :disabled="vipBusy || (!vipDeposit && !vipVolume)" @click="submitVIP">送出申請</button>
     </div>
   </div>
 
@@ -1978,7 +1978,7 @@ watch([role, tabPerms, authReady], () => {
         :risky="stratRisky(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
-        :can-exit="true"
+        :can-exit="can('admin')"
         empty-text="尚無訊號——需等收盤觸發進場訊號(首次啟動需抓取歷史 K 線)。"
         @coin="openDetail"
         @exit="(id) => manualExitStrat(mainTab, id, micro.load)"
@@ -3102,6 +3102,8 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .vipproof { position: relative; width: 92px; height: 92px; border-radius: 8px; overflow: hidden; cursor: zoom-in; background: #05060a; border: 1px solid #23262d; }
 .vipproof img { width: 100%; height: 100%; object-fit: cover; }
 .vplabel { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; text-align: center; padding: 2px 0; background: rgba(0,0,0,.6); color: #c8ccd4; }
+.vipproof.empty { cursor: default; display: flex; align-items: center; justify-content: center; }
+.vpnone { font-size: 11px; color: #6b7078; }
 .reviewinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ri-name { font-weight: 800; color: #e8e9ec; }
 .ri-row { font-size: 12px; color: #9aa0ac; }

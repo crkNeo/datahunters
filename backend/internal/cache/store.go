@@ -117,7 +117,6 @@ type Store struct {
 	srBar   int64              // last processed closed-bar Ts (per-bar throttle)
 
 	srmMu    sync.Mutex // guards the 錘子/流星 插針 monitor (support_mtf.go)
-	srmHits  []PinHit   // recent hammer/shooting-star detections (1H+4H), capped
 	srmBar1h int64      // last processed closed 1h bar Ts
 	srmBar4h int64      // last processed closed 4h bar Ts
 

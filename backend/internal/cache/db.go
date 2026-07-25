@@ -107,6 +107,20 @@ CREATE TABLE IF NOT EXISTS push_subs (
   sub      LONGTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 錘子/流星 插針命中紀錄:持久化,重啟不清除。UNIQUE(coin,tf,ts) 讓同一根棒的
+-- 命中不會重複寫入(重啟後首 tick 只建基準,本就不會重測,這是雙保險)。
+CREATE TABLE IF NOT EXISTS pin_hits (
+  id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  coin    VARCHAR(32) NOT NULL,
+  tf      VARCHAR(4)  NOT NULL,   -- 1H | 4H
+  kind    VARCHAR(16) NOT NULL,   -- hammer | star
+  price   DOUBLE,
+  ts      BIGINT NOT NULL,        -- 命中棒的開盤時戳(ms)
+  created BIGINT,
+  UNIQUE KEY uk_pin (coin, tf, ts),
+  KEY idx_pin_ts (ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 會員申請升級 VIP:上傳入金證明 + 交易量證明,後台審核通過即升級為 vip。
 -- UNIQUE(username) → 每人一列;駁回後可重新申請(upsert 覆蓋回 pending)。
 CREATE TABLE IF NOT EXISTS vip_applications (

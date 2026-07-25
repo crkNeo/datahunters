@@ -73,8 +73,8 @@ func (s *Store) ApplyVIP(username, deposit, volume string) error {
 	if role == "vip" || role == "admin" {
 		return fmt.Errorf("你已經是 VIP,不需要再申請")
 	}
-	if deposit == "" || volume == "" {
-		return fmt.Errorf("入金證明與交易量證明都要上傳")
+	if deposit == "" && volume == "" {
+		return fmt.Errorf("入金證明或交易量證明,至少上傳一張")
 	}
 	if err := s.db.vipUpsert(username, deposit, volume); err != nil {
 		return fmt.Errorf("送出失敗,請稍後再試")

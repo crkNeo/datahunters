@@ -3,7 +3,6 @@ package cache
 import (
 	"fmt"
 	"math"
-	"sort"
 	"time"
 
 	"datahunter/internal/exchange"
@@ -25,7 +24,6 @@ const (
 	pinShadowMul  = 2.0 // 長影線 ≥ N×實體
 	pinOppMul     = 0.5 // 另一側影線 ≤ N×實體
 	pinCtxBars    = 5   // 位置脈絡:與前 N 根比高低
-	pinKeep       = 200 // 保留最近 N 筆命中
 	pinDisplayMax = 60  // 分頁顯示最近 N 筆
 )
 
@@ -124,27 +122,47 @@ func (s *Store) SRMTFTick() {
 		return
 	}
 
-	s.srmMu.Lock()
-	s.srmHits = append(s.srmHits, fresh...)
-	if len(s.srmHits) > pinKeep {
-		s.srmHits = s.srmHits[len(s.srmHits)-pinKeep:]
-	}
-	s.srmMu.Unlock()
-
+	// 持久化(重啟不清除)+ 通知。
 	for _, h := range fresh {
+		if s.db != nil {
+			s.db.pinInsert(h)
+		}
 		s.notifyPin(h)
 	}
 }
 
-// SRMTF 回傳最近的插針命中(新到舊)。分頁用。
+// ---- 持久化(pin_hits 表)----
+
+// pinInsert 寫入一筆命中;UNIQUE(coin,tf,ts) → 同一根棒重複命中會被忽略。
+func (db *DB) pinInsert(h PinHit) {
+	db.sql.Exec(`INSERT IGNORE INTO pin_hits(coin,tf,kind,price,ts,created) VALUES(?,?,?,?,?,?)`,
+		h.Coin, h.TF, h.Kind, h.Price, h.Time, time.Now().UnixMilli())
+}
+
+// pinRecent 讀最近 limit 筆命中(新到舊)。
+func (db *DB) pinRecent(limit int) []PinHit {
+	rows, err := db.sql.Query(`SELECT coin,tf,kind,price,ts FROM pin_hits ORDER BY ts DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []PinHit{}
+	for rows.Next() {
+		var h PinHit
+		if rows.Scan(&h.Coin, &h.TF, &h.Kind, &h.Price, &h.Time) == nil {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// SRMTF 回傳最近的插針命中(新到舊)。分頁用。從 DB 讀 → 重啟後紀錄仍在。
 func (s *Store) SRMTF() PinData {
-	s.srmMu.Lock()
-	defer s.srmMu.Unlock()
-	hits := make([]PinHit, len(s.srmHits))
-	copy(hits, s.srmHits)
-	sort.Slice(hits, func(i, j int) bool { return hits[i].Time > hits[j].Time })
-	if len(hits) > pinDisplayMax {
-		hits = hits[:pinDisplayMax]
+	hits := []PinHit{}
+	if s.db != nil {
+		if l := s.db.pinRecent(pinDisplayMax); l != nil {
+			hits = l
+		}
 	}
 	return PinData{Hits: hits, UpdatedAt: time.Now().Format(time.RFC3339)}
 }
