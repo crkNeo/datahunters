@@ -1508,7 +1508,7 @@ watch([role, tabPerms, authReady], () => {
   </div>
 
   <!-- 我的推廣 modal(點名字開啟) -->
-  <div v-if="refShow" class="overlay" @click="refShow = false">
+  <div v-if="refShow" class="overlay refover" @click="refShow = false">
     <div class="refbox" @click.stop>
       <div class="refhead"><h3>🎁 我的推廣</h3><button class="xbtn" @click="refShow = false">✕</button></div>
       <!-- 規則入口:後端未發佈時 text 是空的,整個按鈕就不出現 -->
@@ -2578,7 +2578,10 @@ body::before {
 .namebtn:hover { color: #d8ad48; }
 .refnote { background: rgba(216,173,72,.1); border: 1px solid #3a3320; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #d8ad48; display: flex; flex-direction: column; gap: 2px; }
 .refnote span { color: #8b909a; font-size: 11px; }
-.refbox { background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px; width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
+.refbox { box-sizing: border-box; background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px; width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
+/* 我的推廣 modal:置中、往下推、不要滿版高(尤其手機)—— ✕ 才不會頂到瀏覽器列 */
+.refover { justify-content: center; align-items: flex-start; padding-top: 8vh; }
+.refover .refbox { max-height: 80vh; }
 .refhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .refhead h3 { margin: 0; font-size: 16px; color: #d8ad48; }
 .xbtn { background: none; border: none; color: #8b909a; font-size: 18px; cursor: pointer; line-height: 1; }
@@ -2634,8 +2637,8 @@ body::before {
 .rulesover { z-index: 60; }
 /* 申請 VIP modal:置中、往下推,避免 ✕ 頂到手機瀏覽器列/瀏海按不到 */
 .vipover { z-index: 60; justify-content: center; align-items: flex-start; }
-.vipbox { background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px;
-  width: min(400px, 90vw); max-height: 78vh; overflow-y: auto; margin-top: 14vh; }
+.vipbox { box-sizing: border-box; background: #14161c; border: 1px solid #23262f; border-radius: 14px;
+  padding: 16px; width: min(380px, 88vw); max-height: 78vh; overflow-y: auto; margin-top: 14vh; }
 .rulesbody { padding: 2px 0 8px; }
 /* pre-line:段落內的單一換行保留(規則常是條列),段落間距靠 <p> */
 .rulespara { margin: 0 0 12px; font-size: 13px; line-height: 1.85; color: #c8ccd4; white-space: pre-line; }
