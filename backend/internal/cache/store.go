@@ -116,6 +116,11 @@ type Store struct {
 	srState map[string]string  // coin → last emitted breach ("" | down | up) for alert dedupe
 	srBar   int64              // last processed closed-bar Ts (per-bar throttle)
 
+	srmMu    sync.Mutex // guards the 錘子/流星 插針 monitor (support_mtf.go)
+	srmHits  []PinHit   // recent hammer/shooting-star detections (1H+4H), capped
+	srmBar1h int64      // last processed closed 1h bar Ts
+	srmBar4h int64      // last processed closed 4h bar Ts
+
 	gdeltW      *gdelt.Watcher    // GDELT market-news watcher (free, no key)
 	gdeltMu     sync.RWMutex      // guards the news feed + dedupe set
 	gdeltFeed   []NewsItem        // recent market-moving headlines (newest first), titles zh-TW

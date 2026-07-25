@@ -623,6 +623,15 @@ async function loadSMC() {
     /* secondary */
   }
 }
+const srmtf = ref(null)
+async function loadSRMTF() {
+  try {
+    const res = await authFetch('/api/srmtf')
+    if (res.ok) srmtf.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
 async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
@@ -1076,6 +1085,7 @@ function loadAll() {
   if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
   if (canTab('smc')) loadSMC()
+  if (canTab('srmtf')) loadSRMTF()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
     loadUsers()
@@ -1147,7 +1157,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1285,7 +1295,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin',
 }
 const tabPerms = ref({})
 async function loadTabPerms() {
@@ -1314,7 +1324,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc',
+  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf',
 ]
 // 這個標籤該不該出現在這一列:看得到,而且它的設定身分正好是這一組。
 function inGroup(tab, grp) {
@@ -1791,6 +1801,7 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('smc', grp[0])" :class="{ active: mainTab === 'smc' }" @click="mainTab = 'smc'; loadSMC()">
             SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>
           </button>
+          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘子/流星</button>
         </div>
       </div>
       </template>
@@ -1857,6 +1868,30 @@ watch([role, tabPerms, authReady], () => {
       </div>
       <p v-else class="loading">載入中…(首個 1h 收盤週期後才會建立支撐壓力)</p>
       <p class="loginhint" style="margin-top:12px">跌破支撐或突破壓力時,會即時推播給 VIP(需在裝置開啟通知)。</p>
+    </section>
+
+    <!-- 錘子/流星 插針訊號(1H + 4H · 純提示,不下單)-->
+    <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
+      <div class="mk-head">
+        <h2>錘子/流星<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒插針型態</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘子(做多)</b>:下影 ≥ 2×實體、上影 ≤ 0.5×實體、當根 low < 前 5 根最低(下插針被買回、局部低點)。<br><b>流星(做空)</b>:上影 ≥ 2×實體、下影 ≤ 0.5×實體、當根 high > 前 5 根最高(上插針被賣回、局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="srmtf && srmtf.hits">最近 {{ srmtf.hits.length }} 筆 · 1H/4H 收盤掃描</span>
+      </div>
+
+      <table class="grid" v-if="srmtf && srmtf.hits.length">
+        <thead><tr><th>時間</th><th>幣種</th><th>週期</th><th>型態</th><th class="r">收盤價</th></tr></thead>
+        <tbody>
+          <tr v-for="(h, i) in srmtf.hits" :key="i">
+            <td class="tsmall">{{ fmtClock(h.time) }}</td>
+            <td class="coin">{{ h.coin }}</td>
+            <td><span class="srmtf-badge" :class="{ h4: h.tf === '4H' }">{{ h.tf }}</span></td>
+            <td><span class="otag" :class="h.kind === 'hammer' ? 'tp' : 'sl'">{{ h.kind === 'hammer' ? '🔨 錘子 做多' : '☄️ 流星 做空' }}</span></td>
+            <td class="r">{{ fmtPrice(h.price) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else-if="srmtf" class="empty">尚無插針訊號 —— 需等 1H/4H 收盤出現符合條件的錘子或流星。</p>
+      <p v-else class="loading">載入中…</p>
+      <p class="loginhint" style="margin-top:12px">1H 或 4H 收盤出現錘子/流星時,會即時推播(需在裝置開啟通知)。純提示,不含任何下單訊號。</p>
     </section>
 
     <!-- 冥王星 (動態ATR 4H 均線收斂) · VIP -->
@@ -2761,6 +2796,14 @@ body::before {
 .sup-level b { font-size: 15px; }
 .sup-level b.long { color: #2ec26b; } .sup-level b.short { color: #ff5c5c; }
 .sup-level small { font-size: 10px; color: #6b7078; }
+/* 多週期支壓:每張卡兩排(1H/4H)*/
+.srmtf-tf { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+.srmtf-badge { flex: none; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: #22303f; color: #6db5ff; }
+.srmtf-badge.h4 { background: #2f2a14; color: #f4d774; }
+.srmtf-lv { font-size: 12px; color: #c8ccd4; }
+.srmtf-lv b { font-size: 13px; }
+.srmtf-lv b.long { color: #2ec26b; } .srmtf-lv b.short { color: #ff5c5c; }
+.srmtf-lv small { font-size: 10px; color: #6b7078; }
 .sup-tag { display: inline-block; margin-top: 10px; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 .sup-tag.short { background: #3a1010; color: #ff5c5c; }
 .sup-tag.long { background: #103a24; color: #2ec26b; }

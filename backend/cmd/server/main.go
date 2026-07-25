@@ -161,6 +161,16 @@ func main() {
 		}
 	}()
 
+	// 多週期支壓 monitor (純提示,1H + 4H):同樣跑在記憶體 WS klines(4h 由 1h 聚合),
+	// 每根 1h/4h 收盤檢查破位並推播。零 REST;首次 tick 只建基準。
+	go func() {
+		store.SRMTFTick()
+		ticker := time.NewTicker(30 * time.Second)
+		for range ticker.C {
+			store.SRMTFTick()
+		}
+	}()
+
 	// 市場快訊 RSS feed (free, no key): 動區/鏈新聞 (繁中, 免翻譯) + Coindesk/
 	// Cointelegraph/The Block (英譯). Poll every 5 min; each tick handles only new URLs.
 	go func() {
