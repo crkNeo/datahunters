@@ -15,15 +15,18 @@ import (
 // (分頁對外 key 沿用 "srmtf"、方法名沿用 SRMTF*,是為了不動已驗證的路由/白名單;
 //  實際邏輯是插針偵測,與支撐壓力無關。)
 //
-// 型態定義(定版,見使用者提供的表):
-//   錘子(hammer, 做多):下影 ≥ 2×實體、上影 ≤ 0.5×實體、當根 low < 前 5 根最低
-//   流星(star,   做空):上影 ≥ 2×實體、下影 ≤ 0.5×實體、當根 high > 前 5 根最高
-//   顏色不要求。
+// 型態定義(定版 2026-07-25):形狀 + 位置脈絡。
+//   錘頭線(hammer, 做多):實體「非常小」+ 下影線遠大於實體、絕對主導上影線
+//                          + 當根 low < 前 10 根最低(出現在局部低點)。
+//   射擊星(star,   做空):實體「非常小」+ 上影線遠大於實體、絕對主導下影線
+//                          + 當根 high > 前 10 根最高(出現在局部高點)。
+//   反向可帶一點點影線,只要主影線絕對主導仍算數。顏色不要求。
 
 const (
-	pinShadowMul  = 2.0 // 長影線 ≥ N×實體
-	pinOppMul     = 0.5 // 另一側影線 ≤ N×實體
-	pinCtxBars    = 5   // 位置脈絡:與前 N 根比高低
+	pinBodyMax    = 0.3 // 實體 ≤ N × 全棒範圍(實體「非常小」)
+	pinWickBody   = 2.0 // 主影線 ≥ N × 實體(明顯較長、遠大於實體)
+	pinWickDom    = 2.0 // 主影線 ≥ N × 反向影線(絕對主導)
+	pinCtxBars    = 10  // 位置脈絡:與前 N 根比高低(局部低/高點)
 	pinDisplayMax = 60  // 分頁顯示最近 N 筆
 )
 
@@ -42,20 +45,25 @@ type PinData struct {
 	UpdatedAt string   `json:"updated_at"`
 }
 
-// pinKind 判定 cs 最後一根是否為錘子/流星,回 "hammer" / "star" / ""。
+// pinKind 判定 cs 最後一根是否為錘頭線/射擊星,回 "hammer" / "star" / ""。
+// 形狀(實體很小、主影線遠大於實體且絕對主導反向影線)+ 位置脈絡(局部低/高點)。
 func pinKind(cs []exchange.Candle) string {
 	n := len(cs)
 	if n < pinCtxBars+1 {
 		return ""
 	}
 	c := cs[n-1]
+	rng := c.High - c.Low
+	if rng <= 0 {
+		return "" // 一字線,無形狀可言
+	}
 	body := math.Abs(c.Close - c.Open)
-	if body <= 0 {
-		return "" // 純十字星:實體為 0,「N×實體」無意義,跳過
+	if body > pinBodyMax*rng {
+		return "" // 實體不夠小
 	}
 	upper := c.High - math.Max(c.Open, c.Close)
 	lower := math.Min(c.Open, c.Close) - c.Low
-	// 位置脈絡:前 5 根的最高 / 最低
+	// 位置脈絡:前 pinCtxBars 根的最高 / 最低
 	hi, lo := cs[n-2].High, cs[n-2].Low
 	for i := n - pinCtxBars - 1; i < n-1; i++ {
 		if cs[i].High > hi {
@@ -66,10 +74,10 @@ func pinKind(cs []exchange.Candle) string {
 		}
 	}
 	switch {
-	case lower >= pinShadowMul*body && upper <= pinOppMul*body && c.Low < lo:
-		return "hammer" // 下插針被買回、出現在局部低點 → 做多
-	case upper >= pinShadowMul*body && lower <= pinOppMul*body && c.High > hi:
-		return "star" // 上插針被賣回、出現在局部高點 → 做空
+	case lower >= pinWickBody*body && lower >= pinWickDom*upper && c.Low < lo:
+		return "hammer" // 小實體 + 長下影絕對主導 + 局部低點 → 做多
+	case upper >= pinWickBody*body && upper >= pinWickDom*lower && c.High > hi:
+		return "star" // 小實體 + 長上影絕對主導 + 局部高點 → 做空
 	}
 	return ""
 }
@@ -171,11 +179,11 @@ func (s *Store) SRMTF() PinData {
 func (s *Store) notifyPin(h PinHit) {
 	var emoji, title, body string
 	if h.Kind == "hammer" {
-		emoji, title = "🔨", h.Coin+" "+h.TF+" 錘子(做多)"
-		body = fmt.Sprintf("%s %s 收盤 $%s 出現錘子:下插針被買回、局部低點", h.Coin, h.TF, fmtPx(h.Price))
+		emoji, title = "🔨", h.Coin+" "+h.TF+" 錘頭線(做多)"
+		body = fmt.Sprintf("%s %s 收盤 $%s 出現錘頭線:小實體 + 長下影線 + 局部低點", h.Coin, h.TF, fmtPx(h.Price))
 	} else {
-		emoji, title = "☄️", h.Coin+" "+h.TF+" 流星(做空)"
-		body = fmt.Sprintf("%s %s 收盤 $%s 出現流星:上插針被賣回、局部高點", h.Coin, h.TF, fmtPx(h.Price))
+		emoji, title = "☄️", h.Coin+" "+h.TF+" 射擊星(做空)"
+		body = fmt.Sprintf("%s %s 收盤 $%s 出現射擊星:小實體 + 長上影線 + 局部高點", h.Coin, h.TF, fmtPx(h.Price))
 	}
 	url := "/?tab=srmtf"
 	if s.TabRole("srmtf") == "admin" {

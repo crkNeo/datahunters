@@ -59,7 +59,7 @@ var tabMeta = []struct {
 	{"bgv2", "布乖v2", "admin", false},
 	{"bollema", "海王星", "admin", false},
 	{"smc", "SMC教練", "admin", false},
-	{"srmtf", "錘子/流星", "admin", false},
+	{"srmtf", "錘頭/射擊星", "admin", false},
 	{"gamblev2", "超新星v2", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},

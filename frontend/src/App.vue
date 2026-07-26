@@ -1869,7 +1869,7 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('smc', grp[0])" :class="{ active: mainTab === 'smc' }" @click="mainTab = 'smc'; loadSMC()">
             SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>
           </button>
-          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘子/流星</button>
+          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘頭/射擊星</button>
           <button v-if="inGroup('gamblev2', grp[0])" :class="{ active: mainTab === 'gamblev2' }" @click="mainTab = 'gamblev2'; loadGambleV2()">
             超新星v2<em v-if="gamblev2 && gamblev2.open.length" class="navbadge">{{ gamblev2.open.length }}</em>
           </button>
@@ -1941,10 +1941,10 @@ watch([role, tabPerms, authReady], () => {
       <p class="loginhint" style="margin-top:12px">跌破支撐或突破壓力時,會即時推播給 VIP(需在裝置開啟通知)。</p>
     </section>
 
-    <!-- 錘子/流星 插針訊號(1H + 4H · 純提示,不下單)-->
+    <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
       <div class="mk-head">
-        <h2>錘子/流星<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒插針型態</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘子(做多)</b>:下影 ≥ 2×實體、上影 ≤ 0.5×實體、當根 low < 前 5 根最低(下插針被買回、局部低點)。<br><b>流星(做空)</b>:上影 ≥ 2×實體、下影 ≤ 0.5×實體、當根 high > 前 5 根最高(上插針被賣回、局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <h2>錘頭/射擊星<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒型態</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘頭線(做多)</b>:實體很小、下影線明顯較長(遠大於實體)且絕對主導上影線(即使帶一點點上影線仍算)、且當根 low < 前 10 根最低(局部低點)。<br><b>射擊星(做空)</b>:實體很小、上影線明顯較長且絕對主導下影線、且當根 high > 前 10 根最高(局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="srmtf && srmtf.hits">最近 {{ srmtf.hits.length }} 筆 · 1H/4H 收盤掃描</span>
       </div>
 
@@ -1955,14 +1955,14 @@ watch([role, tabPerms, authReady], () => {
             <td class="tsmall">{{ fmtClock(h.time) }}</td>
             <td class="coin">{{ h.coin }}</td>
             <td><span class="srmtf-badge" :class="{ h4: h.tf === '4H' }">{{ h.tf }}</span></td>
-            <td><span class="otag" :class="h.kind === 'hammer' ? 'tp' : 'sl'">{{ h.kind === 'hammer' ? '🔨 錘子 做多' : '☄️ 流星 做空' }}</span></td>
+            <td><span class="otag" :class="h.kind === 'hammer' ? 'tp' : 'sl'">{{ h.kind === 'hammer' ? '🔨 錘頭 做多' : '☄️ 射擊星 做空' }}</span></td>
             <td class="r">{{ fmtPrice(h.price) }}</td>
           </tr>
         </tbody>
       </table>
-      <p v-else-if="srmtf" class="empty">尚無插針訊號 —— 需等 1H/4H 收盤出現符合條件的錘子或流星。</p>
+      <p v-else-if="srmtf" class="empty">尚無插針訊號 —— 需等 1H/4H 收盤出現符合條件的錘頭線或射擊星。</p>
       <p v-else class="loading">載入中…</p>
-      <p class="loginhint" style="margin-top:12px">1H 或 4H 收盤出現錘子/流星時,會即時推播(需在裝置開啟通知)。純提示,不含任何下單訊號。</p>
+      <p class="loginhint" style="margin-top:12px">1H 或 4H 收盤出現錘頭線/射擊星時,會即時推播(需在裝置開啟通知)。純提示,不含任何下單訊號。</p>
     </section>
 
     <!-- 冥王星 (動態ATR 4H 均線收斂) · VIP -->
