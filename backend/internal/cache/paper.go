@@ -146,6 +146,7 @@ type paperBook struct {
 	adminOnly    bool    // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
 	maxSLPct     float64 // >0: skip entries whose SL distance exceeds this % (caps far-SL / liquidation risk)
 	posGate      float64 // >0: skip chasing exhaustion — long if range-pos > gate, short if < 1-gate
+	expiry       time.Duration // >0: per-book 逾時 (overrides paperExpiry); 0 = 用全域 24h
 	plan         *tpPlan // >nil: 分批止盈 (multi take-profit) instead of a single TP
 	trades       []*PaperTrade
 	armed        map[string]bool
@@ -196,6 +197,7 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
+	s.tickBook(s.paperGambleV2, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -216,6 +218,7 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
+		collect("gamblev2", s.paperGambleV2)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -324,7 +327,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 				closeTrade(tr, p, "reversed", now)
 			}
 		}
-		if tr.Status == "open" && now.Sub(tr.OpenTime) > paperExpiry {
+		exp := paperExpiry
+		if b.expiry > 0 { // 每本可覆寫逾時(超新星v2 = 6h)
+			exp = b.expiry
+		}
+		if tr.Status == "open" && now.Sub(tr.OpenTime) > exp {
 			closeTrade(tr, p, "expired", now)
 		}
 		if tr.Status == "closed" { // just closed this tick → alert
@@ -425,6 +432,8 @@ func bookLabel(name string) string {
 	switch name {
 	case "gamble":
 		return "超新星"
+	case "gamblev2":
+		return "超新星v2"
 	case "emaonly":
 		return "銀河"
 	case "trail":
@@ -494,7 +503,7 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "smc":
+	case "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "smc":
 		return name
 	}
 	return "paper" // main
@@ -745,8 +754,9 @@ func (b *paperBook) state() PaperState {
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
-func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
+func (s *Store) Paper() PaperState    { return s.serve(s.paperMain, 55) }
+func (s *Store) Gamble() PaperState   { return s.serve(s.paperGamble, 50) }
+func (s *Store) GambleV2() PaperState { return s.serve(s.paperGambleV2, 50) }
 
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
@@ -764,6 +774,8 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
+	case "gamblev2":
+		b = s.paperGambleV2
 	case "emaonly":
 		b = s.paperEMA
 	default:

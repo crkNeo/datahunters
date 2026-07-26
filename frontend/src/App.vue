@@ -666,6 +666,15 @@ async function loadSRMTF() {
     /* secondary */
   }
 }
+const gamblev2 = ref(null)
+async function loadGambleV2() {
+  try {
+    const res = await authFetch('/api/gamblev2')
+    if (res.ok) gamblev2.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // admin: wipe a strategy book's simulated trades (memory + DB), then reload it.
 async function clearStrat(book, loader, closedOnly) {
   const msg = closedOnly
@@ -695,6 +704,10 @@ const microMeta = {
   meanrev: {
     title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
     help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
+  },
+  gamblev2: {
+    title: '超新星v2 · 逾時 6H(A/B 觀察)', load: loadGambleV2, get: () => gamblev2.value,
+    help: "<b>超新星的 A/B 對照版</b> —— 進場條件、分批止盈與最大止損<b>完全同超新星</b>,<b>唯一差別:逾時 24h → 6h</b>。<br>K 線重播顯示縮短逾時單調更佳(動能若不在幾小時內出現就是死單)。<br>這是<b>管理員觀察書</b>,和超新星平行跑、累積各自對帳,用來驗證 6h 是否真的更好再決定要不要套回本尊。<br>⚠️ 純模擬,非投資建議。",
   },
   smc: {
     title: 'SMC 教練 · 15M 多單', load: loadSMC, get: () => smc.value,
@@ -1120,6 +1133,7 @@ function loadAll() {
   if (canTab('bollema')) loadBollema()
   if (canTab('smc')) loadSMC()
   if (canTab('srmtf')) loadSRMTF()
+  if (canTab('gamblev2')) loadGambleV2()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
     loadUsers()
@@ -1191,7 +1205,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1329,7 +1343,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin', gamblev2: 'admin',
 }
 const tabPerms = ref({})
 async function loadTabPerms() {
@@ -1358,7 +1372,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf',
+  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2',
 ]
 // 這個標籤該不該出現在這一列:看得到,而且它的設定身分正好是這一組。
 function inGroup(tab, grp) {
@@ -1856,6 +1870,9 @@ watch([role, tabPerms, authReady], () => {
             SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘子/流星</button>
+          <button v-if="inGroup('gamblev2', grp[0])" :class="{ active: mainTab === 'gamblev2' }" @click="mainTab = 'gamblev2'; loadGambleV2()">
+            超新星v2<em v-if="gamblev2 && gamblev2.open.length" class="navbadge">{{ gamblev2.open.length }}</em>
+          </button>
         </div>
       </div>
       </template>

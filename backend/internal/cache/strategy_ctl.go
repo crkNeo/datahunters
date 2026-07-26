@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc"}
+var allStrategies = []string{"main", "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -68,6 +68,8 @@ var stratDefaults = map[string]StratCfg{
 	// 順勢組:tpMomentum(位置 40/70、分批 40/30/30)
 	"main":    {Tags: []string{"保守", "低頻"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"gamble":  {Tags: []string{"激進", "高頻", "短線"}, MaxSLPct: 12, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
+	// 超新星v2:與 gamble 相同設定,差別只在引擎層的逾時 6h(store.go)。admin 觀察書。
+	"gamblev2": {Tags: []string{"激進", "高頻", "短線"}, MaxSLPct: 12, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 	"emaonly": {Tags: []string{"高頻", "短線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"conv":    {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// bollfade/meanrev 用 tpMeanRevFront(45/60、60/25/15)—— K棒重播調校後的值
@@ -389,12 +391,14 @@ func (s *Store) ManualExit(book, id string) bool {
 	var done *PaperTrade
 	dbBook := book // 家族的 DB book 名 != 開關 key,需記住實際那一腿
 	switch book {
-	case "main", "gamble":
+	case "main", "gamble", "gamblev2":
 		s.paperMu.Lock()
 		b := s.paperMain
 		switch book {
 		case "gamble":
 			b = s.paperGamble
+		case "gamblev2":
+			b = s.paperGambleV2
 		}
 		done = closeIn(b.trades)
 		s.paperMu.Unlock()
