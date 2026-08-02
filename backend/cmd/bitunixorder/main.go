@@ -270,6 +270,7 @@ func main() {
 	symbol := flag.String("symbol", "", "trading pair, e.g. BTCUSDT")
 	side := flag.String("side", "long", "long | short")
 	pct := flag.Float64("pct", 1.0, "margin as percent of available balance (1 = 1%)")
+	fixedMargin := flag.Float64("margin", 0, "fixed margin in marginCoin (e.g. 1.5); >0 overrides -pct")
 	lev := flag.Int("lev", 0, "leverage, e.g. 25")
 	price := flag.Float64("price", 0, "limit price; 0 = MARKET order")
 	marginCoin := flag.String("margin-coin", "USDT", "margin coin")
@@ -303,6 +304,14 @@ func main() {
 
 	avail := atof(acct.Available)
 	margin := avail * (*pct) / 100.0
+	sizing := fmt.Sprintf("= 本金 %.2f%%", *pct)
+	if *fixedMargin > 0 {
+		margin = *fixedMargin
+		sizing = "固定保證金"
+		if *fixedMargin > avail {
+			log.Fatalf("固定保證金 %.4f 超過可用餘額 %.4f %s", *fixedMargin, avail, *marginCoin)
+		}
+	}
 	notional := margin * float64(*lev)
 	qty := floorTo(notional/mark, pair.BasePrecision)
 	minQty := atof(pair.MinTradeVolume)
@@ -314,7 +323,7 @@ func main() {
 	fmt.Printf("可用餘額    %.4f %s\n", avail, *marginCoin)
 	fmt.Printf("標記價      %.6g\n", mark)
 	fmt.Printf("方向/槓桿   %s  %dx\n", *side, *lev)
-	fmt.Printf("保證金      %.4f %s  (= 本金 %.2f%%)\n", margin, *marginCoin, *pct)
+	fmt.Printf("保證金      %.4f %s  (%s)\n", margin, *marginCoin, sizing)
 	fmt.Printf("名目價值    %.4f %s  (= 保證金 × 槓桿)\n", notional, *marginCoin)
 	fmt.Printf("下單數量    %.*f %s\n", pair.BasePrecision, qty, pair.Symbol)
 	fmt.Println("──────────────────────────────────")
