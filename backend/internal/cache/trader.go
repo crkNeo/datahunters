@@ -15,10 +15,11 @@ import (
 // real position rides to its TP or SL). The EMA book (銀河) is the cleanest fit
 // since it only ever closes on TP/SL.
 type bitunixTrader struct {
-	cli   *bitunix.Client
-	pct   float64
-	lev   int
-	books map[string]bool // book names to mirror; "all" → every book
+	cli    *bitunix.Client
+	pct    float64
+	lev    int
+	margin float64         // fixed margin per order (USDT); >0 overrides pct
+	books  map[string]bool // book names to mirror; "all" → every book
 }
 
 // newBitunixTrader builds the trader from env, or nil if disabled/unconfigured:
@@ -26,6 +27,7 @@ type bitunixTrader struct {
 //	BITUNIX_AUTOTRADE=1            (master switch; default off)
 //	BITUNIX_API_KEY / BITUNIX_API_SECRET
 //	BITUNIX_RISK_PCT=1            (margin as % of available; default 1)
+//	BITUNIX_MARGIN_USDT=1.5      (fixed margin/order; >0 overrides RISK_PCT)
 //	BITUNIX_LEVERAGE=25          (default 25)
 //	BITUNIX_BOOKS=emaonly        (all | comma list of main,gamble,emaonly)
 func newBitunixTrader() *bitunixTrader {
@@ -45,6 +47,10 @@ func newBitunixTrader() *bitunixTrader {
 	if v, err := strconv.Atoi(os.Getenv("BITUNIX_LEVERAGE")); err == nil && v > 0 {
 		lev = v
 	}
+	var margin float64 // fixed margin/order; >0 overrides pct sizing
+	if v, err := strconv.ParseFloat(os.Getenv("BITUNIX_MARGIN_USDT"), 64); err == nil && v > 0 {
+		margin = v
+	}
 	books := map[string]bool{}
 	raw := strings.TrimSpace(os.Getenv("BITUNIX_BOOKS"))
 	if raw == "" || strings.EqualFold(raw, "all") {
@@ -57,8 +63,12 @@ func newBitunixTrader() *bitunixTrader {
 			}
 		}
 	}
-	log.Printf("bitunix autotrade: ENABLED (risk %.2f%%, lev %dx, books=%s)", pct, lev, raw)
-	return &bitunixTrader{cli: bitunix.New(key, secret), pct: pct, lev: lev, books: books}
+	if margin > 0 {
+		log.Printf("bitunix autotrade: ENABLED (固定保證金 %.4fU/單, lev %dx, books=%s)", margin, lev, raw)
+	} else {
+		log.Printf("bitunix autotrade: ENABLED (risk %.2f%%, lev %dx, books=%s)", pct, lev, raw)
+	}
+	return &bitunixTrader{cli: bitunix.New(key, secret), pct: pct, lev: lev, margin: margin, books: books}
 }
 
 func (t *bitunixTrader) wants(book string) bool { return t.books["all"] || t.books[book] }
@@ -70,7 +80,7 @@ func (t *bitunixTrader) mirrorOpen(book, coin, dir string, tp, sl float64) {
 		return
 	}
 	go func() {
-		res, err := t.cli.Open(coin+"USDT", dir, t.pct, t.lev, tp, sl, "USDT")
+		res, err := t.cli.Open(coin+"USDT", dir, t.pct, t.lev, tp, sl, "USDT", t.margin)
 		if err != nil {
 			log.Printf("bitunix autotrade: [%s] %s %s FAILED: %v", book, coin, dir, err)
 			return

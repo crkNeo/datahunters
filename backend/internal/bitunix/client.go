@@ -211,10 +211,14 @@ type OpenResult struct {
 	Raw              json.RawMessage
 }
 
-// Open places a MARKET entry sized by margin = available×pct%, notional =
-// margin×lev, qty = notional/mark (floored to precision), with TP/SL attached so
-// the exchange manages the exit. tp/sl are absolute prices (0 = omit that leg).
-func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, marginCoin string) (*OpenResult, error) {
+// Open places a MARKET entry sized by margin, notional = margin×lev, qty =
+// notional/mark (floored to precision), with TP/SL attached so the exchange
+// manages the exit. tp/sl are absolute prices (0 = omit that leg).
+//
+// Sizing: fixedMargin > 0 pins margin to that many marginCoin (e.g. 1.5 USDT) —
+// the account is still queried to reject orders larger than the free balance.
+// Otherwise margin = available × pct%.
+func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, marginCoin string, fixedMargin float64) (*OpenResult, error) {
 	if marginCoin == "" {
 		marginCoin = "USDT"
 	}
@@ -231,6 +235,12 @@ func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, 
 		return nil, err
 	}
 	margin := avail * pct / 100.0
+	if fixedMargin > 0 {
+		if fixedMargin > avail {
+			return nil, fmt.Errorf("fixed margin %.4f%s exceeds available %.4f%s", fixedMargin, marginCoin, avail, marginCoin)
+		}
+		margin = fixedMargin
+	}
 	notional := margin * float64(lev)
 	qty := floorTo(notional/mark, pair.BasePrecision)
 	if qty <= 0 || qty < atof(pair.MinTradeVolume) {
