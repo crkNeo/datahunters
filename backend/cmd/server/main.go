@@ -38,7 +38,19 @@ func loadDotEnv(path string) {
 			continue
 		}
 		key := strings.TrimSpace(line[:eq])
-		val := strings.Trim(strings.TrimSpace(line[eq+1:]), `"'`)
+		raw := strings.TrimSpace(line[eq+1:])
+		// Strip a trailing inline comment (# preceded by whitespace) for unquoted
+		// values, so "KEY=1   # note" yields "1" not "1   # note". Quoted values and
+		// '#' without a leading space (e.g. inside a secret) are left intact.
+		if !strings.HasPrefix(raw, `"`) && !strings.HasPrefix(raw, `'`) {
+			for i := 1; i < len(raw); i++ {
+				if raw[i] == '#' && (raw[i-1] == ' ' || raw[i-1] == '\t') {
+					raw = strings.TrimSpace(raw[:i])
+					break
+				}
+			}
+		}
+		val := strings.Trim(raw, `"'`)
 		if key != "" && os.Getenv(key) == "" {
 			os.Setenv(key, val)
 		}
