@@ -180,8 +180,9 @@ type Store struct {
 	stratOff map[string]bool     // strategy name → disabled (won't open new trades)
 	stratCfg map[string]StratCfg // strategy name → admin config override (empty = code default)
 
-	tabMu    sync.RWMutex      // guards the tab→minimum-role table (admin, tabperm.go)
+	tabMu    sync.RWMutex      // guards the tab→role/kind tables (admin, tabperm.go)
 	tabPerms map[string]string // tab → 最低角色 override(空 = 用 tabMeta 預設)
+	tabKinds map[string]string // tab → 類型 info/signal override(空 = 用預設)
 
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
@@ -291,6 +292,7 @@ func NewStore(coins []string) *Store {
 	s.loadStratOff()    // restore per-strategy on/off switches
 	s.loadStratCfg()    // restore per-strategy admin config (類型/風控/止損上限/保本/分批)
 	s.loadTabPerms()    // restore 各身分組可見標籤 設定
+	s.loadTabKinds()    // restore 各標籤 資訊/訊號 類型設定
 	if s.db != nil {
 		s.db.backfillRefCodes() // 每個帳號都要有推薦碼(不能等他自己開過我的推廣才生成)
 	}

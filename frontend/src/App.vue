@@ -1357,10 +1357,12 @@ const TAB_MIN_ROLE_FALLBACK = {
   bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin', gamblev2: 'admin',
 }
 const tabPerms = ref({})
+const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
 async function loadTabPerms() {
   try {
-    const res = await authFetch('/api/tab-perms')
-    if (res.ok) tabPerms.value = await res.json()
+    const [pr, kr] = await Promise.all([authFetch('/api/tab-perms'), authFetch('/api/tab-kinds')])
+    if (pr.ok) tabPerms.value = await pr.json()
+    if (kr.ok) tabKinds.value = await kr.json()
   } catch (e) {
     /* 拿不到就沿用備援值 */
   }
@@ -1369,23 +1371,34 @@ async function loadTabPerms() {
 function tabNeed(tab) {
   return tabPerms.value[tab] || TAB_MIN_ROLE_FALLBACK[tab] || 'public'
 }
+// 某分頁的類型(資訊/訊號),後台優先,其次前端備援。
+function kindOf(tab) {
+  return tabKinds.value[tab] || TAB_KIND_FALLBACK[tab] || 'info'
+}
 // 目前身分能不能看某分頁
 function canTab(tab) {
   return can(tabNeed(tab))
 }
-// 導覽列的分組。改為「依類型」分列:資訊 / 訊號,管理員專屬分頁仍獨立一列。
-// 權限仍由 canTab 控管(VIP 才看得到的訊號本一樣只有 VIP 看得到),這裡只決定
-// 「看得到的分頁落在哪一列」——資訊 vs 訊號,而非公開/會員/VIP 身分列。
-const NAV_GROUPS = [['info', '資訊'], ['signal', '訊號'], ['admin', '管理']]
-// 分頁類型:'signal' = 交易訊號/策略本,其餘皆 'info' 資訊。管理員專屬的策略本
-// (布林重回/火星/…)類型雖是 signal,但因權限為 admin 會落在「管理」列(見 inGroup)。
-const TAB_KIND = {
+// 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
+// 使用者看得到自己身分「以下」的所有列;管理員專屬分頁(後台/推廣/管理員策略本)
+// 集中在「管理」列,不分資訊/訊號。每格用 "tier:kind" 當 key,inGroup 解析。
+const NAV_TIERS = [['public', '公開'], ['member', '會員'], ['vip', 'VIP']]
+const NAV_GROUPS = computed(() => {
+  const slots = []
+  for (const [tier, tl] of NAV_TIERS) {
+    slots.push([`${tier}:info`, `${tl}·資訊`])
+    slots.push([`${tier}:signal`, `${tl}·訊號`])
+  }
+  slots.push(['admin:*', '管理'])
+  return slots
+})
+// 分頁類型的前端備援值(後端 /api/tab-kinds 拿不到時用)。'signal' = 訊號,其餘資訊。
+const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal', gamblev2: 'signal',
   bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', smc: 'signal', srmtf: 'signal',
 }
-function kindOf(tab) { return TAB_KIND[tab] || 'info' }
-// 導覽列的顯示順序;分組是動態的,這裡只決定同一列內的先後。
+// 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
@@ -1393,17 +1406,17 @@ const NAV_ORDER = [
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2',
 ]
-// 這個標籤該不該出現在這一列:看得到,且落在對的列。
-// 「管理」列 = 權限為 admin 的分頁(後台/推廣/管理員策略本);
-// 「資訊 / 訊號」列 = 其餘分頁,依類型分。
-function inGroup(tab, grp) {
+// 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
+// "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
+function inGroup(tab, slot) {
   if (!canTab(tab)) return false
-  if (grp === 'admin') return tabNeed(tab) === 'admin'
-  return tabNeed(tab) !== 'admin' && kindOf(tab) === grp
+  const [tier, kind] = slot.split(':')
+  if (tier === 'admin') return tabNeed(tab) === 'admin'
+  return tabNeed(tab) === tier && kindOf(tab) === kind
 }
-// 整列都沒東西就連標題一起收掉
-function groupHas(grp) {
-  return NAV_ORDER.some((t) => inGroup(t, grp))
+// 整格都沒東西就連標題一起收掉
+function groupHas(slot) {
+  return NAV_ORDER.some((t) => inGroup(t, slot))
 }
 // 身分或權限設定變動時,若目前停留在看不到的分頁就退回公開首頁,
 // 否則內容區會落在一個都不成立的 v-else-if 分支上、整片空白。
@@ -2988,6 +3001,8 @@ body::before {
 .roleopt { background: #24262c; border: 1px solid #363943; color: #8b909a; border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
 .roleopt.on { background: #2f4a7a33; border-color: #4a7ad4; color: #9dc0ff; font-weight: 700; }
 .roleopt.dim { opacity: .45; cursor: not-allowed; }
+.tabperm-sep { color: #4a4e57; font-weight: 700; margin: 0 2px; } /* 身分 · 類型 分隔 */
+.kindopt.on { background: #2a401f33; border-color: #5a9a3d; color: #a9dd8b; } /* 類型選中:綠系,和身分(藍)區隔 */
 .tagchip { background: #24262c; border: 1px solid #363943; color: #8b909a; border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; transition: all .12s; }
 .tagchip.on { background: #2ea86a22; border-color: #2ea86a; color: #57d495; }
 .stat-tags { font-size: 12px !important; color: #cdd0d6 !important; line-height: 1.35; }

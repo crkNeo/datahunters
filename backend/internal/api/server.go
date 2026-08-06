@@ -118,6 +118,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))            // 首頁整點大盤分析橫幅
 	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta))          // 各策略類型標籤 + 風控警語旗標
 	mux.HandleFunc("/api/tab-perms", s.gate(P, s.handleTabPerms))            // 各分頁所需最低身分(給前端決定顯示哪些)
+	mux.HandleFunc("/api/tab-kinds", s.gate(P, s.handleTabKinds))            // 各分頁類型 資訊/訊號(給前端分列)
 	mux.HandleFunc("/api/btc-sr", s.gate(P, s.handleBTCSR))                  // BTC 支撐壓力(戰場城牆用;全幣種 SR 仍為 VIP)
 	mux.HandleFunc("/api/config", s.gate(P, s.handleConfig))                 // logo / social / QR
 	mux.HandleFunc("/api/notice", s.gate(M, s.handleNotice))                 // login 公告彈窗 (members)
@@ -813,18 +814,31 @@ func (s *Server) handleTabPerms(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.VisibleTabs())
 }
 
-// handleAdminTabPerms lists (GET) or updates (POST) the tab permission table.
+// handleTabKinds serves the PUBLIC tab→type (資訊/訊號) map so the nav can split
+// each tier into two rows.
+func (s *Server) handleTabKinds(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.VisibleTabKinds())
+}
+
+// handleAdminTabPerms lists (GET) or updates (POST) the tab table. A POST carries
+// a tab plus either a new role (身分) or a new kind (資訊/訊號) — whichever is set.
 func (s *Server) handleAdminTabPerms(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var in struct {
 			Tab  string `json:"tab"`
 			Role string `json:"role"`
+			Kind string `json:"kind"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Tab == "" {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
 		}
-		if !s.store.SetTabRole(in.Tab, in.Role) {
+		if in.Kind != "" {
+			if !s.store.SetTabKind(in.Tab, in.Kind) {
+				http.Error(w, "unknown tab, bad kind, or locked", http.StatusBadRequest)
+				return
+			}
+		} else if !s.store.SetTabRole(in.Tab, in.Role) {
 			http.Error(w, "unknown tab, bad role, or locked", http.StatusBadRequest)
 			return
 		}

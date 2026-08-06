@@ -19,6 +19,7 @@ type TabDef struct {
 	Tab    string `json:"tab"`    // frontend mainTab key
 	Label  string `json:"label"`  // 中文名
 	Role   string `json:"role"`   // 目前生效的最低角色
+	Kind   string `json:"kind"`   // 目前生效的類型:info(資訊)/ signal(訊號)
 	Locked bool   `json:"locked"` // true: 不允許調整(管理功能)
 }
 
@@ -69,6 +70,18 @@ var tabMeta = []struct {
 // validRoles is the allowed set for a tab's minimum role.
 var validRoles = map[string]bool{"public": true, "member": true, "vip": true, "admin": true}
 
+// tabDefaultKind seeds each tab's type. Anything not listed defaults to "info"
+// (資訊); listed tabs are "signal" (訊號). Admin can override per tab, same as role.
+var tabDefaultKind = map[string]string{
+	"signals": "signal", "radar": "signal", "scorelog": "signal",
+	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
+	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
+	"smc": "signal", "srmtf": "signal", "gamblev2": "signal",
+}
+
+// validKinds is the allowed set for a tab's type.
+var validKinds = map[string]bool{"info": true, "signal": true}
+
 // loadTabPerms restores the admin overrides at startup.
 func (s *Store) loadTabPerms() {
 	m := map[string]string{}
@@ -83,6 +96,74 @@ func (s *Store) loadTabPerms() {
 	s.tabMu.Lock()
 	s.tabPerms = m
 	s.tabMu.Unlock()
+}
+
+// loadTabKinds restores the admin type overrides at startup.
+func (s *Store) loadTabKinds() {
+	m := map[string]string{}
+	if s.db != nil {
+		if raw := s.db.getConfig("tab_kinds"); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &m); err != nil {
+				log.Printf("tab_kinds: bad json, using defaults: %v", err)
+				m = map[string]string{}
+			}
+		}
+	}
+	s.tabMu.Lock()
+	s.tabKinds = m
+	s.tabMu.Unlock()
+}
+
+// TabKind returns a tab's effective type (info/signal): admin override, else the
+// seeded default, else "info".
+func (s *Store) TabKind(tab string) string {
+	s.tabMu.RLock()
+	k, ok := s.tabKinds[tab]
+	s.tabMu.RUnlock()
+	if ok && validKinds[k] {
+		return k
+	}
+	if d, ok := tabDefaultKind[tab]; ok {
+		return d
+	}
+	return "info"
+}
+
+// SetTabKind applies an admin type change. Locked tabs and unknown kinds rejected.
+func (s *Store) SetTabKind(tab, kind string) bool {
+	if !validKinds[kind] {
+		return false
+	}
+	found := false
+	for _, t := range tabMeta {
+		if t.tab == tab {
+			if t.locked {
+				return false // 管理功能不參與資訊/訊號分類
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	s.tabMu.Lock()
+	s.tabKinds[tab] = kind
+	blob, err := json.Marshal(s.tabKinds)
+	s.tabMu.Unlock()
+	if err == nil && s.db != nil {
+		s.db.setConfig("tab_kinds", string(blob))
+	}
+	return true
+}
+
+// VisibleTabKinds returns the tab→type map the frontend nav needs.
+func (s *Store) VisibleTabKinds() map[string]string {
+	out := make(map[string]string, len(tabMeta))
+	for _, t := range tabMeta {
+		out[t.tab] = s.TabKind(t.tab)
+	}
+	return out
 }
 
 // TabRole returns a tab's effective minimum role. Unknown tabs are treated as
@@ -139,7 +220,7 @@ func (s *Store) SetTabRole(tab, role string) bool {
 func (s *Store) TabPerms() []TabDef {
 	out := make([]TabDef, 0, len(tabMeta))
 	for _, t := range tabMeta {
-		out = append(out, TabDef{Tab: t.tab, Label: t.label, Role: s.TabRole(t.tab), Locked: t.locked})
+		out = append(out, TabDef{Tab: t.tab, Label: t.label, Role: s.TabRole(t.tab), Kind: s.TabKind(t.tab), Locked: t.locked})
 	}
 	return out
 }

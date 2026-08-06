@@ -12,6 +12,8 @@ const emit = defineEmits(['changed', 'msg'])
 
 const ROLE_CN = { public: '公開', member: '會員', vip: 'VIP', admin: '管理員' }
 const ROLES = ['public', 'member', 'vip', 'admin']
+const KIND_CN = { info: '資訊', signal: '訊號' }
+const KINDS = ['info', 'signal']
 const rows = ref([])
 const busy = ref(false)
 
@@ -49,6 +51,21 @@ async function setRole(row, role) {
   }
 }
 
+async function setKind(row, kind) {
+  if (row.locked || row.kind === kind) return
+  const res = await authFetch('/api/admin/tab-perms', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tab: row.tab, kind }),
+  })
+  if (res.ok) {
+    row.kind = kind
+    emit('msg', '✓ ' + row.label + ' 已歸類為「' + KIND_CN[kind] + '」')
+    emit('changed')
+  } else {
+    emit('msg', '✗ ' + row.label + ' 分類失敗')
+  }
+}
+
 onMounted(() => load(true)) // 首次載入不出訊息
 defineExpose({ load })
 </script>
@@ -68,10 +85,16 @@ defineExpose({ load })
           <button v-for="r in ROLES" :key="r" class="roleopt"
             :class="{ on: row.role === r, dim: row.locked }"
             :disabled="row.locked" @click="setRole(row, r)">{{ ROLE_CN[r] }}</button>
+          <span class="tabperm-sep">·</span>
+          <button v-for="k in KINDS" :key="k" class="roleopt kindopt"
+            :class="{ on: row.kind === k, dim: row.locked }"
+            :disabled="row.locked" @click="setKind(row, k)">{{ KIND_CN[k] }}</button>
         </div>
       </div>
     </div>
     <p class="loginhint">
+      左側設「最低身分」、右側設「類型(<b>資訊 / 訊號</b>)」。導覽列會依此排成「身分 × 類型」:
+      每個身分列再拆成資訊、訊號兩排。<br />
       設定「最低身分」:選<b>公開</b>代表所有訪客都看得到,選 <b>VIP</b> 代表只有 VIP 與管理員看得到。<br />
       🔒 的項目(後台、推廣管理)<b>不可調整</b>。<br />
       此設定<b>同時控管後端 API</b> —— 不是只把分頁藏起來,調降後該身分組是真的拿不到資料。<br />
