@@ -38,6 +38,7 @@ const marketSort = ref('vol') // vol | gainers | losers
 // token 與 authFetch 已移到 src/lib/api.js(axios 實作),這裡只保留 UI 狀態。
 const role = ref('public')
 const username = ref('')
+const regTime = ref(0) // 帳號註冊時間(ms epoch),顯示在使用者名稱旁
 const loginOpen = ref(false)
 const loginForm = ref({ u: '', p: '' })
 const loginErr = ref('')
@@ -59,7 +60,15 @@ function clearAuth(msg) {
   role.value = 'public'
   status.value = ''
   username.value = ''
+  regTime.value = 0
   authMsg.value = msg || ''
+}
+// 註冊時間顯示:ms epoch → YYYY/MM/DD(0 或無值回空字串)
+function fmtRegDate(ms) {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`
 }
 // ---- toast prompt ----
 const toastMsg = ref('')
@@ -127,6 +136,7 @@ async function loadMe() {
       role.value = d.role
       status.value = 'active'
       username.value = d.username || ''
+      regTime.value = d.created || 0
       authMsg.value = ''
     }
   } catch (e) {
@@ -164,6 +174,7 @@ async function doLogin() {
     role.value = d.role
     status.value = 'active'
     username.value = d.username
+    loadMe() // 補上註冊時間等 /api/auth/me 才有的欄位
     authMsg.value = ''
     loginOpen.value = false
     loginForm.value = { u: '', p: '' }
@@ -1362,10 +1373,18 @@ function tabNeed(tab) {
 function canTab(tab) {
   return can(tabNeed(tab))
 }
-// 導覽列的分組。標籤要落在「它自己被設定的身分組」那一列 —— 後台把綜合排行調成
-// VIP,它就該從「公開」列移到「VIP」列,而不是留在原位只改權限。分組寫死的話,
-// 管理員(看得到全部標籤)會看到設定與實際位置對不起來。
-const NAV_GROUPS = [['public', '公開'], ['member', '會員'], ['vip', 'VIP'], ['admin', '管理']]
+// 導覽列的分組。改為「依類型」分列:資訊 / 訊號,管理員專屬分頁仍獨立一列。
+// 權限仍由 canTab 控管(VIP 才看得到的訊號本一樣只有 VIP 看得到),這裡只決定
+// 「看得到的分頁落在哪一列」——資訊 vs 訊號,而非公開/會員/VIP 身分列。
+const NAV_GROUPS = [['info', '資訊'], ['signal', '訊號'], ['admin', '管理']]
+// 分頁類型:'signal' = 交易訊號/策略本,其餘皆 'info' 資訊。管理員專屬的策略本
+// (布林重回/火星/…)類型雖是 signal,但因權限為 admin 會落在「管理」列(見 inGroup)。
+const TAB_KIND = {
+  signals: 'signal', scorelog: 'signal', radar: 'signal',
+  paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal', gamblev2: 'signal',
+  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', smc: 'signal', srmtf: 'signal',
+}
+function kindOf(tab) { return TAB_KIND[tab] || 'info' }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一列內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
@@ -1374,9 +1393,13 @@ const NAV_ORDER = [
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2',
 ]
-// 這個標籤該不該出現在這一列:看得到,而且它的設定身分正好是這一組。
+// 這個標籤該不該出現在這一列:看得到,且落在對的列。
+// 「管理」列 = 權限為 admin 的分頁(後台/推廣/管理員策略本);
+// 「資訊 / 訊號」列 = 其餘分頁,依類型分。
 function inGroup(tab, grp) {
-  return canTab(tab) && tabNeed(tab) === grp
+  if (!canTab(tab)) return false
+  if (grp === 'admin') return tabNeed(tab) === 'admin'
+  return tabNeed(tab) !== 'admin' && kindOf(tab) === grp
 }
 // 整列都沒東西就連標題一起收掉
 function groupHas(grp) {
@@ -1438,6 +1461,7 @@ watch([role, tabPerms, authReady], () => {
         OI收縮過濾 {{ qualityFilter ? '✓' : '✕' }}
       </button>
       <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openReferral" title="我的推廣">{{ username }}</button> <em>{{ role }}</em>
+        <em v-if="regTime" class="regdate" title="註冊時間">註冊 {{ fmtRegDate(regTime) }}</em>
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
@@ -2694,6 +2718,7 @@ body::before {
 @media (max-width: 560px) { .refstats { gap: 6px; } .refsv { font-size: 17px; } .refcodev { font-size: 15px; } }
 .userchip { font-size: 12px; color: #c8cdd6; display: inline-flex; align-items: center; gap: 6px; }
 .userchip em { font-style: normal; background: #2a2410; color: #f4d774; padding: 1px 6px; border-radius: 6px; font-size: 11px; }
+.userchip em.regdate { background: none; color: #8b93a1; padding: 0; font-size: 11px; } /* 註冊時間:次要資訊,不做成徽章 */
 .loginbox { background: #16181d; border: 1px solid #2a2d35; border-radius: 14px; padding: 22px; width: 300px; display: flex; flex-direction: column; gap: 10px; }
 .loginbox h3 { margin: 0 0 4px; }
 .loginbox input { background: #0d0f13; border: 1px solid #2a2d35; border-radius: 8px; padding: 9px 11px; color: #e8eaed; font-size: 14px; }

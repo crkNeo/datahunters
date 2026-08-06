@@ -298,6 +298,16 @@ func (db *DB) userRoleStatus(username string) (role, status string, ok bool) {
 	return role, status, true
 }
 
+// userCreated returns the account's registration epoch (ms), or 0 if unknown.
+func (db *DB) userCreated(username string) int64 {
+	var created int64
+	row := db.sql.QueryRow(`SELECT created FROM users WHERE username=? COLLATE utf8mb4_bin`, username)
+	if err := row.Scan(&created); err != nil {
+		return 0
+	}
+	return created
+}
+
 // registerUser inserts a self-registered account in "pending" review status.
 func (db *DB) registerUser(username, passHash, uid, notes, proof, refBy string) {
 	db.sql.Exec(`INSERT INTO users(username,pass_hash,role,status,uid,created,notes,proof,ref_by)

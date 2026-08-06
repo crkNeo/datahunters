@@ -379,7 +379,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"role": auth.RolePublic})
 		return
 	}
-	writeJSON(w, map[string]any{"username": user, "role": role, "status": status})
+	writeJSON(w, map[string]any{"username": user, "role": role, "status": status, "created": s.store.UserCreated(user)})
 }
 
 // handleAdminUsers: GET lists users; POST creates; PUT sets role/status. Admin only.

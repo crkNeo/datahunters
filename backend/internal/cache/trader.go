@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -9,50 +10,81 @@ import (
 	"datahunter/internal/bitunix"
 )
 
-// bitunixTrader mirrors strategy OPENS onto a real Bitunix account. Phase 1:
-// admin's own keys from env; the exit is managed by the exchange via the TP/SL
-// attached at entry (so reversed/expired paper-closes are NOT mirrored — the
-// real position rides to its TP or SL). The EMA book (銀河) is the cleanest fit
-// since it only ever closes on TP/SL.
-type bitunixTrader struct {
+// bitunixAccount is one Bitunix account to mirror opens onto. The exit is managed
+// by the exchange via the TP/SL attached at entry (so reversed/expired paper-
+// closes are NOT mirrored — the real position rides to its TP or SL).
+type bitunixAccount struct {
+	label  string // "帳1" / "帳2" for logs
 	cli    *bitunix.Client
 	pct    float64
-	lev    int
+	lev    int             // 0 = use each coin's max leverage
 	margin float64         // fixed margin per order (USDT); >0 overrides pct
 	books  map[string]bool // book names to mirror; "all" → every book
 }
 
-// newBitunixTrader builds the trader from env, or nil if disabled/unconfigured:
+func (a *bitunixAccount) wants(book string) bool { return a.books["all"] || a.books[book] }
+
+// bitunixTrader fans a strategy open out to one or more accounts.
+type bitunixTrader struct{ accts []*bitunixAccount }
+
+// newBitunixTrader builds the trader from env, or nil if disabled/unconfigured.
+// Account 1 uses the unprefixed vars; accounts 2..9 use a BITUNIX_<n>_ prefix.
 //
-//	BITUNIX_AUTOTRADE=1            (master switch; default off)
+//	BITUNIX_AUTOTRADE=1            (master switch; default off — gates ALL accounts)
 //	BITUNIX_API_KEY / BITUNIX_API_SECRET
 //	BITUNIX_RISK_PCT=1            (margin as % of available; default 1)
 //	BITUNIX_MARGIN_USDT=1.5      (fixed margin/order; >0 overrides RISK_PCT)
-//	BITUNIX_LEVERAGE=25          (default 25)
+//	BITUNIX_LEVERAGE=25          (default 25; 0 or "max" = each coin's max)
 //	BITUNIX_BOOKS=emaonly        (all | comma list of main,gamble,emaonly)
+//
+//	# second account (optional): same keys with a 2_ prefix
+//	BITUNIX_2_API_KEY / BITUNIX_2_API_SECRET / BITUNIX_2_BOOKS / BITUNIX_2_MARGIN_USDT / ...
 func newBitunixTrader() *bitunixTrader {
 	if os.Getenv("BITUNIX_AUTOTRADE") != "1" {
 		return nil
 	}
-	key, secret := os.Getenv("BITUNIX_API_KEY"), os.Getenv("BITUNIX_API_SECRET")
-	if key == "" || secret == "" {
-		log.Printf("bitunix autotrade: BITUNIX_AUTOTRADE=1 but API keys missing — disabled")
+	var accts []*bitunixAccount
+	for i := 1; i <= 9; i++ {
+		prefix := "BITUNIX_"
+		if i > 1 {
+			prefix = fmt.Sprintf("BITUNIX_%d_", i)
+		}
+		key, secret := os.Getenv(prefix+"API_KEY"), os.Getenv(prefix+"API_SECRET")
+		if key == "" || secret == "" {
+			continue // no keys for this slot → skip
+		}
+		if a := buildAccount(fmt.Sprintf("帳%d", i), prefix, key, secret); a != nil {
+			accts = append(accts, a)
+		}
+	}
+	if len(accts) == 0 {
+		log.Printf("bitunix autotrade: BITUNIX_AUTOTRADE=1 but no account has API keys — disabled")
 		return nil
 	}
+	return &bitunixTrader{accts: accts}
+}
+
+func buildAccount(label, prefix, key, secret string) *bitunixAccount {
 	pct := 1.0
-	if v, err := strconv.ParseFloat(os.Getenv("BITUNIX_RISK_PCT"), 64); err == nil && v > 0 {
+	if v, err := strconv.ParseFloat(os.Getenv(prefix+"RISK_PCT"), 64); err == nil && v > 0 {
 		pct = v
 	}
-	lev := 25
-	if v, err := strconv.Atoi(os.Getenv("BITUNIX_LEVERAGE")); err == nil && v > 0 {
-		lev = v
+	lev := 25 // 0 = each coin's max leverage
+	switch v := strings.TrimSpace(os.Getenv(prefix + "LEVERAGE")); {
+	case v == "":
+	case strings.EqualFold(v, "max") || v == "0":
+		lev = 0
+	default:
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			lev = n
+		}
 	}
-	var margin float64 // fixed margin/order; >0 overrides pct sizing
-	if v, err := strconv.ParseFloat(os.Getenv("BITUNIX_MARGIN_USDT"), 64); err == nil && v > 0 {
+	var margin float64
+	if v, err := strconv.ParseFloat(os.Getenv(prefix+"MARGIN_USDT"), 64); err == nil && v > 0 {
 		margin = v
 	}
 	books := map[string]bool{}
-	raw := strings.TrimSpace(os.Getenv("BITUNIX_BOOKS"))
+	raw := strings.TrimSpace(os.Getenv(prefix + "BOOKS"))
 	if raw == "" || strings.EqualFold(raw, "all") {
 		books["all"] = true
 		raw = "all"
@@ -63,29 +95,34 @@ func newBitunixTrader() *bitunixTrader {
 			}
 		}
 	}
-	if margin > 0 {
-		log.Printf("bitunix autotrade: ENABLED (固定保證金 %.4fU/單, lev %dx, books=%s)", margin, lev, raw)
-	} else {
-		log.Printf("bitunix autotrade: ENABLED (risk %.2f%%, lev %dx, books=%s)", pct, lev, raw)
+	levStr := fmt.Sprintf("%dx", lev)
+	if lev == 0 {
+		levStr = "該幣最大"
 	}
-	return &bitunixTrader{cli: bitunix.New(key, secret), pct: pct, lev: lev, margin: margin, books: books}
+	sizeStr := fmt.Sprintf("risk %.2f%%", pct)
+	if margin > 0 {
+		sizeStr = fmt.Sprintf("固定保證金 %.4fU/單", margin)
+	}
+	log.Printf("bitunix autotrade: %s ENABLED (%s, lev %s, books=%s)", label, sizeStr, levStr, raw)
+	return &bitunixAccount{label: label, cli: bitunix.New(key, secret), pct: pct, lev: lev, margin: margin, books: books}
 }
 
-func (t *bitunixTrader) wants(book string) bool { return t.books["all"] || t.books[book] }
-
-// mirrorOpen fires a real Bitunix order for a strategy open. Async and fully
+// mirrorOpen fires a real Bitunix order per matching account. Async and fully
 // isolated: any failure is logged and never affects the paper engine.
-func (t *bitunixTrader) mirrorOpen(book, coin, dir string, tp, sl float64) {
-	if !t.wants(book) {
-		return
-	}
-	go func() {
-		res, err := t.cli.Open(coin+"USDT", dir, t.pct, t.lev, tp, sl, "USDT", t.margin)
-		if err != nil {
-			log.Printf("bitunix autotrade: [%s] %s %s FAILED: %v", book, coin, dir, err)
-			return
+func (t *bitunixTrader) mirrorOpen(book, coin, dir string, entry, tp, sl float64) {
+	for _, a := range t.accts {
+		if !a.wants(book) {
+			continue
 		}
-		log.Printf("bitunix autotrade: [%s] %s %s OK — qty %s · 保證金 %.2fU · 名目 %.2fU @ %.6g (TP %.6g / SL %.6g)",
-			book, coin, dir, res.Qty, res.Margin, res.Notional, res.Price, tp, sl)
-	}()
+		a := a
+		go func() {
+			res, err := a.cli.Open(coin+"USDT", dir, a.pct, a.lev, entry, tp, sl, "USDT", a.margin)
+			if err != nil {
+				log.Printf("bitunix autotrade: %s [%s] %s %s FAILED: %v", a.label, book, coin, dir, err)
+				return
+			}
+			log.Printf("bitunix autotrade: %s [%s] %s %s OK — qty %s · %dx · 保證金 %.2fU · 名目 %.2fU @ %.6g (TP %.6g / SL %.6g)",
+				a.label, book, coin, dir, res.Qty, res.Lev, res.Margin, res.Notional, res.Price, tp, sl)
+		}()
+	}
 }

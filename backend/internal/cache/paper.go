@@ -558,14 +558,14 @@ func abs2(f float64) float64 {
 // book has no radar fields (score/OI/CVD), so it gets its own signal-style
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
+	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
+		s.trader.mirrorOpen(b.name, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
+	}
 	if b.adminOnly || !s.notifyOn(b.name, "open") { // 後台的「開倉通知」開關
 		return // admin A/B book: silent on open (mirrors 超新星's signals; only its 套保 alerts fire)
 	}
 	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
 		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
-	if s.trader != nil { // mirror the open onto a real Bitunix account (admin, Phase 1)
-		s.trader.mirrorOpen(b.name, tr.Coin, tr.Dir, tr.TP, tr.SL)
-	}
 	if !s.notifier.Enabled() {
 		return
 	}
@@ -630,6 +630,9 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 // 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
 func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
+	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
+		s.trader.mirrorOpen(book, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
+	}
 	strat := stratKeyOf(book)
 	if !s.notifyOn(strat, "open") { // 後台的「開倉通知」開關
 		return false

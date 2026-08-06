@@ -728,6 +728,14 @@ func (s *Store) LiveRoleStatus(username string) (role, status string, ok bool) {
 	return s.db.userRoleStatus(username)
 }
 
+// UserCreated returns the account's registration epoch (ms), 0 if unknown.
+func (s *Store) UserCreated(username string) int64 {
+	if s.db == nil {
+		return 0
+	}
+	return s.db.userCreated(username)
+}
+
 func (s *Store) Users() []User {
 	if s.db == nil {
 		return nil

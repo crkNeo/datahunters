@@ -39,6 +39,15 @@ func atof(s string) float64     { f, _ := strconv.ParseFloat(s, 64); return f }
 // floorTo rounds x DOWN to n decimals (never over-sizes an order).
 func floorTo(x float64, n int) float64 { f := math.Pow10(n); return math.Floor(x*f) / f }
 
+// snapPow10 rounds x to the nearest power of ten (1, 1000, 1e6 …). Used to turn a
+// noisy mark/entry ratio into a clean bundle factor.
+func snapPow10(x float64) float64 {
+	if x <= 0 {
+		return 1
+	}
+	return math.Pow(10, math.Round(math.Log10(x)))
+}
+
 // do performs a request. signed=true adds Bitunix auth headers. query is signed
 // as sorted key+value with NO separators ("marginCoinUSDT"); body is compact JSON.
 func (c *Client) do(method, path string, query map[string]string, bodyObj any, signed bool) ([]byte, error) {
@@ -112,6 +121,7 @@ type pairData struct {
 	MinTradeVolume string `json:"minTradeVolume"`
 	MaxLeverage    int    `json:"maxLeverage"`
 	MinLeverage    int    `json:"minLeverage"`
+	IsApiSupported bool   `json:"isApiSupported"` // false for UI-only symbols (tokenised stocks, metals)
 }
 
 type acctData struct {
@@ -126,24 +136,41 @@ type tickerData struct {
 	MarkPrice string `json:"markPrice"`
 }
 
-func (c *Client) tradingPair(symbol string) (pairData, error) {
+// resolveSymbol maps a requested "COINUSDT" to the actual Bitunix contract and its
+// price multiplier. Bitunix lists high-supply memecoins bundled ×1000 / ×1e6
+// (1000PEPE, 1000SHIB, 1000000MOG, 1MBABYDOGE), whose price is factor× the raw
+// coin. The caller must scale price-based inputs (TP/SL) by the returned factor.
+func (c *Client) resolveSymbol(reqSymbol string) (pairData, float64, error) {
 	raw, err := c.do(http.MethodGet, "/api/v1/futures/market/trading_pairs", nil, nil, false)
 	if err != nil {
-		return pairData{}, err
+		return pairData{}, 0, err
 	}
 	var r struct {
 		codeMsg
 		Data []pairData `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return pairData{}, fmt.Errorf("decode trading_pairs: %v", err)
+		return pairData{}, 0, fmt.Errorf("decode trading_pairs: %v", err)
 	}
-	for _, p := range r.Data {
-		if strings.EqualFold(p.Symbol, symbol) {
-			return p, nil
+	base := strings.TrimSuffix(strings.ToUpper(reqSymbol), "USDT")
+	// exact first (factor 1), then bundled variants — order matters.
+	cands := []struct {
+		sym    string
+		factor float64
+	}{
+		{reqSymbol, 1},
+		{"1000" + base + "USDT", 1000},
+		{"1000000" + base + "USDT", 1e6},
+		{"1M" + base + "USDT", 1e6},
+	}
+	for _, cd := range cands {
+		for _, p := range r.Data {
+			if strings.EqualFold(p.Symbol, cd.sym) {
+				return p, cd.factor, nil
+			}
 		}
 	}
-	return pairData{}, fmt.Errorf("symbol %s not tradable on Bitunix", symbol)
+	return pairData{}, 0, fmt.Errorf("%s 在 Bitunix 找不到合約(含 1000/1M 變體)", reqSymbol)
 }
 
 func (c *Client) markPrice(symbol string) (float64, error) {
@@ -208,6 +235,7 @@ type OpenResult struct {
 	Symbol, Dir, Qty string
 	Margin, Notional float64
 	Price            float64
+	Lev              int // leverage actually used (after max-resolve / clamp)
 	Raw              json.RawMessage
 }
 
@@ -218,13 +246,34 @@ type OpenResult struct {
 // Sizing: fixedMargin > 0 pins margin to that many marginCoin (e.g. 1.5 USDT) —
 // the account is still queried to reject orders larger than the free balance.
 // Otherwise margin = available × pct%.
-func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, marginCoin string, fixedMargin float64) (*OpenResult, error) {
+//
+// Leverage: lev <= 0 means "use this coin's max leverage"; any other value is
+// clamped into the coin's [minLeverage, maxLeverage] range (so a fixed 30 still
+// trades a 20x-cap coin at 20x instead of failing outright).
+//
+// entry is the strategy's raw entry price; when >0 it derives the price-scale
+// factor empirically (mark/entry snapped to a power of ten), which self-corrects
+// bundled contracts (1000PEPE priced ×1000) regardless of the symbol name.
+func (c *Client) Open(symbol, dir string, pct float64, lev int, entry, tp, sl float64, marginCoin string, fixedMargin float64) (*OpenResult, error) {
 	if marginCoin == "" {
 		marginCoin = "USDT"
 	}
-	pair, err := c.tradingPair(symbol)
+	pair, nameFactor, err := c.resolveSymbol(symbol)
 	if err != nil {
 		return nil, err
+	}
+	symbol = pair.Symbol // use the resolved venue symbol (e.g. 1000PEPEUSDT) below
+	if !pair.IsApiSupported {
+		return nil, fmt.Errorf("%s 不支援 API 交易 (isApiSupported=false — 代幣股/貴金屬僅限網頁/App)", symbol)
+	}
+	// resolve leverage: 0 ⇒ coin max; else clamp into the coin's allowed range.
+	switch {
+	case lev <= 0:
+		lev = pair.MaxLeverage
+	case lev < pair.MinLeverage:
+		lev = pair.MinLeverage
+	case lev > pair.MaxLeverage:
+		lev = pair.MaxLeverage
 	}
 	mark, err := c.markPrice(symbol)
 	if err != nil {
@@ -246,11 +295,23 @@ func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, 
 	if qty <= 0 || qty < atof(pair.MinTradeVolume) {
 		return nil, fmt.Errorf("qty %.*f below min %s (餘額/pct/槓桿太小)", pair.BasePrecision, qty, pair.MinTradeVolume)
 	}
-	if lev < pair.MinLeverage || lev > pair.MaxLeverage {
-		return nil, fmt.Errorf("leverage %d out of range %d-%d", lev, pair.MinLeverage, pair.MaxLeverage)
-	}
 	if err := c.setLeverage(symbol, marginCoin, lev); err != nil {
 		return nil, fmt.Errorf("set leverage: %w", err)
+	}
+	// price-scale TP/SL onto this contract. Prefer the empirical factor
+	// (venue mark ÷ strategy entry, snapped to a power of ten) so bundled
+	// contracts self-correct; fall back to the symbol-name factor.
+	scale := nameFactor
+	if entry > 0 && mark > 0 {
+		scale = snapPow10(mark / entry)
+	}
+	if scale != 1 {
+		if tp > 0 {
+			tp *= scale
+		}
+		if sl > 0 {
+			sl *= scale
+		}
 	}
 	side := "BUY"
 	if dir == "short" {
@@ -283,6 +344,6 @@ func (c *Client) Open(symbol, dir string, pct float64, lev int, tp, sl float64, 
 	}
 	return &OpenResult{
 		Symbol: symbol, Dir: dir, Qty: body["qty"].(string),
-		Margin: margin, Notional: notional, Price: mark, Raw: raw,
+		Margin: margin, Notional: notional, Price: mark, Lev: lev, Raw: raw,
 	}, nil
 }
