@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc"}
+var allStrategies = []string{"main", "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc", "smcv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -82,6 +82,8 @@ var stratDefaults = map[string]StratCfg{
 	// SMC 教練:15M 多單狀態機,固定 1:2 RR、結構止損。單段止盈(不分批)。
 	// MaxSLPct 預設 0(結構止損距離不定,靠固定風險倉位控管,見 smc.go 規格 §6)。
 	"smc": {Tags: []string{"保守", "低頻", "短線"}, ExitMode: "single", NotifyOpen: true, NotifyClose: true},
+	// SMC_V2 自管兩段出場(TP1 50%@1R / TP2 / 固定SL),不走 multitp;預設值只影響開關與通知。
+	"smcv2": {Tags: []string{"短線"}, ExitMode: "single", NotifyOpen: true, NotifyClose: true},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.

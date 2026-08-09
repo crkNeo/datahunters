@@ -347,3 +347,115 @@ func (c *Client) Open(symbol, dir string, pct float64, lev int, entry, tp, sl fl
 		Margin: margin, Notional: notional, Price: mark, Lev: lev, Raw: raw,
 	}, nil
 }
+
+// OpenSMC executes SMC_V2's market entry: full-position SL + TP2 attached to the
+// market order, plus a reduce-only LIMIT TP1 for tp1Pct of the size. Slippage
+// guard: if the live mark deviates from the trigger by more than maxSlipPct%, the
+// whole entry is skipped (spec §4). tp1Fail (non-nil) means only the TP1 leg failed
+// — the position is live with SL+TP2 and the caller should log it.
+func (c *Client) OpenSMC(symbol, dir string, entry, sl, tp1, tp2, tp1Pct float64, lev int, marginCoin string, fixedMargin, pct, maxSlipPct float64) (res *OpenResult, tp1Fail error, err error) {
+	if marginCoin == "" {
+		marginCoin = "USDT"
+	}
+	pair, factor, err := c.resolveSymbol(symbol)
+	if err != nil {
+		return nil, nil, err
+	}
+	symbol = pair.Symbol
+	if !pair.IsApiSupported {
+		return nil, nil, fmt.Errorf("%s 不支援 API 交易 (isApiSupported=false)", symbol)
+	}
+	switch {
+	case lev <= 0:
+		lev = pair.MaxLeverage
+	case lev < pair.MinLeverage:
+		lev = pair.MinLeverage
+	case lev > pair.MaxLeverage:
+		lev = pair.MaxLeverage
+	}
+	mark, err := c.markPrice(symbol)
+	if err != nil {
+		return nil, nil, err
+	}
+	slV, tp1V, tp2V := sl*factor, tp1*factor, tp2*factor // strategy scale → venue scale
+	refTrig := entry * factor
+	if maxSlipPct > 0 && refTrig > 0 && math.Abs(mark-refTrig)/refTrig*100 > maxSlipPct {
+		return nil, nil, fmt.Errorf("滑價防護:現價 %.6g 偏離觸發 %.6g > %.2f%%", mark, refTrig, maxSlipPct)
+	}
+	avail, posMode, err := c.Account(marginCoin)
+	if err != nil {
+		return nil, nil, err
+	}
+	margin := avail * pct / 100.0
+	if fixedMargin > 0 {
+		if fixedMargin > avail {
+			return nil, nil, fmt.Errorf("fixed margin %.4f%s exceeds available %.4f%s", fixedMargin, marginCoin, avail, marginCoin)
+		}
+		margin = fixedMargin
+	}
+	notional := margin * float64(lev)
+	qty := floorTo(notional/mark, pair.BasePrecision)
+	if qty <= 0 || qty < atof(pair.MinTradeVolume) {
+		return nil, nil, fmt.Errorf("qty %.*f below min %s (餘額/pct/槓桿太小)", pair.BasePrecision, qty, pair.MinTradeVolume)
+	}
+	if err := c.setLeverage(symbol, marginCoin, lev); err != nil {
+		return nil, nil, fmt.Errorf("set leverage: %w", err)
+	}
+	pxfmt := func(v float64) string { return strconv.FormatFloat(v, 'f', pair.QuotePrecision, 64) }
+	side := "BUY"
+	if dir == "short" {
+		side = "SELL"
+	}
+	body := map[string]any{
+		"symbol": symbol, "side": side, "orderType": "MARKET",
+		"qty": strconv.FormatFloat(qty, 'f', pair.BasePrecision, 64),
+	}
+	if posMode == "HEDGE" {
+		body["tradeSide"] = "OPEN"
+	}
+	if tp2V > 0 {
+		body["tpPrice"], body["tpStopType"], body["tpOrderType"] = pxfmt(tp2V), "LAST_PRICE", "MARKET"
+	}
+	if slV > 0 {
+		body["slPrice"], body["slStopType"], body["slOrderType"] = pxfmt(slV), "LAST_PRICE", "MARKET"
+	}
+	raw, err := c.do(http.MethodPost, "/api/v1/futures/trade/place_order", nil, body, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	var r codeMsg
+	json.Unmarshal(raw, &r)
+	if !r.ok() {
+		return nil, nil, fmt.Errorf("place_order code=%s msg=%s", r.Code, r.Msg)
+	}
+	res = &OpenResult{Symbol: symbol, Dir: dir, Qty: body["qty"].(string),
+		Margin: margin, Notional: notional, Price: mark, Lev: lev, Raw: raw}
+
+	// reduce-only TP1 limit for tp1Pct of the position (opposite side).
+	tp1Qty := floorTo(qty*tp1Pct, pair.BasePrecision)
+	if tp1V > 0 && tp1Qty >= atof(pair.MinTradeVolume) {
+		closeSide := "SELL"
+		if dir == "short" {
+			closeSide = "BUY"
+		}
+		tb := map[string]any{
+			"symbol": symbol, "side": closeSide, "orderType": "LIMIT",
+			"price": pxfmt(tp1V), "qty": strconv.FormatFloat(tp1Qty, 'f', pair.BasePrecision, 64),
+			"effect": "GTC", "reduceOnly": true,
+		}
+		if posMode == "HEDGE" {
+			tb["tradeSide"] = "CLOSE"
+		}
+		traw, terr := c.do(http.MethodPost, "/api/v1/futures/trade/place_order", nil, tb, true)
+		if terr != nil {
+			tp1Fail = terr
+		} else {
+			var tr2 codeMsg
+			json.Unmarshal(traw, &tr2)
+			if !tr2.ok() {
+				tp1Fail = fmt.Errorf("TP1 code=%s msg=%s", tr2.Code, tr2.Msg)
+			}
+		}
+	}
+	return res, tp1Fail, nil
+}

@@ -62,6 +62,7 @@ var tabMeta = []struct {
 	{"smc", "SMC教練", "admin", false},
 	{"srmtf", "錘頭/射擊星", "admin", false},
 	{"gamblev2", "超新星v2", "admin", false},
+	{"smcv2", "SMC_V2", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -76,7 +77,7 @@ var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
-	"smc": "signal", "srmtf": "signal", "gamblev2": "signal",
+	"smc": "signal", "srmtf": "signal", "gamblev2": "signal", "smcv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -246,6 +247,7 @@ var tabOfRoute = map[string]string{
 	"/api/admin/bollfade": "bollfade",
 	"/api/admin/meanrev": "meanrev", "/api/admin/bgv2": "bgv2", "/api/admin/bollema": "bollema",
 	"/api/smc": "smc", "/api/srmtf": "srmtf", "/api/gamblev2": "gamblev2",
+	"/api/smcv2": "smcv2",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

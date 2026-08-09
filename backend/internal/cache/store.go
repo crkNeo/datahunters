@@ -139,6 +139,7 @@ type Store struct {
 	bgv2Boll     *microBook // 布乖v2 腿2:布林重回 4h 只做空 (admin, microrev.go)
 	bollEMABook  *microBook // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
 	smcBook      *smcBook   // SMC 教練 15M 多單狀態機 (admin, smc.go)
+	smcv2Book    *smcv2Book // SMC_V2 共振回撤 1h 多空,市價觸發 (smcv2.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -264,6 +265,7 @@ func NewStore(coins []string) *Store {
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 	s.smcBook = newSMCBook() // SMC 教練 15M 多單(狀態機在 smc.go)
+	s.smcv2Book = newSMCV2Book() // SMC_V2 共振回撤 1h 多空(smcv2.go)
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -284,6 +286,7 @@ func NewStore(coins []string) *Store {
 		s.bgv2Dev.trades = db.loadTrades("bgv2dev")
 		s.bgv2Boll.trades = db.loadTrades("bgv2boll")
 		s.bollEMABook.trades = db.loadTrades("bollema")
+		s.smcv2Book.trades = db.loadTrades("smcv2")
 		s.smcBook.trades = db.loadTrades("smc")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))

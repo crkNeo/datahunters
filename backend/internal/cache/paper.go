@@ -630,7 +630,8 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 // 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
 func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
-	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
+	// smcv2 需要兩段止盈(TP1 50% + TP2),走專屬 mirrorSMCV2;其餘書用通用單一 TP 鏡射。
+	if s.trader != nil && book != "smcv2" { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
 		s.trader.mirrorOpen(book, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
 	}
 	strat := stratKeyOf(book)

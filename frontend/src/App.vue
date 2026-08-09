@@ -668,6 +668,15 @@ async function loadSMC() {
     /* secondary */
   }
 }
+const smcv2 = ref(null)
+async function loadSMCV2() {
+  try {
+    const res = await authFetch('/api/smcv2')
+    if (res.ok) smcv2.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 const srmtf = ref(null)
 async function loadSRMTF() {
   try {
@@ -719,6 +728,10 @@ const microMeta = {
   gamblev2: {
     title: '超新星v2 · 逾時 6H(A/B 觀察)', load: loadGambleV2, get: () => gamblev2.value,
     help: "<b>超新星的 A/B 對照版</b> —— 進場條件、分批止盈與最大止損<b>完全同超新星</b>,<b>唯一差別:逾時 24h → 6h</b>。<br>K 線重播顯示縮短逾時單調更佳(動能若不在幾小時內出現就是死單)。<br>這是<b>管理員觀察書</b>,和超新星平行跑、累積各自對帳,用來驗證 6h 是否真的更好再決定要不要套回本尊。<br>⚠️ 純模擬,非投資建議。",
+  },
+  smcv2: {
+    title: 'SMC_V2 · 共振回撤 1h · 多空', load: loadSMCV2, get: () => smcv2.value,
+    help: "<b>SMC 共振回撤(多空對稱)</b> —— 1h 收盤偵測 BOS 結構突破 → 佈防價格觸發器(回踩訂單區邊緣)→ <b>現價觸及即市價進場</b>。<br><br><b>【進場計畫】</b>(1h 收盤鎖定)<br>・觸發價=OB 邊緣(多=最近陰線 High / 空=最近陽線 Low)<br>・止損=OB 另一端 ∓ 0.15×ATR<br>・TP2=剛被突破的擺動極值(鎖定不變)<br>・盈虧比需 ≥ 1.5;共振 ≥1(FVG 重疊 / OB中點貼 EMA50 ±0.5ATR / 4h+1d EMA20 同向)<br><br><b>【出場】</b>TP1 出 <b>50% @ +1R</b>;TP2 出剩餘;<b>止損固定,永不移動</b>(TP1 後也不移保本)。<br><br><b>【風控】</b>觸發器壽命 10 小時、每幣一個計畫、<b>全帳戶同時持倉 ≤ 8</b>。<br><br>回測(市價觸發+滑價)每筆 +0.22~0.25R、勝率 ~44%、止損結局 ~56%。⚠️ 上線前 4-8 週請對照回測分布,非投資建議。",
   },
   smc: {
     title: 'SMC 教練 · 15M 多單', load: loadSMC, get: () => smc.value,
@@ -1143,6 +1156,7 @@ function loadAll() {
   if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
   if (canTab('smc')) loadSMC()
+  if (canTab('smcv2')) loadSMCV2()
   if (canTab('srmtf')) loadSRMTF()
   if (canTab('gamblev2')) loadGambleV2()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
@@ -1216,7 +1230,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'smcv2', 'srmtf', 'gamblev2', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1354,7 +1368,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin', gamblev2: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin', gamblev2: 'admin', smcv2: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1396,7 +1410,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal', gamblev2: 'signal',
-  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', smc: 'signal', srmtf: 'signal',
+  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', smc: 'signal', srmtf: 'signal', smcv2: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1404,7 +1418,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'srmtf', 'gamblev2',
+  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'smcv2', 'srmtf', 'gamblev2',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -1902,6 +1916,9 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
             海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
+          </button>
+          <button v-if="inGroup('smcv2', grp[0])" :class="{ active: mainTab === 'smcv2' }" @click="mainTab = 'smcv2'; loadSMCV2()">
+            SMC_V2<em v-if="smcv2 && smcv2.open.length" class="navbadge">{{ smcv2.open.length }}</em>
           </button>
           <button v-if="inGroup('smc', grp[0])" :class="{ active: mainTab === 'smc' }" @click="mainTab = 'smc'; loadSMC()">
             SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>

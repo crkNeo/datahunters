@@ -222,6 +222,15 @@ func main() {
 		}
 	}()
 
+	// SMC_V2 共振回撤 (1h 多空,市價觸發):每分鐘偵測一次(內部 1h bucket 去重)。
+	go func() {
+		store.SMCV2Tick()
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.SMCV2Tick()
+		}
+	}()
+
 	// 出場改即時價:每 20s 用 WS 現價檢查止盈止損/停損(進場仍為各自的收 K)。
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
@@ -232,6 +241,7 @@ func main() {
 			store.BGV2MarkTick()
 			store.BollEMAMarkTick()
 			store.SMCMarkTick()
+			store.SMCV2MarkTick() // 觸發器成交 + TP1/TP2/SL
 		}
 	}()
 
