@@ -12,9 +12,10 @@
   且統計列欄位不同,硬合會變成一堆 flag。那是使用者實際下單的畫面,維持原狀。
 -->
 <script setup>
+import { computed } from 'vue'
 import { fmtPct, fmtPrice, fmtClock, lvlPct, pctOf, outcomeCN, outcomeCls } from '../lib/format'
 
-defineProps({
+const props = defineProps({
   // PaperState: { open: [], closed: [], stats: {} }
   state: { type: Object, default: null },
   // 風控警語(由後台「顯示風控建議」控制)
@@ -29,6 +30,11 @@ defineProps({
 })
 
 defineEmits(['coin', 'exit'])
+
+// SMC_V2 把「待觸發掛單」(status=pending)也放進 open;它們還沒成交,不是持倉,
+// 不能顯示 TP 進度/損益。以下把兩者分開計數,列上再逐筆用徽章區分。
+const openFilled = computed(() => (props.state?.open || []).filter((t) => t.status !== 'pending').length)
+const openPending = computed(() => (props.state?.open || []).filter((t) => t.status === 'pending').length)
 </script>
 
 <template>
@@ -65,29 +71,36 @@ defineEmits(['coin', 'exit'])
       </div>
     </div>
 
-    <h3 class="psub" v-if="state && state.open.length">進行中 ({{ state.open.length }})</h3>
+    <h3 class="psub" v-if="state && state.open.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
     <table v-if="state && state.open.length" class="grid">
-      <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">動態止損</th><th class="r">進場時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
-          <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+          <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span><span v-if="t.status === 'pending'" class="pendtag" title="價格觸發器已佈防,尚未成交(等待回踩至觸發價)">⏳待觸發</span></td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ fmtPrice(t.cur) }}</td>
-          <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-          <td class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' (' + lvlPct(t, t.tp1) + ') · TP2 ' + fmtPrice(t.tp2) + ' (' + lvlPct(t, t.tp2) + ') · TP3 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')') : ('止盈 ' + fmtPrice(t.tp) + ' (' + lvlPct(t, t.tp) + ')')">
-            <template v-if="t.tp1">
+          <td class="r" :class="t.status === 'pending' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
+            <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
+          </td>
+          <td class="tsmall">
+            <template v-if="t.status === 'pending'">
+              <span class="tsmall">等回踩至 {{ fmtPrice(t.entry) }} 才進場 · 目標 {{ fmtPrice(t.tp) }}</span>
+            </template>
+            <template v-else-if="t.tp1 && t.tp2">
               <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
+            </template>
+            <template v-else-if="t.tp1">
+              <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP2 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
             </template>
             <template v-else>
               <span class="tsmall">單一 · {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span>
-              <!-- 保本位:純提示,止盈止損不變(布林EMA) -->
               <span v-if="t.be_hit" class="betag" :title="'價格曾觸及保本位 ' + fmtPrice(t.be_price) + ';止盈止損維持不變'">🛡 已達保本位 {{ fmtPrice(t.be_price) }}</span>
             </template>
           </td>
-          <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
+          <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></td>
           <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-          <td v-if="canExit" class="r"><button class="exitbtn" @click.stop="$emit('exit', t.id)">手動出場</button></td>
+          <td v-if="canExit" class="r"><button v-if="t.status !== 'pending'" class="exitbtn" @click.stop="$emit('exit', t.id)">手動出場</button><small v-else class="tsmall">—</small></td>
         </tr>
       </tbody>
     </table>
@@ -112,3 +125,8 @@ defineEmits(['coin', 'exit'])
     <p v-else-if="!state" class="loading">載入中…</p>
   </div>
 </template>
+
+<style scoped>
+.pendtag { margin-left: 6px; font-size: 10px; color: #d8ad48; background: #2a2410; border-radius: 6px; padding: 1px 5px; white-space: nowrap; }
+.pendcount { color: #d8ad48; font-weight: 600; font-size: 13px; }
+</style>
