@@ -60,8 +60,9 @@ export function outcomeCN(o, pnl) {
     : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
       : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
         : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
-          // 手動平倉對外一律顯示成「逾時」(用戶要求:不揭露人工介入;momdead 是舊代碼)
-          : (o === 'manual' || o === 'momdead' || o === 'expired') ? '逾時' : o
+          : o === 'cancel' ? '未成交撤銷' // SMC_V2 觸發器逾時/滿倉未成交,非交易結果
+            // 手動平倉對外一律顯示成「逾時」(用戶要求:不揭露人工介入;momdead 是舊代碼)
+            : (o === 'manual' || o === 'momdead' || o === 'expired') ? '逾時' : o
 }
 
 // 出場結果 → 樣式類別

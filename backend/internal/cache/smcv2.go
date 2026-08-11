@@ -3,6 +3,7 @@ package cache
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -12,8 +13,9 @@ import (
 // smcv2.go — SMC 共振回撤策略 (SMC_V2)，市價觸發版 v1.1（定版規格 2026-08-07）。
 //
 // 流程:1h 收盤偵測 BOS(結構突破)→ 佈防價格觸發器(回踩 OB 邊緣)→ 現價觸及觸發器
-// 即市價進場 → TP1 出 50% @ +1R / TP2 出剩餘 @ 被突破的擺動極值 / 止損固定永不移動。
-// 多空對稱。全帳戶同時持倉上限 8。
+// 即市價進場 → TP1 出 50% @ +1R(同時把止損移到進場價保本)/ TP2 出剩餘 @ 被突破的
+// 擺動極值。多空對稱。全帳戶同時持倉上限 8。
+// ⚠️ 「TP1 後移保本」與 v1.1 規格的「止損永不移動」不同(依你要求改成保本棘輪)。
 //
 // 持久化沿用 trades 表(book="smcv2"):Status="pending" = 已佈防的觸發器(存活 10h,
 // 重啟續用);"open" = 已成交持倉;"closed" = 已出場/逾時。偵測在 1h 收盤 tick(SMCV2Tick),
@@ -258,7 +260,7 @@ func (s *Store) SMCV2MarkTick() {
 		case "pending":
 			if now.Sub(tr.OpenTime) >= smcv2TrigLifeH*time.Hour { // 逾時解除
 				cn := now
-				tr.Status, tr.Outcome, tr.CloseTime = "closed", "expired", &cn
+				tr.Status, tr.Outcome, tr.CloseTime = "closed", "cancel", &cn // 觸發器未成交撤銷(非交易結果)
 				dirty = append(dirty, tr)
 				continue
 			}
@@ -272,14 +274,14 @@ func (s *Store) SMCV2MarkTick() {
 			}
 			if openCount >= smcv2MaxConc { // 全帳戶持倉滿 8 → 忽略此觸發
 				cn := now
-				tr.Status, tr.Outcome, tr.CloseTime = "closed", "expired", &cn
+				tr.Status, tr.Outcome, tr.CloseTime = "closed", "cancel", &cn // 觸發器未成交撤銷(非交易結果)
 				dirty = append(dirty, tr)
 				continue
 			}
 			risk := math.Abs(tr.Entry - tr.SL)
 			if risk <= 0 {
 				cn := now
-				tr.Status, tr.Outcome, tr.CloseTime = "closed", "expired", &cn
+				tr.Status, tr.Outcome, tr.CloseTime = "closed", "cancel", &cn // 觸發器未成交撤銷(非交易結果)
 				dirty = append(dirty, tr)
 				continue
 			}
@@ -335,6 +337,7 @@ func (s *Store) smcv2Step(tr *PaperTrade, p float64, now time.Time) bool {
 		tr.Realized += smcv2TP1Pct * pnl(tr.Dir, tr.Entry, tr.TP1)
 		tr.Filled += smcv2TP1Pct
 		tr.Legs = 1
+		tr.SL = roundPx(tr.Entry) // TP1 後把止損移到進場價(保本):剩餘 50% 不再變虧損
 	}
 	if (long && p >= tr.TP) || (!long && p <= tr.TP) {
 		tr.Legs = 3
@@ -371,14 +374,18 @@ func smcv2Trim(b *smcv2Book) {
 	b.trades = append(live, done...)
 }
 
-// SMCV2State 回傳前端分頁用的 open/pending/closed。
+// SMCV2State 回傳前端分頁用的 open(含待觸發)/closed + 統計。未成交撤銷的觸發器
+// (outcome="cancel")顯示在已結束、但不計入勝率/損益(它們不是交易)。
 func (s *Store) SMCV2State() PaperState {
 	px := s.livePrices()
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
+	st.Stats.MultiTP = true // TP1/TP2 分段
+	var sum, grossWin, grossLoss float64
 	b := s.smcv2Book
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, tr := range b.trades {
+	all := append([]*PaperTrade{}, b.trades...)
+	b.mu.Unlock()
+	for _, tr := range all {
 		cp := *tr
 		if p := px[tr.Coin]; p > 0 && (tr.Status == "open" || tr.Status == "pending") {
 			cp.Cur = roundPx(p)
@@ -386,10 +393,35 @@ func (s *Store) SMCV2State() PaperState {
 				cp.PnLPct = round2(tr.Realized + (1-tr.Filled)*pnl(tr.Dir, tr.Entry, p))
 			}
 		}
-		if tr.Status == "closed" {
-			st.Closed = append(st.Closed, &cp)
-		} else {
+		if tr.Status != "closed" {
 			st.Open = append(st.Open, &cp)
+			continue
+		}
+		st.Closed = append(st.Closed, &cp)
+		if tr.Outcome == "cancel" { // 未成交觸發器,不計入績效
+			continue
+		}
+		st.Stats.Closed++
+		sum += tr.PnLPct
+		if tr.PnLPct > 0 {
+			st.Stats.Wins++
+		} else {
+			st.Stats.Losses++
+		}
+		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
+	}
+	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
+	sort.Slice(st.Closed, func(i, j int) bool {
+		return st.Closed[i].CloseTime != nil && st.Closed[j].CloseTime != nil && st.Closed[i].CloseTime.After(*st.Closed[j].CloseTime)
+	})
+	if st.Stats.Closed > 0 {
+		st.Stats.WinRate = round2(float64(st.Stats.Wins) / float64(st.Stats.Closed) * 100)
+		st.Stats.AvgPnl = round2(sum / float64(st.Stats.Closed))
+		st.Stats.TotalPnl = round2(sum)
+		if grossLoss > 0 {
+			st.Stats.ProfitFactor = round2(grossWin / grossLoss)
+		} else if grossWin > 0 {
+			st.Stats.ProfitFactor = 99.99
 		}
 	}
 	return st
