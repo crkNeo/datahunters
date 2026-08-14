@@ -3227,7 +3227,8 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .ae-block { border: 1px solid #23262d; border-radius: 10px; padding: 8px; background: #0f1116; }
 .ae-block-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .ae-btype { font-size: 11px; color: #b9902f; font-weight: 700; margin-right: auto; }
-.minibtn { width: 26px; height: 24px; border: 1px solid #2a2e37; background: #1b1e25; color: #cdd0d6; border-radius: 6px; cursor: pointer; }
+/* 圖示鈕(↑↓✕)維持 ~26px 方形;文字鈕(儲存/刷新/載入目前…)靠 min-width+padding 自動撐寬,不再被 26px 固定寬截掉 */
+.minibtn { min-width: 26px; height: 24px; padding: 0 8px; font-size: 11px; line-height: 1; border: 1px solid #2a2e37; background: #1b1e25; color: #cdd0d6; border-radius: 6px; cursor: pointer; }
 .minibtn.del { color: #ef8a8a; }
 .ae-textarea { width: 100%; box-sizing: border-box; min-height: 80px; resize: vertical; background: #0b0c0f;
   border: 1px solid #2a2e37; border-radius: 8px; color: #e8e9ec; padding: 8px; font: inherit; }
