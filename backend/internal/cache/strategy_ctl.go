@@ -446,6 +446,10 @@ func (s *Store) ManualExit(book, id string) bool {
 			delete(s.smcBook.states, done.Coin) // 手動平倉後狀態機也要重置
 		}
 		s.smcBook.mu.Unlock()
+	case "smcv2":
+		s.smcv2Book.mu.Lock()
+		done = closeIn(s.smcv2Book.trades) // 只平已成交(open)的;待觸發前端不給出場鈕
+		s.smcv2Book.mu.Unlock()
 	default:
 		return false
 	}

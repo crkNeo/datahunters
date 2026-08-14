@@ -683,6 +683,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 			s.smcBook.states = map[string]*smcState{} // 全清時狀態機也歸零
 		}
 		s.smcBook.mu.Unlock()
+	case "smcv2":
+		s.smcv2Book.mu.Lock()
+		s.smcv2Book.trades = keepIf(s.smcv2Book.trades, closedOnly)
+		s.smcv2Book.mu.Unlock()
 	case "main", "gamble", "emaonly":
 		s.paperMu.Lock()
 		b := s.paperMain

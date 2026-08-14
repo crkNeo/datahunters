@@ -453,6 +453,8 @@ func bookLabel(name string) string {
 		return "海王星"
 	case "smc":
 		return "SMC教練"
+	case "smcv2":
+		return "SMC_V2"
 	}
 	return "星軌"
 }
@@ -506,7 +508,7 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "smc":
+	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "smc", "smcv2":
 		return name
 	}
 	return "paper" // main
