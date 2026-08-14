@@ -61,7 +61,6 @@ var tabMeta = []struct {
 	{"bollema", "海王星", "admin", false},
 	{"smc", "SMC教練", "admin", false},
 	{"srmtf", "錘頭/射擊星", "admin", false},
-	{"gamblev2", "超新星v2", "admin", false},
 	{"smcv2", "SMC_V2", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
@@ -77,7 +76,7 @@ var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
-	"smc": "signal", "srmtf": "signal", "gamblev2": "signal", "smcv2": "signal",
+	"smc": "signal", "srmtf": "signal", "smcv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -246,7 +245,7 @@ var tabOfRoute = map[string]string{
 	"/api/conv": "conv", "/api/sr": "sr",
 	"/api/admin/bollfade": "bollfade",
 	"/api/admin/meanrev": "meanrev", "/api/admin/bgv2": "bgv2", "/api/admin/bollema": "bollema",
-	"/api/smc": "smc", "/api/srmtf": "srmtf", "/api/gamblev2": "gamblev2",
+	"/api/smc": "smc", "/api/srmtf": "srmtf",
 	"/api/smcv2": "smcv2",
 }
 

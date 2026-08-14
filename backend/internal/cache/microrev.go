@@ -380,7 +380,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		}
 		dirty = open
 	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
-		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) {
+		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) && s.microTPOK(b, entry, tp) {
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:     coin,
@@ -428,6 +428,16 @@ func (s *Store) microSLOK(b *microBook, entry, sl float64) bool {
 		return true
 	}
 	return math.Abs(entry-sl)/entry*100 <= cap
+}
+
+// microTPOK reports whether the entry's TP distance is at least the strategy's
+// 最小止盈% (0 = no limit). Skips entries with too little room to run.
+func (s *Store) microTPOK(b *microBook, entry, tp float64) bool {
+	min := s.stratMinTP(b.strat())
+	if min <= 0 || entry <= 0 {
+		return true
+	}
+	return math.Abs(tp-entry)/entry*100 >= min
 }
 
 // strat returns the StrategyEnabled key for this book (a family shares one switch).
@@ -673,14 +683,12 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 			s.smcBook.states = map[string]*smcState{} // 全清時狀態機也歸零
 		}
 		s.smcBook.mu.Unlock()
-	case "main", "gamble", "gamblev2", "emaonly":
+	case "main", "gamble", "emaonly":
 		s.paperMu.Lock()
 		b := s.paperMain
 		switch book {
 		case "gamble":
 			b = s.paperGamble
-		case "gamblev2":
-			b = s.paperGambleV2
 		case "emaonly":
 			b = s.paperEMA
 		}

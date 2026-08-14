@@ -48,7 +48,7 @@ function toggleStratTag(st, tag) {
 async function saveStratCfg(st) {
   const n = (v) => Number(v) || 0
   const cfg = {
-    tags: st.tags || [], show_risk: !!st.show_risk, max_sl_pct: n(st.max_sl_pct),
+    tags: st.tags || [], show_risk: !!st.show_risk, max_sl_pct: n(st.max_sl_pct), min_tp_pct: n(st.min_tp_pct),
     exit_mode: st.exit_mode || 'single',
     split_a: n(st.split_a), split_b: n(st.split_b),
     split_w1: n(st.split_w1), split_w2: n(st.split_w2), split_w3: n(st.split_w3),
@@ -96,6 +96,11 @@ defineExpose({ load: loadStratStates })
         <span class="stratcfg-k">最大止損%</span>
         <input v-model.number="st.max_sl_pct" type="number" min="0" max="100" step="0.5" class="stratcfg-num" />
         <span class="stratcfg-hint">0 = 不限制;止損距離超過此% 不開新單</span>
+      </div>
+      <div class="stratcfg-line">
+        <span class="stratcfg-k">最小止盈%</span>
+        <input v-model.number="st.min_tp_pct" type="number" min="0" max="100" step="0.5" class="stratcfg-num" />
+        <span class="stratcfg-hint">0 = 不限制;止盈距離小於此% 不開新單(空間太小)</span>
       </div>
 
       <!-- 出場模式三選一。分批與保本互斥:保本靠 TP1 觸發,兩者並存只會得到

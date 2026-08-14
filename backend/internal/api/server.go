@@ -146,7 +146,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv)) // 冥王星 (動態ATR均線收斂 4H)
 	mux.HandleFunc("/api/smc", s.gateTab("smc", s.handleSMC))    // SMC 教練 (15M 多單狀態機)
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF)) // 多週期支壓 (1H+4H 提示)
-	mux.HandleFunc("/api/gamblev2", s.gateTab("gamblev2", s.handleGambleV2)) // 超新星v2 (逾時6h A/B)
 	mux.HandleFunc("/api/smcv2", s.gateTab("smcv2", s.handleSMCV2)) // SMC_V2 共振回撤 (1h 多空,市價觸發)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
@@ -692,11 +691,6 @@ func (s *Server) handleSMCV2(w http.ResponseWriter, r *http.Request) {
 // handleSRMTF serves the 多週期支壓 (1H+4H 支撐壓力提示) board.
 func (s *Server) handleSRMTF(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SRMTF())
-}
-
-// handleGambleV2 serves the 超新星v2 (逾時6h A/B 觀察書) tracker.
-func (s *Server) handleGambleV2(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.GambleV2())
 }
 
 // handleStratClear (admin): POST ?book=<name>[&scope=closed] resets a strategy's

@@ -61,8 +61,7 @@ type Store struct {
 
 	paperMu       sync.Mutex // guards the paper-trading books
 	paperMain     *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble   *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12%
-	paperGambleV2 *paperBook // 超新星v2 (admin A/B): 同 gamble 進場,但逾時 6h(短打驗證)
+	paperGamble   *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12% + 逾時6h
 	paperEMA      *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
@@ -197,8 +196,7 @@ func NewStore(coins []string) *Store {
 		ex:                exchange.NewClient(),
 		coins:             coins,
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
-		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧)
-		paperGambleV2:     newBook("gamblev2", 50, false, 1*time.Hour, 0), // 超新星v2:同 gamble,逾時改 6h(見下方設定)
+		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧;逾時6h)
 		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
@@ -239,14 +237,8 @@ func NewStore(coins []string) *Store {
 	// weren't NY-concentrated; skipNY left at its default false).
 	// 分批止盈 (TP1/TP2 = 進場→TP3 的 40%/70%) 套用到 radar/EMA 書。gamble 另加 FILTER@12%。
 	s.paperGamble.plan = tpMomentum
-	s.paperGamble.maxSLPct = 12 // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
-	// 超新星v2:與 gamble 完全相同的進場/分批止盈,唯一差別是逾時 24h → 6h。
-	// K 線重播顯示縮短逾時單調更佳(24h 太長,動能不快出現就是死單)。adminOnly:
-	// 純觀察書,不推播給使用者,只在後台分頁看它累積對帳。
-	s.paperGambleV2.plan = tpMomentum
-	s.paperGambleV2.maxSLPct = 12
-	s.paperGambleV2.expiry = 6 * time.Hour
-	s.paperGambleV2.adminOnly = true
+	s.paperGamble.maxSLPct = 12  // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
+	s.paperGamble.expiry = 6 * time.Hour // 超新星改用短逾時(原超新星v2 的邏輯):24h→6h,動能不快出現就是死單
 	s.paperMain.plan = tpMomentum
 	s.paperEMA.plan = tpMomentum
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
@@ -278,7 +270,6 @@ func NewStore(coins []string) *Store {
 		s.scoreLog = db.loadScoreEvents(500)
 		s.paperMain.trades = db.loadTrades("main")
 		s.paperGamble.trades = db.loadTrades("gamble")
-		s.paperGambleV2.trades = db.loadTrades("gamblev2")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.convTrades = db.loadTrades("conv")
 		s.bollFadeBook.trades = db.loadTrades("bollfade")

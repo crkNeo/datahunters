@@ -197,7 +197,6 @@ func (s *Store) PaperTick() {
 	s.paperMu.Lock()
 	s.tickBook(s.paperMain, radar, px, pumpSc, dumpSc, now)
 	s.tickBook(s.paperGamble, radar, px, pumpSc, dumpSc, now)
-	s.tickBook(s.paperGambleV2, radar, px, pumpSc, dumpSc, now)
 	s.tickEMAOnly(px, now)
 	// persist only DIRTY trades (open, or closed within the last few ticks) —
 	// closed rows never change again, and rewriting the full history every tick
@@ -218,7 +217,6 @@ func (s *Store) PaperTick() {
 		}
 		collect("main", s.paperMain)
 		collect("gamble", s.paperGamble)
-		collect("gamblev2", s.paperGambleV2)
 		collect("emaonly", s.paperEMA)
 	}
 	s.paperMu.Unlock()
@@ -389,6 +387,11 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 			}
 			if cap := s.stratMaxSL(b.name, b.maxSLPct); cap > 0 { // SL 距離超過上限(波動過大的低市值幣)→ 不進場
 				if slDist := math.Abs(p-it.SL) / p * 100; slDist > cap {
+					continue
+				}
+			}
+			if minTP := s.stratMinTP(b.name); minTP > 0 { // 止盈距離太近(空間不足)→ 不進場
+				if tpDist := math.Abs(it.TP-p) / p * 100; tpDist < minTP {
 					continue
 				}
 			}
@@ -758,9 +761,8 @@ func (b *paperBook) state() PaperState {
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.
-func (s *Store) Paper() PaperState    { return s.serve(s.paperMain, 55) }
-func (s *Store) Gamble() PaperState   { return s.serve(s.paperGamble, 50) }
-func (s *Store) GambleV2() PaperState { return s.serve(s.paperGambleV2, 50) }
+func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
+func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
 
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
@@ -778,8 +780,6 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	switch book {
 	case "gamble":
 		b = s.paperGamble
-	case "gamblev2":
-		b = s.paperGambleV2
 	case "emaonly":
 		b = s.paperEMA
 	default:

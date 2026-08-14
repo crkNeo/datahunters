@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "gamblev2", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc", "smcv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc", "smcv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -26,6 +26,7 @@ type StratCfg struct {
 	Tags     []string `json:"tags"`       // 類型(可多選):激進/保守/高頻/低頻/長線/短線
 	ShowRisk bool     `json:"show_risk"`  // 策略頁顯示「風險較大,請謹慎操作」警語
 	MaxSLPct float64  `json:"max_sl_pct"` // >0: 止損距離超過此 % 就不開新單(0 = 不限制)
+	MinTPPct float64  `json:"min_tp_pct"` // >0: 止盈距離小於此 % 就不開新單(0 = 不限制)
 
 	// 出場模式,三選一。分批止盈與保本互斥:保本是靠 TP1 觸發的,
 	// 兩者混用只會得到「開了保本卻永遠不觸發」的假設定。
@@ -69,7 +70,6 @@ var stratDefaults = map[string]StratCfg{
 	"main":    {Tags: []string{"保守", "低頻"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"gamble":  {Tags: []string{"激進", "高頻", "短線"}, MaxSLPct: 12, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// 超新星v2:與 gamble 相同設定,差別只在引擎層的逾時 6h(store.go)。admin 觀察書。
-	"gamblev2": {Tags: []string{"激進", "高頻", "短線"}, MaxSLPct: 12, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 	"emaonly": {Tags: []string{"高頻", "短線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"conv":    {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// bollfade/meanrev 用 tpMeanRevFront(45/60、60/25/15)—— K棒重播調校後的值
@@ -266,6 +266,17 @@ func (s *Store) stratMaxSL(name string, bookDefault float64) float64 {
 	return bookDefault
 }
 
+// stratMinTP returns the min take-profit distance %: entries whose TP is closer
+// than this to entry are skipped. 0 = no limit. Admin override, else 0 (no default).
+func (s *Store) stratMinTP(name string) float64 {
+	s.stratMu.RLock()
+	defer s.stratMu.RUnlock()
+	if _, ok := s.stratCfg[name]; ok {
+		return s.stratCfgLocked(name).MinTPPct
+	}
+	return 0
+}
+
 // tpFor resolves a strategy's runtime 分批止盈 setup from its admin config.
 // Returns the plan to use (nil = 單段止盈) and whether the TP1→保本 stop move is on.
 // The plan is built from the configured percentages, so an admin edit takes effect
@@ -393,14 +404,11 @@ func (s *Store) ManualExit(book, id string) bool {
 	var done *PaperTrade
 	dbBook := book // 家族的 DB book 名 != 開關 key,需記住實際那一腿
 	switch book {
-	case "main", "gamble", "gamblev2":
+	case "main", "gamble":
 		s.paperMu.Lock()
 		b := s.paperMain
-		switch book {
-		case "gamble":
+		if book == "gamble" {
 			b = s.paperGamble
-		case "gamblev2":
-			b = s.paperGambleV2
 		}
 		done = closeIn(b.trades)
 		s.paperMu.Unlock()

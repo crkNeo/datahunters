@@ -361,6 +361,11 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 				continue
 			}
 		}
+		if minTP := s.stratMinTP("emaonly"); minTP > 0 { // 止盈距離太近 → 不進場
+			if tpDist := math.Abs(tp-p) / p * 100; tpDist < minTP {
+				continue
+			}
+		}
 		tr := &PaperTrade{
 			ID:   fmt.Sprintf("emaonly|%s|%s|%d", coin, dir, now.UnixMilli()),
 			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),

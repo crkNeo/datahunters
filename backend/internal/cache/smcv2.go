@@ -194,6 +194,11 @@ func (s *Store) smcv2Detect(b *smcv2Book, coin string, cs []exchange.Candle, now
 	if rr := math.Abs(tp2-trigger) / math.Abs(trigger-sl); rr < smcv2MinRR {
 		return
 	}
+	if minTP := s.stratMinTP("smcv2"); minTP > 0 { // 後台「最小止盈%」:止盈距離太近不佈防
+		if math.Abs(tp2-trigger)/trigger*100 < minTP {
+			return
+		}
+	}
 
 	// 共振計分(≥1 才佈防)
 	conf := 0
