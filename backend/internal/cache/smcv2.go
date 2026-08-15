@@ -194,10 +194,9 @@ func (s *Store) smcv2Detect(b *smcv2Book, coin string, cs []exchange.Candle, now
 	if rr := math.Abs(tp2-trigger) / math.Abs(trigger-sl); rr < smcv2MinRR {
 		return
 	}
-	if minTP := s.stratMinTP("smcv2"); minTP > 0 { // 後台「最小止盈%」:止盈距離太近不佈防
-		if math.Abs(tp2-trigger)/trigger*100 < minTP {
-			return
-		}
+	// 後台「最大止損% / 最小止盈%」濾網(entry 用觸發價;0=不限制)
+	if !s.slWithinCap("smcv2", trigger, sl) || !s.tpAboveMin("smcv2", trigger, tp2) {
+		return
 	}
 
 	// 共振計分(≥1 才佈防)

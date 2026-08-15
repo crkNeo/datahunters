@@ -386,6 +386,10 @@ func (s *Store) smcAdvance(coin string, st *smcState, cs15 []exchange.Candle, t1
 				return nil
 			}
 			tp := roundPx(entry + smcRR*(entry-sl))
+			if !s.tpAboveMin("smc", entry, tp) { // 後台「最小止盈%」濾網(0=不限制)
+				smcReset(st)
+				return nil
+			}
 			t := time.UnixMilli(last.Ts).UTC()
 			return &PaperTrade{
 				ID:       fmt.Sprintf("smc|%s|%d", coin, now.UnixMilli()),

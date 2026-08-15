@@ -257,6 +257,16 @@ func (s *Store) slWithinCap(strat string, entry, sl float64) bool {
 	return math.Abs(entry-sl)/entry*100 <= cap
 }
 
+// tpAboveMin reports whether the TP distance meets the strategy's 最小止盈%
+// (0 = no limit). Entry path helper so every book enforces it consistently.
+func (s *Store) tpAboveMin(strat string, entry, tp float64) bool {
+	min := s.stratMinTP(strat)
+	if min <= 0 || entry <= 0 {
+		return true
+	}
+	return math.Abs(tp-entry)/entry*100 >= min
+}
+
 func (s *Store) stratMaxSL(name string, bookDefault float64) float64 {
 	s.stratMu.RLock()
 	defer s.stratMu.RUnlock()
