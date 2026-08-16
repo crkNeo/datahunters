@@ -861,9 +861,13 @@ func (s *Store) Refresh() {
 		s.setEMAUniverse(tickers, emaTopN) // top-N by volume → EMA strategy universe
 	}
 
-	nextSnaps := make(map[string]Snapshot, len(s.coins))
-	nextDetails := make(map[string]CoinDetail, len(s.coins))
-	for _, coin := range s.coins {
+	// OI 儀表板 / 數據訊號 / 評分穿越的監控幣池 = 動態「成交量前 N」(emaCoins,與策略同
+	// 池、自動換血)。setEMAUniverse 已在上面跑過,這裡拿到的就是本輪最新的 top-N;
+	// 開機第一輪(還沒抓到行情)emaCoins() 會 fallback 到 s.coins。
+	coins := s.emaCoins()
+	nextSnaps := make(map[string]Snapshot, len(coins))
+	nextDetails := make(map[string]CoinDetail, len(coins))
+	for _, coin := range coins {
 		detail, snap := s.computeDetailCore(coin, tmap[coin+"USDT"].ChgPct, btcChg)
 		nextSnaps[coin] = snap
 		nextDetails[coin] = detail

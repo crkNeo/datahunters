@@ -932,11 +932,36 @@ const srStatusMeta = {
   range: { txt: '區間內', cls: 'neutral' },
 }
 
-const boardRows = computed(() =>
-  Object.entries(board.value)
-    .map(([coin, v]) => ({ coin, ...v }))
-    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-)
+// OI 儀表板排序:預設按「評分絕對值」由大到小(最強訊號在上)。點欄位標題可改排序,
+// 再點一次切換升/降。數值欄降序優先、文字欄升序優先。
+const boardSort = ref({ key: 'absScore', dir: 'desc' })
+const BOARD_TEXT_KEYS = ['coin', 'bias', 'quality']
+function sortBoard(key) {
+  if (boardSort.value.key === key) {
+    boardSort.value = { key, dir: boardSort.value.dir === 'desc' ? 'asc' : 'desc' }
+  } else {
+    boardSort.value = { key, dir: BOARD_TEXT_KEYS.includes(key) ? 'asc' : 'desc' }
+  }
+}
+function boardArrow(key) {
+  if (boardSort.value.key !== key) return ''
+  return boardSort.value.dir === 'desc' ? ' ▼' : ' ▲'
+}
+const boardRows = computed(() => {
+  const rows = Object.entries(board.value).map(([coin, v]) => ({ coin, ...v }))
+  const { key, dir } = boardSort.value
+  const val = (r) => {
+    if (key === 'absScore') return Math.abs(r.score ?? 0)
+    if (BOARD_TEXT_KEYS.includes(key)) return r[key] ?? ''
+    return r[key] ?? 0
+  }
+  rows.sort((a, b) => {
+    const av = val(a), bv = val(b)
+    const cmp = typeof av === 'string' ? String(av).localeCompare(String(bv)) : av - bv
+    return dir === 'asc' ? cmp : -cmp
+  })
+  return rows
+})
 
 // ---- BTC regime filter (backtest: counter-BTC-trend signals lose money) ----
 const regimeFilter = ref(localStorage.getItem('regimeFilter') !== '0')
@@ -2201,9 +2226,17 @@ watch([role, tabPerms, authReady], () => {
         <h2>OI 儀表板</h2>
         <span class="mk-count" v-if="boardUpdated">更新：{{ new Date(boardUpdated).toLocaleTimeString() }}</span>
       </div>
-      <table class="grid">
+      <table class="grid oi-sortable">
         <thead>
-          <tr><th>幣種</th><th class="r">評分</th><th>方向</th><th>品質</th><th class="r" title="最新 1 小時 K 棒的漲跌%">1H%</th><th class="r" title="未平倉量近 1 小時變化%">OI 1h%</th><th class="r" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%</th></tr>
+          <tr>
+            <th class="sortable" @click="sortBoard('coin')">幣種{{ boardArrow('coin') }}</th>
+            <th class="r sortable" @click="sortBoard('absScore')" title="點:按評分絕對值(最強訊號)排序">評分{{ boardArrow('absScore') }}</th>
+            <th class="sortable" @click="sortBoard('bias')">方向{{ boardArrow('bias') }}</th>
+            <th class="sortable" @click="sortBoard('quality')">品質{{ boardArrow('quality') }}</th>
+            <th class="r sortable" @click="sortBoard('okx_chg')" title="最新 1 小時 K 棒的漲跌%">1H%{{ boardArrow('okx_chg') }}</th>
+            <th class="r sortable" @click="sortBoard('oi_chg_1h')" title="未平倉量近 1 小時變化%">OI 1h%{{ boardArrow('oi_chg_1h') }}</th>
+            <th class="r sortable" @click="sortBoard('cvd_ratio')" title="近 12 小時買賣單量差（CVD），正=買方主導">CVD%{{ boardArrow('cvd_ratio') }}</th>
+          </tr>
         </thead>
         <tbody>
           <tr v-for="r in boardRows" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">
@@ -3046,6 +3079,8 @@ body::before {
 .grid { width: 100%; border-collapse: collapse; font-size: 13px; }
 .grid th { padding: 8px 10px; color: #8b909a; font-weight: 500; border-bottom: 1px solid #23262d; text-align: left; }
 .grid th.r { text-align: right; } .grid th.rank { width: 36px; }
+.grid th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.grid th.sortable:hover { color: #d8ad48; }
 .grid td { padding: 9px 10px; border-bottom: 1px solid #14161b; font-variant-numeric: tabular-nums; }
 .grid td.r { text-align: right; } .grid td.rank { color: #5c616b; }
 .grid tr.clickable { cursor: pointer; }
