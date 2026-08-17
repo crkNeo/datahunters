@@ -225,6 +225,10 @@ type Candle struct {
 	TakerBuy float64 // taker (aggressive) buy base volume; 0 if unavailable (OKX)
 	QuoteVol float64 // quote (USDT) volume; 0 if unavailable (OKX)
 	Trades   float64 // number of trades in the bar; 0 if unavailable (OKX)
+	// TakerBuyQuote is the taker buy volume in QUOTE (USDT) terms. Prefer it over
+	// TakerBuy for CVD: quote terms are comparable across coins without a price
+	// multiplication, and it needs no extra request. 0 if unavailable (OKX).
+	TakerBuyQuote float64
 }
 
 // OKXCandles fetches OHLCV for a SWAP instrument, e.g. "BTC-USDT-SWAP".
@@ -370,6 +374,9 @@ func parseKlines(raw []binanceKline) []Candle {
 		}
 		if len(k) > 9 { // index 9 = taker buy base volume
 			c.TakerBuy = toFloat(k[9])
+		}
+		if len(k) > 10 { // index 10 = taker buy QUOTE volume
+			c.TakerBuyQuote = toFloat(k[10])
 		}
 		out = append(out, c)
 	}

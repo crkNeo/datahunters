@@ -86,6 +86,28 @@ multi-timeframe), and measure hit-rate on your own.
   same numbers.
 - **Persistence / auth / alerts** — add Postgres, a Telegram bot, etc. as needed.
 
+## Research collector
+
+`backend/cmd/collector` is a separate binary that records a per-minute snapshot
+of the whole USDT-perp market (price/volume, OI notional, funding, basis, taker
+flow, order-book depth, spot volume) into MySQL, and backfills forward returns
+and MFE/MAE for every bar.
+
+It stores **raw observations only** — no scores, no thresholds, no signals — so
+that ranking rules can be written and rewritten offline against a fixed history
+instead of being frozen into the collection step. It also records every tradable
+perp daily, not just the tracked slice, so a later analysis can still see coins
+that were delisted in between.
+
+```bash
+cd backend
+MYSQL_DSN='user:pass@tcp(127.0.0.1:3306)/datahunter?charset=utf8mb4' \
+  go run ./cmd/collector -universe 100
+```
+
+Design rationale, table reference and the questions the data is meant to settle
+are in [`資料採集器.md`](./資料採集器.md).
+
 ## Disclaimer
 
 All data is from public exchange APIs and is for research only. The scoring is a
