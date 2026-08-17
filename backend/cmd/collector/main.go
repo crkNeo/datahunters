@@ -30,6 +30,7 @@ import (
 
 	"datahunter/internal/collector"
 	"datahunter/internal/exchange"
+	"datahunter/internal/unlock"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -51,6 +52,7 @@ func main() {
 	evPct := flag.Float64("event-pct", lcfg.EventPct, "move within 5m that counts as an event, e.g. 0.10 for +10%")
 	noLabel := flag.Bool("no-labeler", false, "collect only; skip forward-return backfill")
 	labelOnly := flag.Bool("labeler-only", false, "backfill labels only; do not collect")
+	noUnlocks := flag.Bool("no-unlocks", false, "skip the daily token-unlock schedule capture")
 	flag.Parse()
 
 	cfg.SettleDelay = *settle
@@ -76,6 +78,9 @@ func main() {
 
 	ex := exchange.NewClient()
 	c := collector.New(ex, db, cfg)
+	if !*noUnlocks && !*labelOnly {
+		c.EnableUnlocks(unlock.NewWatcher())
+	}
 	if err := c.Init(); err != nil {
 		log.Fatalf("init: %v", err)
 	}
@@ -93,6 +98,11 @@ func main() {
 		log.Printf("collector: tracking %d symbols, depth every %dm (limit %d), spot every %dm, retention %dd",
 			cfg.Universe, cfg.DepthEvery, cfg.DepthLimit, cfg.SpotEvery, cfg.RetentionDays)
 		go c.Run(stop)
+		if !*noUnlocks {
+			// Sparse, slow-moving and on entirely different hosts — its own
+			// goroutine so a 40s dataset fetch can never delay a snapshot tick.
+			go c.RunUnlocks(stop)
+		}
 	}
 	if !*noLabel {
 		log.Printf("labeler: event threshold %.1f%% within 5m", lcfg.EventPct*100)

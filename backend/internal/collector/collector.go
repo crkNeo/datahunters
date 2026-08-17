@@ -55,6 +55,8 @@ type Collector struct {
 	db  *sql.DB
 	cfg Config
 
+	unlockW UnlockSource // optional; nil disables the daily unlock capture
+
 	mu       sync.RWMutex
 	universe []string        // ranked, highest turnover first
 	spotOK   map[string]bool // symbol has a live spot pair
@@ -63,6 +65,10 @@ type Collector struct {
 func New(ex *exchange.Client, db *sql.DB, cfg Config) *Collector {
 	return &Collector{ex: ex, db: db, cfg: cfg, spotOK: map[string]bool{}}
 }
+
+// EnableUnlocks attaches a token-unlock schedule source. Optional: without it
+// the collector simply records no unlock tables.
+func (c *Collector) EnableUnlocks(w UnlockSource) { c.unlockW = w }
 
 // Init prepares the schema and loads the first universe. Called before Run.
 func (c *Collector) Init() error {

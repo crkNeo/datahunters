@@ -189,6 +189,50 @@ const universeDDL = `CREATE TABLE IF NOT EXISTS universe_1d (
   PRIMARY KEY (day, symbol)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 
+// unlock_events is the dated unlock schedule AS SEEN ON asof_day.
+//
+// The whole table is re-recorded daily rather than kept as one current view,
+// because unlock schedules get REVISED — projects delay or accelerate, and the
+// upstream dataset gets corrected. Joining today's schedule onto a snapshot
+// from three months ago would use knowledge that did not exist at the time,
+// which is lookahead of the most convincing kind: it makes the feature look
+// prescient precisely because it was written after the fact.
+const unlockEventsDDL = `CREATE TABLE IF NOT EXISTS unlock_events (
+  asof_day  INT    NOT NULL,
+  coin      VARCHAR(32) NOT NULL,
+  unlock_ts BIGINT NOT NULL,
+  category  VARCHAR(64) NOT NULL,
+  amount    DOUBLE NOT NULL DEFAULT 0,
+  PRIMARY KEY (asof_day, coin, unlock_ts, category),
+  KEY idx_ue_coin_ts (coin, unlock_ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+
+// unlock_snapshot_1d records, per coin per day, what was known about its
+// unlocks — including the two negative cases that make the control group valid:
+//
+//	covered=0                 → the unlock source does not track this coin at
+//	                            all. UNKNOWN. Must never be read as "no unlock".
+//	covered=1, has_upcoming=0 → genuinely nothing scheduled in the horizon.
+//
+// price/circ/max_supply are the as-of values, stored raw so that magnitude
+// measures (unlock USD against daily turnover, unlock as a share of float) stay
+// reproducible offline instead of being frozen here.
+const unlockSnapshotDDL = `CREATE TABLE IF NOT EXISTS unlock_snapshot_1d (
+  day             INT    NOT NULL,
+  coin            VARCHAR(32) NOT NULL,
+  in_universe     TINYINT NOT NULL DEFAULT 0,
+  covered         TINYINT NOT NULL DEFAULT 0,
+  has_upcoming    TINYINT NOT NULL DEFAULT 0,
+  next_unlock_ts  BIGINT NOT NULL DEFAULT 0,
+  next_unlock_amt DOUBLE NOT NULL DEFAULT 0,
+  horizon_amt     DOUBLE NOT NULL DEFAULT 0,
+  events_n        INT    NOT NULL DEFAULT 0,
+  price           DOUBLE NOT NULL DEFAULT 0,
+  circ            DOUBLE NOT NULL DEFAULT 0,
+  max_supply      DOUBLE NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, coin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+
 // dayKey renders a UTC time as the YYYYMMDD partition key.
 func dayKey(t time.Time) int {
 	t = t.UTC()
@@ -223,6 +267,12 @@ func ensureSchema(db *sql.DB, retentionDays int) error {
 	}
 	if _, err := db.Exec(stateDDL); err != nil {
 		return fmt.Errorf("create collector_state: %w", err)
+	}
+	if _, err := db.Exec(unlockEventsDDL); err != nil {
+		return fmt.Errorf("create unlock_events: %w", err)
+	}
+	if _, err := db.Exec(unlockSnapshotDDL); err != nil {
+		return fmt.Errorf("create unlock_snapshot_1d: %w", err)
 	}
 	return ensurePartitions(db, retentionDays)
 }

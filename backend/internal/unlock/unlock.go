@@ -122,10 +122,10 @@ type parsed struct {
 	cats                 []string
 }
 
-// fetchOne pulls + parses one protocol. Returns nil if it has no unlock in the
-// next 30 days (fully unlocked, or next cliff further out) — such tokens are not
-// "upcoming" and are omitted from the board.
-func (w *Watcher) fetchOne(slug string) *parsed {
+// fetchDataset pulls and decodes one protocol's emission file. Shared by the
+// board summary (fetchOne) and the dated research schedule (fetchScheduleOne)
+// so both always read the same source in the same way.
+func (w *Watcher) fetchDataset(slug string) *dataset {
 	req, err := http.NewRequest("GET", datasetURL+slug, nil)
 	if err != nil {
 		return nil
@@ -144,6 +144,18 @@ func (w *Watcher) fetchOne(slug string) *parsed {
 	if json.Unmarshal(body, &d) != nil {
 		return nil
 	}
+	return &d
+}
+
+// fetchOne pulls + parses one protocol. Returns nil if it has no unlock in the
+// next 30 days (fully unlocked, or next cliff further out) — such tokens are not
+// "upcoming" and are omitted from the board.
+func (w *Watcher) fetchOne(slug string) *parsed {
+	dp := w.fetchDataset(slug)
+	if dp == nil {
+		return nil
+	}
+	d := *dp
 	skip := map[string]bool{} // staking = continuous emission, not a scheduled unlock
 	for _, l := range d.Categories["staking"] {
 		skip[l] = true

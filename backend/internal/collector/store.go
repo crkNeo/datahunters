@@ -85,10 +85,16 @@ type universeRow struct {
 	Selected    bool
 }
 
+// execer is the subset of *sql.DB the write path uses. Keeping the writers on
+// an interface lets row construction be unit-tested without a live database.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // insertChunkRows is the shared batching primitive: it builds
 // `INSERT IGNORE INTO t (cols) VALUES (...),(...)` in chunks so a burst never
 // exceeds max_allowed_packet, and so one bad chunk cannot lose the whole minute.
-func insertChunkRows(db *sql.DB, table string, cols []string, n int, args func(i int) []any) error {
+func insertChunkRows(db execer, table string, cols []string, n int, args func(i int) []any) error {
 	if n == 0 {
 		return nil
 	}
