@@ -274,10 +274,26 @@ func (c *Collector) tick(now time.Time) {
 		log.Printf("collector: %v", err)
 	}
 
+	took := time.Since(started)
 	log.Printf("collector: bar=%s snaps=%d depth=%d spot=%d errs(bar=%d oi=%d) took=%s",
 		time.UnixMilli(barTs).UTC().Format("15:04"), len(snaps), len(depths), len(spots),
-		nErrBar, nErrOI, time.Since(started).Round(time.Millisecond))
+		nErrBar, nErrOI, took.Round(time.Millisecond))
+
+	// A tick that outruns its minute does not pile up — the loop simply waits
+	// for the next boundary — but it silently drops a bar, and a silent gap in
+	// a research dataset is worse than a loud one. Warn while there is still
+	// margin to act, rather than at the point where bars are already missing.
+	if took > tickWarnAt {
+		log.Printf("collector: WARNING tick took %s of the 60s budget — requests are "+
+			"paced at ~100ms each on one outbound IP, so raise -spot-every / -depth-every, "+
+			"lower -universe, or add BINANCE_PROXIES lanes before bars start being skipped",
+			took.Round(time.Millisecond))
+	}
 }
+
+// tickWarnAt leaves a quarter of the minute as headroom. Crossing it is not yet
+// data loss, it is the last comfortable moment to change the cadence.
+const tickWarnAt = 45 * time.Second
 
 // buildRegime reduces the minute's cross-section to the market-state row.
 //
