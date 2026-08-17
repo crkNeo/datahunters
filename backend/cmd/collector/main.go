@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"database/sql"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -41,7 +42,7 @@ func main() {
 	cfg := collector.DefaultConfig()
 	lcfg := collector.DefaultLabelConfig()
 
-	dsn := flag.String("dsn", os.Getenv("MYSQL_DSN"), "MySQL DSN (or set MYSQL_DSN)")
+	dsn := flag.String("dsn", mysqlDSN(), "MySQL DSN (or set MYSQL_DSN / DB_HOST,DB_USER,…)")
 	flag.IntVar(&cfg.Universe, "universe", cfg.Universe, "symbols to track, ranked by 24h turnover")
 	flag.IntVar(&cfg.Workers, "workers", cfg.Workers, "concurrent per-symbol fetches")
 	flag.IntVar(&cfg.DepthEvery, "depth-every", cfg.DepthEvery, "minutes between order-book snapshots (0 disables)")
@@ -59,7 +60,7 @@ func main() {
 	lcfg.EventPct = *evPct
 
 	if strings.TrimSpace(*dsn) == "" {
-		log.Fatal("no MySQL DSN: pass -dsn or set MYSQL_DSN")
+		log.Fatal("no MySQL DSN: pass -dsn, or set MYSQL_DSN (or DB_HOST/DB_USER/DB_PASS/DB_NAME) in backend/.env")
 	}
 	db, err := sql.Open("mysql", *dsn)
 	if err != nil {
@@ -112,6 +113,31 @@ func main() {
 	<-stop
 	// Give an in-flight minute a moment to finish its writes before the pool closes.
 	time.Sleep(2 * time.Second)
+}
+
+// mysqlDSN mirrors cache.mysqlDSN so the collector connects with whatever the
+// site is already configured with — either MYSQL_DSN outright, or the
+// DB_HOST / DB_PORT / DB_USER / DB_PASS / DB_NAME pieces. Returning "" when
+// nothing is set lets main report a clear error instead of dialling localhost
+// with a guessed password.
+func mysqlDSN() string {
+	if v := os.Getenv("MYSQL_DSN"); v != "" {
+		return v
+	}
+	if os.Getenv("DB_HOST") == "" && os.Getenv("DB_USER") == "" && os.Getenv("DB_NAME") == "" {
+		return ""
+	}
+	get := func(k, def string) string {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+		return def
+	}
+	// epochs are stored as BIGINT so parseTime is unnecessary; force UTC + utf8mb4.
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=false&loc=UTC",
+		get("DB_USER", "root"), os.Getenv("DB_PASS"),
+		get("DB_HOST", "127.0.0.1"), get("DB_PORT", "3306"),
+		get("DB_NAME", "datahunter"))
 }
 
 // loadDotEnv mirrors cmd/server: fill unset env vars from a .env file so the
