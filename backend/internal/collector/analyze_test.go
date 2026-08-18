@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -199,9 +200,63 @@ func TestReportRendersWithEvents(t *testing.T) {
 	rep.q3(eps, bf)
 
 	out := buf.String()
-	for _, want := range []string{"最常爆的標的", "MFE 5m", "觸及 +20%", "事件中位數", "到頂中位數"} {
+	for _, want := range []string{"最常爆的標的", "MFE 5m", "觸及 +20%", "事件中位數", "可交易性"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n---\n%s", want, out)
 		}
+	}
+}
+
+// The anchor sits up to 5 minutes before the peak by construction, so anything
+// measured from it overstates the opportunity. addTradableView re-measures from
+// the first bar a live system could have reacted to; this pins that arithmetic.
+func TestAddTradableView(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	set := func(i int, high, low, close_ float64) {
+		bs[i].high, bs[i].low, bs[i].close_ = high, low, close_
+	}
+	set(101, 100.6, 100.0, 100.5) // +0.5% — below the visibility threshold
+	set(102, 103.2, 100.4, 103.0) // +3.0% — the move becomes visible here
+	set(103, 110.0, 102.0, 109.0) // peak
+	set(104, 109.0, 106.0, 107.0)
+	set(105, 108.0, 105.0, 106.0)
+	set(106, 107.0, 104.0, 105.0)
+	set(107, 106.0, 103.0, 104.0)
+
+	var e episode
+	addTradableView(&e, bs, 100)
+	if !e.hasVis {
+		t.Fatal("move should have been visible")
+	}
+	near := func(name string, got, want float64) {
+		t.Helper()
+		if math.Abs(got-want) > 1e-6 {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	near("visSecs", e.visSecs, 120)         // two bars after the anchor
+	near("visMFE", e.visMFE, 110.0/103.0-1) // from the ENTRY price, not the anchor
+	near("visMAE", e.visMAE, 102.0/103.0-1)
+	near("visToPeakSec", e.visToPeakSec, 60) // one bar from visible to peak
+
+	// The anchor-based view of the same move looks far better — that gap is the
+	// cost of detection, and the report must never present only the first one.
+	if anchorMFE := 110.0/100.0 - 1; anchorMFE <= e.visMFE {
+		t.Errorf("anchor MFE %v should exceed the tradable MFE %v", anchorMFE, e.visMFE)
+	}
+}
+
+// A spike that only ever shows up as a wick — never in a close — is not
+// something a close-based screener can react to, and must not be counted as
+// tradable rather than silently inheriting the anchor's numbers.
+func TestAddTradableViewWickOnly(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	bs[103].high = 130 // a huge wick, but every close stays at 100
+	var e episode
+	addTradableView(&e, bs, 100)
+	if e.hasVis {
+		t.Errorf("wick-only move must not be reported as tradable, got %+v", e)
 	}
 }

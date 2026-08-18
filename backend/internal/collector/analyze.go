@@ -126,13 +126,32 @@ func loadAnalysisSeries(db *sql.DB, from int64) (map[string][]abar, error) {
 }
 
 // episode is one burst: the bar it started from, plus its outcome.
+//
+// The anchor is the first bar whose 5-minute window already contains the spike,
+// which by construction sits up to 5 minutes BEFORE the peak — a bar nobody can
+// identify while it is happening. Its MFE therefore describes the whole move and
+// its MAE is near zero, and neither number is achievable.
+//
+// The vis* fields fix that: they re-measure everything from the first bar where
+// the move is actually VISIBLE (price already up by visiblePct). That bar is one
+// a live system could react to, so those are the numbers that decide whether
+// there is a trade here at all.
 type episode struct {
 	symbol                      string
 	i                           int // index into the symbol's series
 	ts                          int64
 	mfe5, mae5, mfe15, secsPeak float64
 	feat                        map[string]float64
+
+	hasVis                       bool
+	visSecs                      float64 // anchor → the move becoming visible
+	visMFE, visMAE, visToPeakSec float64 // measured FROM the visible bar
 }
+
+// visiblePct is how far price must have moved before a live screener could
+// plausibly have fired on it. Deliberately small: the argument is not that a
+// system triggers here, it is that it could not possibly have triggered EARLIER.
+const visiblePct = 0.02
 
 // splitEpisodes finds burst starts and collects a matched baseline.
 //
@@ -159,8 +178,10 @@ func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, 
 			if !ok {
 				continue // not enough history behind this bar
 			}
-			eps = append(eps, episode{symbol: sym, i: i, ts: b.ts,
-				mfe5: b.mfe5, mae5: b.mae5, mfe15: b.mfe15, secsPeak: b.secsPeak, feat: f})
+			e := episode{symbol: sym, i: i, ts: b.ts,
+				mfe5: b.mfe5, mae5: b.mae5, mfe15: b.mfe15, secsPeak: b.secsPeak, feat: f}
+			addTradableView(&e, bs, i)
+			eps = append(eps, e)
 		}
 		// mark the neighbourhood of every event bar as unusable for baseline
 		for i, b := range bs {
@@ -242,6 +263,55 @@ func featuresAt(bs []abar, i int) (map[string]float64, bool) {
 		f["基差 basis(bps)"] = (b.mark - b.indexPx) / b.indexPx * 10000
 	}
 	return f, true
+}
+
+// addTradableView re-measures the episode from the first bar a live system
+// could have reacted to, rather than from the unknowable anchor.
+func addTradableView(e *episode, bs []abar, i int) {
+	base := bs[i].close_
+	if base <= 0 {
+		return
+	}
+	// walk forward within the 5-minute window looking for the move to show up
+	vis := -1
+	for j := i + 1; j < len(bs) && bs[j].ts <= bs[i].ts+5*60_000; j++ {
+		if bs[j].close_/base-1 >= visiblePct {
+			vis = j
+			break
+		}
+	}
+	if vis < 0 {
+		return // the spike never showed in the closes — a wick-only move
+	}
+	entry := bs[vis].close_
+	if entry <= 0 {
+		return
+	}
+	e.hasVis = true
+	e.visSecs = float64(bs[vis].ts-bs[i].ts) / 1000
+
+	// From the visible bar, look ahead the same 5 minutes an entry would hold.
+	var hi, lo float64
+	var peakTs int64
+	have := false
+	for j := vis + 1; j < len(bs) && bs[j].ts <= bs[vis].ts+5*60_000; j++ {
+		if !have {
+			hi, lo, peakTs, have = bs[j].high, bs[j].low, bs[j].ts, true
+			continue
+		}
+		if bs[j].high > hi {
+			hi, peakTs = bs[j].high, bs[j].ts
+		}
+		if bs[j].low < lo {
+			lo = bs[j].low
+		}
+	}
+	if !have {
+		return
+	}
+	e.visMFE = hi/entry - 1
+	e.visMAE = lo/entry - 1
+	e.visToPeakSec = float64(peakTs-bs[vis].ts) / 1000
 }
 
 // ---------- report ----------
@@ -378,15 +448,65 @@ func (r *report) q4(eps []episode, cfg AnalyzeConfig) {
 		r.line("  觸及 +%2.0f%% 的比例   %5.1f%%  (%d/%d)", tgt*100,
 			float64(hit)/float64(len(eps))*100, hit, len(eps))
 	}
-	secs := get(func(e episode) float64 { return e.secsPeak })
-	if len(secs) > 0 {
-		med := pct(secs, 0.50)
-		r.line("")
-		if med <= 120 {
-			r.line("  ⚠ 到頂中位數僅 %.0f 秒 — 人工點擊來不及,只剩自動化或改抓第二波。", med)
-		} else {
-			r.line("  到頂中位數 %.0f 秒 — 人工反應仍有機會,但滑價會吃掉大部分。", med)
+	r.line("")
+	r.line("  ⚠ 以上是從「錨點」量的,而錨點是尖峰前最多 5 分鐘那根 K 棒 —")
+	r.line("    當下你認不出它。所以 MFE 偏大、MAE 偏小、到頂秒數會被釘在 300 秒附近,")
+	r.line("    這是錨定方式的產物,不是行情的性質。真正能拿到的看下一段。")
+
+	r.tradable(eps)
+}
+
+// tradable re-states the same episodes from the first bar a live system could
+// have reacted to. The gap between this section and the one above IS the cost
+// of detection — and it is usually where a promising-looking edge disappears.
+func (r *report) tradable(eps []episode) {
+	r.head(fmt.Sprintf("Q4b 可交易性 — 從價格已經動了 +%.0f%% 之後才進場", visiblePct*100))
+	var vis []episode
+	for _, e := range eps {
+		if e.hasVis {
+			vis = append(vis, e)
 		}
+	}
+	if len(vis) == 0 {
+		r.line("  沒有任何一次在收盤價上顯現出來(可能都是上影線) — 樣本太少或行情形態如此。")
+		return
+	}
+	r.line("  可辨識的次數  %d / %d", len(vis), len(eps))
+
+	col := func(f func(episode) float64) []float64 {
+		var v []float64
+		for _, e := range vis {
+			v = append(v, f(e))
+		}
+		sort.Float64s(v)
+		return v
+	}
+	show := func(name string, v []float64, mul float64, unit string) {
+		r.line("  %-22s p10 %7.1f%s   中位 %7.1f%s   p90 %7.1f%s",
+			name, pct(v, 0.10)*mul, unit, pct(v, 0.50)*mul, unit, pct(v, 0.90)*mul, unit)
+	}
+	show("進場前已漲掉", col(func(e episode) float64 { return e.visSecs }), 1, "s")
+	mfe := col(func(e episode) float64 { return e.visMFE })
+	mae := col(func(e episode) float64 { return e.visMAE })
+	show("進場後 MFE", mfe, 100, "%")
+	show("進場後 MAE", mae, 100, "%")
+	show("進場→到頂", col(func(e episode) float64 { return e.visToPeakSec }), 1, "s")
+
+	r.line("")
+	const cost = 0.003 // 來回手續費 + 小幣滑價,取 0.3%
+	medMFE, medMAE := pct(mfe, 0.5), pct(mae, 0.5)
+	r.line("  中位剩餘漲幅 %.1f%%,扣掉來回成本 %.1f%% 後約 %.1f%%",
+		medMFE*100, cost*100, (medMFE-cost)*100)
+	switch {
+	case medMFE <= cost:
+		r.line("  ⛔ 偵測到的時候行情已經走完 — 這個門檻下沒有可交易的剩餘空間。")
+	case medMFE < cost*3:
+		r.line("  ⚠ 剩餘空間不到成本的三倍 — 命中率要非常高才有正期望,實務上很難。")
+	default:
+		r.line("  ✅ 剩餘空間仍有成本的 %.1f 倍,值得往下做進場規則。", medMFE/cost)
+	}
+	if medMAE < 0 {
+		r.line("  停損若設得比 %.1f%% 淺,會被進場後的正常回撤掃掉。", medMAE*100)
 	}
 }
 
