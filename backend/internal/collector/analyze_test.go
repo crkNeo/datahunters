@@ -260,3 +260,60 @@ func TestAddTradableViewWickOnly(t *testing.T) {
 		t.Errorf("wick-only move must not be reported as tradable, got %+v", e)
 	}
 }
+
+func TestSimulate(t *testing.T) {
+	const cost = 0.003
+	e := func(path ...pathBar) episode { return episode{entry: 100, path: path} }
+
+	near := func(name string, got, want float64) {
+		t.Helper()
+		if math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+
+	// take-profit reached
+	near("TP", e(pathBar{106, 99, 105}).simulate(0.05, 0.02, cost), 0.05-cost)
+	// stop-loss reached
+	near("SL", e(pathBar{101, 97, 98}).simulate(0.05, 0.02, cost), -0.02-cost)
+
+	// A bar spanning BOTH levels must resolve as the stop. Minute bars cannot
+	// say which came first, and picking the favourable reading is how a
+	// backtest quietly converts losses into wins.
+	near("both-in-one-bar", e(pathBar{106, 97, 105}).simulate(0.05, 0.02, cost), -0.02-cost)
+
+	// neither level touched → time stop at the last close
+	near("time stop", e(pathBar{103, 99, 102}, pathBar{104, 101, 103}).simulate(0.10, 0.05, cost), 0.03-cost)
+
+	// earlier bar wins over a later one
+	near("first bar decides", e(pathBar{101, 97, 98}, pathBar{120, 119, 120}).simulate(0.05, 0.02, cost), -0.02-cost)
+
+	near("empty path", e().simulate(0.05, 0.02, cost), 0)
+}
+
+// The simulation must be reachable from a real episode built by addTradableView,
+// not only from hand-made structs — otherwise a change to the capture window
+// could leave the path empty and every simulated trade would silently read as a
+// flat time-stop.
+func TestAddTradableViewCapturesPath(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	bs[102].high, bs[102].low, bs[102].close_ = 103.2, 100.4, 103.0
+	bs[103].high, bs[103].low, bs[103].close_ = 110.0, 102.0, 109.0
+
+	var e episode
+	addTradableView(&e, bs, 100)
+	if !e.hasVis {
+		t.Fatal("expected a visible move")
+	}
+	if len(e.path) == 0 {
+		t.Fatal("path is empty — the simulation would see every trade as a flat time stop")
+	}
+	if e.entry != 103.0 {
+		t.Errorf("entry = %v, want the visible bar's close 103.0", e.entry)
+	}
+	// +5% from 103 is 108.15, reached by bar 103's high of 110
+	if got := e.simulate(0.05, 0.02, 0); got != 0.05 {
+		t.Errorf("simulate = %v, want the +5%% take-profit", got)
+	}
+}

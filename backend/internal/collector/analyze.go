@@ -146,6 +146,16 @@ type episode struct {
 	hasVis                       bool
 	visSecs                      float64 // anchor → the move becoming visible
 	visMFE, visMAE, visToPeakSec float64 // measured FROM the visible bar
+	entry                        float64 // close of the visible bar
+	path                         []pathBar
+}
+
+// pathBar is one bar of what happened after a (hypothetical) entry. Keeping the
+// path lets the report simulate any take-profit / stop pair without re-reading
+// the database, and — more importantly — forces the verdict to account for the
+// losing side instead of admiring the best-case excursion.
+type pathBar struct {
+	high, low, close_ float64
 }
 
 // visiblePct is how far price must have moved before a live screener could
@@ -312,6 +322,31 @@ func addTradableView(e *episode, bs []abar, i int) {
 	e.visMFE = hi/entry - 1
 	e.visMAE = lo/entry - 1
 	e.visToPeakSec = float64(peakTs-bs[vis].ts) / 1000
+	e.entry = entry
+	for j := vis + 1; j < len(bs) && bs[j].ts <= bs[vis].ts+5*60_000; j++ {
+		e.path = append(e.path, pathBar{bs[j].high, bs[j].low, bs[j].close_})
+	}
+}
+
+// simulate walks one episode's path under a take-profit / stop-loss pair with a
+// time stop at the end of the window, and returns the NET return after cost.
+//
+// When a bar's range spans both levels the stop is assumed to hit first. Bar
+// data cannot say which came first within the minute, and choosing the
+// favourable reading is how a backtest quietly turns losses into wins.
+func (e episode) simulate(tp, sl, cost float64) float64 {
+	for _, b := range e.path {
+		if b.low/e.entry-1 <= -sl {
+			return -sl - cost
+		}
+		if b.high/e.entry-1 >= tp {
+			return tp - cost
+		}
+	}
+	if len(e.path) == 0 {
+		return 0
+	}
+	return e.path[len(e.path)-1].close_/e.entry - 1 - cost
 }
 
 // ---------- report ----------
@@ -472,6 +507,7 @@ func (r *report) tradable(eps []episode) {
 		return
 	}
 	r.line("  可辨識的次數  %d / %d", len(vis), len(eps))
+	const cost = 0.003 // 來回手續費 + 小幣滑價,保守取 0.3%
 
 	col := func(f func(episode) float64) []float64 {
 		var v []float64
@@ -485,28 +521,51 @@ func (r *report) tradable(eps []episode) {
 		r.line("  %-22s p10 %7.1f%s   中位 %7.1f%s   p90 %7.1f%s",
 			name, pct(v, 0.10)*mul, unit, pct(v, 0.50)*mul, unit, pct(v, 0.90)*mul, unit)
 	}
-	show("進場前已漲掉", col(func(e episode) float64 { return e.visSecs }), 1, "s")
+	show("偵測延遲(錨點→可辨識)", col(func(e episode) float64 { return e.visSecs }), 1, "s")
 	mfe := col(func(e episode) float64 { return e.visMFE })
 	mae := col(func(e episode) float64 { return e.visMAE })
-	show("進場後 MFE", mfe, 100, "%")
-	show("進場後 MAE", mae, 100, "%")
-	show("進場→到頂", col(func(e episode) float64 { return e.visToPeakSec }), 1, "s")
+	show("進場後 MFE(最好情況)", mfe, 100, "%")
+	show("進場後 MAE(最壞情況)", mae, 100, "%")
+	toPeak := col(func(e episode) float64 { return e.visToPeakSec })
+	show("進場→到頂", toPeak, 1, "s")
+
+	// MFE alone flatters everything: it is the best price the move ever offered,
+	// which nobody exits at. The verdict has to come from a rule that can lose.
+	r.line("")
+	r.line("  停利/停損模擬(進場後 5 分鐘時間停損,來回成本 %.1f%%,同一根同時觸及則算停損):", cost*100)
+	r.line("  %-14s %8s %12s %12s", "TP / SL", "命中率", "平均淨報酬", "總淨報酬")
+	r.line("  %s", strings.Repeat("-", 50))
+	type grid struct{ tp, sl float64 }
+	for _, g := range []grid{{0.03, 0.02}, {0.05, 0.02}, {0.05, 0.03}, {0.08, 0.03}} {
+		var wins int
+		var total float64
+		for _, e := range vis {
+			ret := e.simulate(g.tp, g.sl, cost)
+			total += ret
+			if ret > 0 {
+				wins++
+			}
+		}
+		avg := total / float64(len(vis))
+		r.line("  +%.0f%% / -%.0f%%      %6.1f%% %11.2f%% %11.2f%%",
+			g.tp*100, g.sl*100, float64(wins)/float64(len(vis))*100, avg*100, total*100)
+	}
 
 	r.line("")
-	const cost = 0.003 // 來回手續費 + 小幣滑價,取 0.3%
-	medMFE, medMAE := pct(mfe, 0.5), pct(mae, 0.5)
-	r.line("  中位剩餘漲幅 %.1f%%,扣掉來回成本 %.1f%% 後約 %.1f%%",
-		medMFE*100, cost*100, (medMFE-cost)*100)
-	switch {
-	case medMFE <= cost:
-		r.line("  ⛔ 偵測到的時候行情已經走完 — 這個門檻下沒有可交易的剩餘空間。")
-	case medMFE < cost*3:
-		r.line("  ⚠ 剩餘空間不到成本的三倍 — 命中率要非常高才有正期望,實務上很難。")
-	default:
-		r.line("  ✅ 剩餘空間仍有成本的 %.1f 倍,值得往下做進場規則。", medMFE/cost)
+	medToPeak := pct(toPeak, 0.5)
+	if medToPeak <= 90 {
+		r.line("  ⚠ 從看得見到見頂只有 %.0f 秒(中位)— 人工點擊來不及,這條路必須自動化,",
+			medToPeak)
+		r.line("    否則就得放棄第一波、改抓回踩或同板塊落後幣。")
+	} else {
+		r.line("  從看得見到見頂 %.0f 秒(中位)— 人工仍有機會,但滑價會吃掉可觀比例。", medToPeak)
 	}
-	if medMAE < 0 {
-		r.line("  停損若設得比 %.1f%% 淺,會被進場後的正常回撤掃掉。", medMAE*100)
+	if p10 := pct(mfe, 0.10); p10 < cost {
+		r.line("  ⚠ 最差的 10%% 進場後只剩 %.1f%% 空間 — 有一部分是「看到就已經結束」,", p10*100)
+		r.line("    這些單注定虧手續費,必須靠停損規則而不是靠訊號來控制。")
+	}
+	if p10 := pct(mae, 0.10); p10 < -0.05 {
+		r.line("  ⚠ 最差的 10%% 進場後回撤達 %.1f%% — 停損若要涵蓋它,風報比會很難看。", p10*100)
 	}
 }
 
