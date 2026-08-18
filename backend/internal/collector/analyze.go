@@ -37,6 +37,27 @@ type AnalyzeConfig struct {
 	// per-event statistic toward the middle of moves rather than their start.
 	EpisodeGap time.Duration
 	TopCoins   int
+	// VisiblePct is how far price must already have moved before a live system
+	// could plausibly react. 0 = derive it from EventPct.
+	//
+	// It MUST scale with the event threshold. Detection eats the first slice of
+	// every move, so a fixed 2% costs a tenth of a 20% burst and two thirds of
+	// a 3% one — hold it constant and small targets look unprofitable purely
+	// because of the measurement, not because of the market.
+	VisiblePct float64
+}
+
+// autoVisible derives the detection threshold from the event threshold, capped
+// so it never exceeds a third of the move being chased.
+func autoVisible(eventPct float64) float64 {
+	v := eventPct / 3
+	if v > 0.02 {
+		v = 0.02
+	}
+	if v < 0.005 {
+		v = 0.005
+	}
+	return v
 }
 
 func DefaultAnalyzeConfig() AnalyzeConfig {
@@ -75,15 +96,101 @@ func RunAnalysis(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 		return nil
 	}
 
+	visPct := cfg.VisiblePct
+	if visPct <= 0 {
+		visPct = autoVisible(cfg.EventPct)
+	}
+
 	rep := newReport(w)
 	rep.health(series)
+	rep.sweep(series, cfg)
 
 	eps, base := splitEpisodes(series, cfg)
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg)
+	rep.q4(eps, cfg, visPct)
 	rep.q3(eps, base)
 	rep.footer(eps, cfg)
 	return nil
+}
+
+// sweepTargets are the move sizes worth comparing side by side. A smaller
+// target fires far more often but leaves less room once detection has taken its
+// cut, and the two effects pull in opposite directions — which is precisely why
+// the choice has to be read off a table rather than argued about.
+var sweepTargets = []float64{0.03, 0.05, 0.08, 0.10, 0.15}
+
+// sweep reports the frequency/room trade-off across event thresholds.
+//
+// The simulated rule is fixed at TP = half the move and SL = a quarter of it,
+// deliberately NOT optimised per row: picking each row's best cell in-sample
+// would make every threshold look good and would say nothing about the next
+// month of trading.
+func (r *report) sweep(series map[string][]abar, cfg AnalyzeConfig) {
+	r.head("門檻掃描 — 想抓多大的行情?")
+	r.line("  偵測門檻隨事件門檻自動縮放(取 1/3,上限 2%%),否則小行情會被偵測本身吃光。")
+	r.line("  模擬規則固定為 TP = 幅度一半、SL = 幅度四分之一,不逐列最佳化。")
+	r.line("")
+	r.line("  %-8s %8s %6s %9s %11s %9s %10s", "門檻", "事件/天", "標的", "偵測延遲", "進場後MFE", "進場→頂", "平均淨報酬")
+	r.line("  %s", strings.Repeat("-", 70))
+
+	for _, thr := range sweepTargets {
+		c := cfg
+		c.EventPct = thr
+		c.VisiblePct = autoVisible(thr)
+		eps, _ := splitEpisodes(series, c)
+
+		var vis []episode
+		for _, e := range eps {
+			if e.hasVis {
+				vis = append(vis, e)
+			}
+		}
+		if len(eps) == 0 {
+			r.line("  +%-6.0f%% %8s %6s %9s %11s %9s %10s", thr*100, "0", "-", "-", "-", "-", "-")
+			continue
+		}
+		span := float64(eps[len(eps)-1].ts-eps[0].ts) / float64(24*time.Hour/time.Millisecond)
+		if span < 0.01 {
+			span = 0.01
+		}
+		coins := map[string]bool{}
+		for _, e := range eps {
+			coins[e.symbol] = true
+		}
+		perDay := float64(len(eps)) / span
+
+		if len(vis) == 0 {
+			r.line("  +%-6.0f%% %8.1f %6d %9s %11s %9s %10s", thr*100, perDay, len(coins), "-", "-", "-", "-")
+			continue
+		}
+		colOf := func(f func(episode) float64) []float64 {
+			var v []float64
+			for _, e := range vis {
+				v = append(v, f(e))
+			}
+			sort.Float64s(v)
+			return v
+		}
+		medDelay := pct(colOf(func(e episode) float64 { return e.visSecs }), 0.5)
+		medMFE := pct(colOf(func(e episode) float64 { return e.visMFE }), 0.5)
+		medPeak := pct(colOf(func(e episode) float64 { return e.visToPeakSec }), 0.5)
+
+		var total float64
+		for _, e := range vis {
+			total += e.simulate(thr/2, thr/4, 0.003)
+		}
+		avg := total / float64(len(vis)) * 100
+
+		mark := ""
+		if avg > 0 {
+			mark = "  ←正"
+		}
+		r.line("  +%-6.0f%% %8.1f %6d %8.0fs %10.1f%% %8.0fs %9.2f%%%s",
+			thr*100, perDay, len(coins), medDelay, medMFE*100, medPeak, avg, mark)
+	}
+	r.line("")
+	r.line("  「進場後MFE」才是你真正能搶的那一段 — 門檻本身的數字已經被偵測延遲吃掉一部分。")
+	r.line("  想實盤拿到 3%%,看的是這一欄有沒有明顯高於 3%% + 成本,而不是看門檻寫 3%%。")
 }
 
 func loadAnalysisSeries(db *sql.DB, from int64) (map[string][]abar, error) {
@@ -158,11 +265,6 @@ type pathBar struct {
 	high, low, close_ float64
 }
 
-// visiblePct is how far price must have moved before a live screener could
-// plausibly have fired on it. Deliberately small: the argument is not that a
-// system triggers here, it is that it could not possibly have triggered EARLIER.
-const visiblePct = 0.02
-
 // splitEpisodes finds burst starts and collects a matched baseline.
 //
 // Baseline bars exclude anything within an hour either side of an episode:
@@ -171,6 +273,10 @@ const visiblePct = 0.02
 func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, base map[string][]float64) {
 	base = map[string][]float64{}
 	gapMs := int64(cfg.EpisodeGap / time.Millisecond)
+	visPct := cfg.VisiblePct
+	if visPct <= 0 {
+		visPct = autoVisible(cfg.EventPct)
+	}
 
 	for sym, bs := range series {
 		var lastEventTs int64 = math.MinInt32
@@ -190,7 +296,7 @@ func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, 
 			}
 			e := episode{symbol: sym, i: i, ts: b.ts,
 				mfe5: b.mfe5, mae5: b.mae5, mfe15: b.mfe15, secsPeak: b.secsPeak, feat: f}
-			addTradableView(&e, bs, i)
+			addTradableView(&e, bs, i, visPct)
 			eps = append(eps, e)
 		}
 		// mark the neighbourhood of every event bar as unusable for baseline
@@ -277,7 +383,7 @@ func featuresAt(bs []abar, i int) (map[string]float64, bool) {
 
 // addTradableView re-measures the episode from the first bar a live system
 // could have reacted to, rather than from the unknowable anchor.
-func addTradableView(e *episode, bs []abar, i int) {
+func addTradableView(e *episode, bs []abar, i int, visiblePct float64) {
 	base := bs[i].close_
 	if base <= 0 {
 		return
@@ -446,7 +552,7 @@ func (r *report) q1(eps []episode, series map[string][]abar, cfg AnalyzeConfig) 
 	}
 }
 
-func (r *report) q4(eps []episode, cfg AnalyzeConfig) {
+func (r *report) q4(eps []episode, cfg AnalyzeConfig, visPct float64) {
 	r.head("Q4 MFE / MAE 分佈 — 決定停利、停損、時間停損")
 	if len(eps) == 0 {
 		return
@@ -488,14 +594,14 @@ func (r *report) q4(eps []episode, cfg AnalyzeConfig) {
 	r.line("    當下你認不出它。所以 MFE 偏大、MAE 偏小、到頂秒數會被釘在 300 秒附近,")
 	r.line("    這是錨定方式的產物,不是行情的性質。真正能拿到的看下一段。")
 
-	r.tradable(eps)
+	r.tradable(eps, visPct)
 }
 
 // tradable re-states the same episodes from the first bar a live system could
 // have reacted to. The gap between this section and the one above IS the cost
 // of detection — and it is usually where a promising-looking edge disappears.
-func (r *report) tradable(eps []episode) {
-	r.head(fmt.Sprintf("Q4b 可交易性 — 從價格已經動了 +%.0f%% 之後才進場", visiblePct*100))
+func (r *report) tradable(eps []episode, visPct float64) {
+	r.head(fmt.Sprintf("Q4b 可交易性 — 從價格已經動了 +%.1f%% 之後才進場", visPct*100))
 	var vis []episode
 	for _, e := range eps {
 		if e.hasVis {

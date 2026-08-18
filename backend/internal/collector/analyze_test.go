@@ -169,7 +169,7 @@ func TestReportRendersWithNoEvents(t *testing.T) {
 	rep.health(series)
 	eps, bf := splitEpisodes(series, cfg)
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg)
+	rep.q4(eps, cfg, autoVisible(cfg.EventPct))
 	rep.q3(eps, bf)
 	rep.footer(eps, cfg)
 
@@ -196,7 +196,7 @@ func TestReportRendersWithEvents(t *testing.T) {
 		t.Fatalf("episodes = %d, want 3", len(eps))
 	}
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg)
+	rep.q4(eps, cfg, autoVisible(cfg.EventPct))
 	rep.q3(eps, bf)
 
 	out := buf.String()
@@ -225,7 +225,7 @@ func TestAddTradableView(t *testing.T) {
 	set(107, 106.0, 103.0, 104.0)
 
 	var e episode
-	addTradableView(&e, bs, 100)
+	addTradableView(&e, bs, 100, 0.02)
 	if !e.hasVis {
 		t.Fatal("move should have been visible")
 	}
@@ -255,7 +255,7 @@ func TestAddTradableViewWickOnly(t *testing.T) {
 	bs := mkSeries(base, 200, 100)
 	bs[103].high = 130 // a huge wick, but every close stays at 100
 	var e episode
-	addTradableView(&e, bs, 100)
+	addTradableView(&e, bs, 100, 0.02)
 	if e.hasVis {
 		t.Errorf("wick-only move must not be reported as tradable, got %+v", e)
 	}
@@ -302,7 +302,7 @@ func TestAddTradableViewCapturesPath(t *testing.T) {
 	bs[103].high, bs[103].low, bs[103].close_ = 110.0, 102.0, 109.0
 
 	var e episode
-	addTradableView(&e, bs, 100)
+	addTradableView(&e, bs, 100, 0.02)
 	if !e.hasVis {
 		t.Fatal("expected a visible move")
 	}
@@ -315,5 +315,62 @@ func TestAddTradableViewCapturesPath(t *testing.T) {
 	// +5% from 103 is 108.15, reached by bar 103's high of 110
 	if got := e.simulate(0.05, 0.02, 0); got != 0.05 {
 		t.Errorf("simulate = %v, want the +5%% take-profit", got)
+	}
+}
+
+// Detection eats the first slice of every move, so the threshold that decides
+// "visible" has to scale with the move being chased. Pinned at a constant 2% it
+// would consume two thirds of a 3% target and make small moves look
+// unprofitable for reasons of measurement rather than market.
+func TestAutoVisibleScalesWithTarget(t *testing.T) {
+	cases := map[float64]float64{
+		0.03:  0.01, // a third of the move
+		0.05:  0.0166666667,
+		0.10:  0.02,  // capped
+		0.30:  0.02,  // still capped
+		0.006: 0.005, // floored
+	}
+	for target, want := range cases {
+		if got := autoVisible(target); math.Abs(got-want) > 1e-6 {
+			t.Errorf("autoVisible(%.3f) = %.6f, want %.6f", target, got, want)
+		}
+	}
+	// monotonic up to the cap, never above it, never below the floor
+	prev := 0.0
+	for _, tgt := range []float64{0.005, 0.01, 0.02, 0.03, 0.06, 0.10, 0.50} {
+		v := autoVisible(tgt)
+		if v > 0.02+1e-9 || v < 0.005-1e-9 {
+			t.Errorf("autoVisible(%.3f) = %v, outside [0.005, 0.02]", tgt, v)
+		}
+		if v < prev-1e-9 {
+			t.Errorf("autoVisible not monotonic at %.3f: %v < %v", tgt, v, prev)
+		}
+		prev = v
+	}
+}
+
+// A lower event threshold must find at least as many episodes as a higher one:
+// every +10% move is also a +3% move.
+func TestSweepThresholdsAreNested(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 400, 100)
+	bs[100].mfe5 = 0.12 // clears every threshold
+	bs[200].mfe5 = 0.04 // clears 3% only
+	series := map[string][]abar{"AAAUSDT": bs}
+
+	cfg := DefaultAnalyzeConfig()
+	cfg.EventPct = 0.10
+	hi, _ := splitEpisodes(series, cfg)
+	cfg.EventPct = 0.03
+	lo, _ := splitEpisodes(series, cfg)
+
+	if len(hi) != 1 {
+		t.Errorf("at +10%% got %d episodes, want 1", len(hi))
+	}
+	if len(lo) != 2 {
+		t.Errorf("at +3%% got %d episodes, want 2", len(lo))
+	}
+	if len(lo) < len(hi) {
+		t.Error("lowering the threshold must never reduce the episode count")
 	}
 }
