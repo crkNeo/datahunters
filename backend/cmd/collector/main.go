@@ -54,6 +54,8 @@ func main() {
 	noLabel := flag.Bool("no-labeler", false, "collect only; skip forward-return backfill")
 	labelOnly := flag.Bool("labeler-only", false, "backfill labels only; do not collect")
 	noUnlocks := flag.Bool("no-unlocks", false, "skip the daily token-unlock schedule capture")
+	analyze := flag.Bool("analyze", false, "print the research report and exit (does not collect)")
+	analyzeDays := flag.Int("analyze-days", 0, "limit -analyze to the last N days (0 = all history)")
 	flag.Parse()
 
 	cfg.SettleDelay = *settle
@@ -75,6 +77,20 @@ func main() {
 	db.SetConnMaxLifetime(3 * time.Minute)
 	if err := db.Ping(); err != nil {
 		log.Fatalf("ping mysql: %v", err)
+	}
+
+	// -analyze is a read-only report over what has already been collected. It
+	// runs before anything else is started so it never competes with a live
+	// collector for the connection pool, and it exits rather than falling
+	// through into the loops.
+	if *analyze {
+		acfg := collector.DefaultAnalyzeConfig()
+		acfg.Days = *analyzeDays
+		acfg.EventPct = *evPct
+		if err := collector.RunAnalysis(db, acfg, os.Stdout); err != nil {
+			log.Fatalf("analyze: %v", err)
+		}
+		return
 	}
 
 	ex := exchange.NewClient()
