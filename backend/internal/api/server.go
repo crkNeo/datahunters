@@ -93,6 +93,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
+	mux.HandleFunc("/api/admin/patterns", s.gate(A, s.handlePatterns)) // 爆發型態 A/B 偵測紀錄
 	mux.HandleFunc("/api/admin/users", s.gate(A, s.handleAdminUsers))
 
 	// uploaded images (asset proofs, article images, logo, QR), read-only.
@@ -143,8 +144,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
-	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv)) // 冥王星 (動態ATR均線收斂 4H)
-	mux.HandleFunc("/api/smc", s.gateTab("smc", s.handleSMC))    // SMC 教練 (15M 多單狀態機)
+	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))    // 冥王星 (動態ATR均線收斂 4H)
+	mux.HandleFunc("/api/smc", s.gateTab("smc", s.handleSMC))       // SMC 教練 (15M 多單狀態機)
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF)) // 多週期支壓 (1H+4H 提示)
 	mux.HandleFunc("/api/smcv2", s.gateTab("smcv2", s.handleSMCV2)) // SMC_V2 共振回撤 (1h 多空,市價觸發)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
@@ -182,8 +183,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/referral-approve", s.gate(A, s.handleAdminRefApprove)) // 審核獎勵:通過
 	mux.HandleFunc("/api/admin/referral-of", s.gate(A, s.handleAdminReferralOf))      // 某用戶的推廣名單(全名)
 	mux.HandleFunc("/api/admin/merch-stock", s.gate(A, s.handleAdminMerchStock))      // 周邊庫存管理
-	mux.HandleFunc("/api/referral/rules", s.gate(M, s.handleRefRules))               // 推廣規則(會員,未發佈回空)
-	mux.HandleFunc("/api/admin/referral-rules", s.gate(A, s.handleAdminRefRules))    // 推廣規則:編輯/發佈
+	mux.HandleFunc("/api/referral/rules", s.gate(M, s.handleRefRules))                // 推廣規則(會員,未發佈回空)
+	mux.HandleFunc("/api/admin/referral-rules", s.gate(A, s.handleAdminRefRules))     // 推廣規則:編輯/發佈
 
 	// web push (PWA notifications)
 	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
@@ -551,7 +552,6 @@ func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
 }
 
-
 // handleBollFade serves the admin-only 布林重回 1h strategy tracker.
 func (s *Server) handleBollFade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.BollFadeState())
@@ -859,6 +859,13 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLiquidations serves the recent liquidation feed.
+// handlePatterns serves the 爆發型態 board. Admin-only: these are unvalidated
+// hypotheses with a handful of observations behind them, and a half-tested
+// signal shown to members would be read as a recommendation.
+func (s *Server) handlePatterns(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Patterns(200))
+}
+
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
 }

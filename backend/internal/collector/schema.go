@@ -274,6 +274,9 @@ func ensureSchema(db *sql.DB, retentionDays int) error {
 	if _, err := db.Exec(unlockSnapshotDDL); err != nil {
 		return fmt.Errorf("create unlock_snapshot_1d: %w", err)
 	}
+	if err := ensurePatternSchema(db); err != nil {
+		return err
+	}
 	return ensurePartitions(db, retentionDays)
 }
 

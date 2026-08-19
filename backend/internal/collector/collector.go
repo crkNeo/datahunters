@@ -275,6 +275,14 @@ func (c *Collector) tick(now time.Time) {
 	}
 
 	took := time.Since(started)
+	// Pattern detection runs here rather than on its own timer so it can only
+	// ever read a minute whose snapshot is already committed. It is a DB read
+	// plus in-memory evaluation — milliseconds against a tick measured in tens
+	// of seconds.
+	if len(snaps) > 0 {
+		c.DetectPatterns(barTs)
+	}
+
 	log.Printf("collector: bar=%s snaps=%d depth=%d spot=%d errs(bar=%d oi=%d) took=%s",
 		time.UnixMilli(barTs).UTC().Format("15:04"), len(snaps), len(depths), len(spots),
 		nErrBar, nErrOI, took.Round(time.Millisecond))

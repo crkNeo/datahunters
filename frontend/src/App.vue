@@ -5,6 +5,7 @@ import TabPermissions from './components/admin/TabPermissions.vue'
 import StrategySettings from './components/admin/StrategySettings.vue'
 import LoginNotice from './components/admin/LoginNotice.vue'
 import PushBroadcast from './components/admin/PushBroadcast.vue'
+import PatternBoard from './components/admin/PatternBoard.vue'
 import SiteSettings from './components/admin/SiteSettings.vue'
 import UserManagement from './components/admin/UserManagement.vue'
 import ReferralRules from './components/admin/ReferralRules.vue'
@@ -603,6 +604,7 @@ const ADMIN_TABS = [
   ['notice', '登入公告'],
   ['refrules', '推廣規則'],
   ['push', '即時推播'],
+  ['patterns', '爆發型態'],
 ]
 
 // public: 策略類型標籤 + 風控警語旗標(給各策略頁用)
@@ -2190,6 +2192,7 @@ watch([role, tabPerms, authReady], () => {
         @msg="(m) => { adminMsg = m; loadRefRules() }" @toast="(t, k) => showToast(t, k)" />
       <PushBroadcast v-else-if="adminTab === 'push'" :articles="articles"
         @toast="(t, k) => showToast(t, k)" />
+      <PatternBoard v-else-if="adminTab === 'patterns'" @msg="(m) => (adminMsg = m)" />
 
     </section>
 
