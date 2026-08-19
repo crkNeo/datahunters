@@ -37,6 +37,11 @@ type AnalyzeConfig struct {
 	// per-event statistic toward the middle of moves rather than their start.
 	EpisodeGap time.Duration
 	TopCoins   int
+	// Leverage converts price moves into margin terms and, more importantly,
+	// tells the report where the exchange will close the position for you.
+	// 0 or 1 = report in price terms only.
+	Leverage float64
+
 	// Side selects which tail to study: "up" for pumps, "down" for dumps.
 	//
 	// Both are the same physics — a forced-liquidation cascade into a thin book
@@ -79,7 +84,7 @@ func autoVisible(eventPct float64) float64 {
 }
 
 func DefaultAnalyzeConfig() AnalyzeConfig {
-	return AnalyzeConfig{Days: 0, EventPct: 0.10, EpisodeGap: 30 * time.Minute, TopCoins: 12, Side: "up"}
+	return AnalyzeConfig{Days: 0, EventPct: 0.10, EpisodeGap: 30 * time.Minute, TopCoins: 12, Side: "up", Leverage: 1}
 }
 
 // abar is one minute of one symbol, with everything the features need.
@@ -125,7 +130,7 @@ func RunAnalysis(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 
 	eps, base, bySym := splitEpisodesFull(series, cfg)
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg, visPct)
+	rep.q4(eps, cfg, visPct, cfg.Leverage)
 	rep.q3(eps, base)
 	rep.q3b(eps, bySym)
 	rep.footer(eps, cfg)
@@ -730,7 +735,7 @@ func (r *report) q1(eps []episode, series map[string][]abar, cfg AnalyzeConfig) 
 	}
 }
 
-func (r *report) q4(eps []episode, cfg AnalyzeConfig, visPct float64) {
+func (r *report) q4(eps []episode, cfg AnalyzeConfig, visPct, lev float64) {
 	r.head("Q4 MFE / MAE 分佈 — 決定停利、停損、時間停損")
 	if len(eps) == 0 {
 		return
@@ -772,13 +777,13 @@ func (r *report) q4(eps []episode, cfg AnalyzeConfig, visPct float64) {
 	r.line("    當下你認不出它。所以 MFE 偏大、MAE 偏小、到頂秒數會被釘在 300 秒附近,")
 	r.line("    這是錨定方式的產物,不是行情的性質。真正能拿到的看下一段。")
 
-	r.tradable(eps, visPct)
+	r.tradable(eps, visPct, lev)
 }
 
 // tradable re-states the same episodes from the first bar a live system could
 // have reacted to. The gap between this section and the one above IS the cost
 // of detection — and it is usually where a promising-looking edge disappears.
-func (r *report) tradable(eps []episode, visPct float64) {
+func (r *report) tradable(eps []episode, visPct, lev float64) {
 	r.head(fmt.Sprintf("Q4b 可交易性 — 從價格已經動了 +%.1f%% 之後才進場", visPct*100))
 	var vis []episode
 	for _, e := range eps {
@@ -838,6 +843,8 @@ func (r *report) tradable(eps []episode, visPct float64) {
 	r.line("")
 	r.line("  ⚠ 這張表同樣只跑在「事後確認有行情」的那些 K 棒上,所以命中率與總報酬都偏樂觀。")
 	r.line("    實盤數字看最上面掃描表的「全觸發淨報酬」那一欄。")
+	r.leverage(vis, mae, cost, lev)
+
 	r.line("")
 	medToPeak := pct(toPeak, 0.5)
 	if medToPeak <= 90 {
@@ -887,6 +894,42 @@ func (r *report) q3(eps []episode, base map[string][]float64) {
 	r.line("")
 	r.line("  讀法:兩欄差距不明顯的指標就是沒有資訊量,別再往上加權重。")
 	r.line("  這些是「事件當根」的值 — 真正有領先性的,應該在事件發生前就已經偏離。")
+}
+
+// leverage restates the outcome in margin terms and, above all, checks how
+// often the position would simply have been closed by the exchange.
+//
+// At high leverage the stop is no longer a choice. Liquidation sits roughly
+// 1/leverage away, maintenance margin brings it slightly nearer still, and any
+// adverse excursion past it ends the trade at a total loss of margin no matter
+// what stop was intended. A plan whose typical drawdown approaches that
+// distance is not a plan with a wide stop — it is a plan with no stop at all.
+func (r *report) leverage(vis []episode, maeSorted []float64, cost, lev float64) {
+	if lev <= 1 || len(vis) == 0 {
+		return
+	}
+	liq := 1 / lev // optimistic: maintenance margin makes it hit marginally sooner
+	var blown int
+	for _, e := range vis {
+		if e.visMAE <= -liq {
+			blown++
+		}
+	}
+	r.line("")
+	r.line("  ── %.0fx 槓桿的現實 ──", lev)
+	r.line("  強平距離        約 -%.2f%%(維持保證金會讓它再近一點)", liq*100)
+	r.line("  進場後觸及該距離 %.1f%%  (%d/%d) — 這些單直接爆倉,保證金歸零",
+		float64(blown)/float64(len(vis))*100, blown, len(vis))
+	if len(maeSorted) > 0 {
+		r.line("  進場後 MAE 的 p10 是 %.1f%%,p25 是 %.1f%% — 停損必須設在強平之內才有意義",
+			pct(maeSorted, 0.10)*100, pct(maeSorted, 0.25)*100)
+	}
+	r.line("  單趟成本 %.2f%% 的價格波動,在 %.0fx 下等於保證金的 %.1f%%",
+		cost*100, lev, cost*lev*100)
+	if blown > 0 {
+		r.line("  ⚠ 槓桿放大的是既有的邊,不是修正它。若「全觸發淨報酬」為負,")
+		r.line("    %.0fx 只會讓同一個負期望值以 %.0f 倍的速度實現。", lev, lev)
+	}
 }
 
 // q3b answers "does anything move BEFORE the move", measured against each

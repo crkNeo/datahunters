@@ -170,7 +170,7 @@ func TestReportRendersWithNoEvents(t *testing.T) {
 	rep.health(series)
 	eps, bf := splitEpisodes(series, cfg)
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg, autoVisible(cfg.EventPct))
+	rep.q4(eps, cfg, autoVisible(cfg.EventPct), 1)
 	rep.q3(eps, bf)
 	rep.footer(eps, cfg)
 
@@ -197,7 +197,7 @@ func TestReportRendersWithEvents(t *testing.T) {
 		t.Fatalf("episodes = %d, want 3", len(eps))
 	}
 	rep.q1(eps, series, cfg)
-	rep.q4(eps, cfg, autoVisible(cfg.EventPct))
+	rep.q4(eps, cfg, autoVisible(cfg.EventPct), 1)
 	rep.q3(eps, bf)
 
 	out := buf.String()
@@ -579,5 +579,52 @@ func TestPerSymbolBaselineRemovesCrossSectionalOffset(t *testing.T) {
 	}
 	if dev := 0.80 - pct(own, 0.5); math.Abs(dev) > 1e-6 {
 		t.Errorf("deviation from its own normal = %.4f, want ~0 — the coin is behaving normally", dev)
+	}
+}
+
+// At high leverage the stop is not a choice: the exchange closes the position
+// roughly 1/leverage away. Any episode whose adverse excursion reaches that
+// distance is a total loss of margin regardless of the intended stop, so the
+// count has to be reported rather than left implicit in an MAE percentile.
+func TestLeverageBlowupCount(t *testing.T) {
+	vis := []episode{
+		{visMAE: -0.005}, // survives 50x
+		{visMAE: -0.015}, // survives 50x (liq at -2%), dies at 100x
+		{visMAE: -0.025}, // liquidated at 50x
+		{visMAE: -0.090}, // liquidated at any of these
+	}
+	count := func(lev float64) int {
+		liq := 1 / lev
+		n := 0
+		for _, e := range vis {
+			if e.visMAE <= -liq {
+				n++
+			}
+		}
+		return n
+	}
+	if got := count(50); got != 2 {
+		t.Errorf("50x blowups = %d, want 2 (liquidation at -2%%)", got)
+	}
+	if got := count(100); got != 3 {
+		t.Errorf("100x blowups = %d, want 3 (liquidation at -1%%)", got)
+	}
+	if got := count(10); got != 0 {
+		t.Errorf("10x blowups = %d, want 0 (liquidation at -10%%)", got)
+	}
+}
+
+// The leverage block is advisory only and must stay silent when leverage is not
+// in play, so a plain price-terms report is not cluttered with liquidation talk.
+func TestLeverageSectionSilentAtOneX(t *testing.T) {
+	var buf bytes.Buffer
+	r := newReport(&buf)
+	r.leverage([]episode{{visMAE: -0.05}}, []float64{-0.05}, 0.003, 1)
+	if buf.Len() != 0 {
+		t.Errorf("expected no output at 1x, got:\n%s", buf.String())
+	}
+	r.leverage([]episode{{visMAE: -0.05}}, []float64{-0.05}, 0.003, 50)
+	if !strings.Contains(buf.String(), "強平距離") {
+		t.Errorf("expected a liquidation line at 50x, got:\n%s", buf.String())
 	}
 }

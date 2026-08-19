@@ -59,6 +59,7 @@ func main() {
 	detail := flag.Int("event-detail", 0, "-analyze: 改為逐分鐘回放最大的 N 次事件(0 = 印統計報表)")
 	detailBefore := flag.Int("detail-before", 30, "-event-detail: 回放事件前幾分鐘")
 	detailAfter := flag.Int("detail-after", 10, "-event-detail: 回放事件後幾分鐘")
+	lev := flag.Float64("leverage", 1, "-analyze: 以幾倍槓桿換算保證金報酬與強平距離(1 = 只看價格)")
 	side := flag.String("side", "up", "-analyze: which tail to study — up (暴漲) or down (暴跌)")
 	visPct := flag.Float64("visible-pct", 0, "-analyze: move already made before entry is assumed possible (0 = scale from -event-pct)")
 	flag.Parse()
@@ -94,6 +95,7 @@ func main() {
 		acfg.EventPct = *evPct
 		acfg.VisiblePct = *visPct
 		acfg.Side = *side
+		acfg.Leverage = *lev
 		if *detail > 0 {
 			if err := collector.RunEventDetail(db, acfg, os.Stdout, *detail, *detailBefore, *detailAfter); err != nil {
 				log.Fatalf("event-detail: %v", err)
