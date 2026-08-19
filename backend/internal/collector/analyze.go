@@ -123,11 +123,11 @@ func RunAnalysis(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	rep.health(series)
 	rep.sweep(series, cfg)
 
-	eps, base := splitEpisodes(series, cfg)
+	eps, base, bySym := splitEpisodesFull(series, cfg)
 	rep.q1(eps, series, cfg)
 	rep.q4(eps, cfg, visPct)
 	rep.q3(eps, base)
-	rep.q3b(eps, base)
+	rep.q3b(eps, bySym)
 	rep.footer(eps, cfg)
 	return nil
 }
@@ -373,7 +373,21 @@ type pathBar struct {
 // including the run-up or the aftermath in "normal conditions" would blunt
 // exactly the contrast the comparison exists to measure.
 func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, base map[string][]float64) {
+	e, b, _ := splitEpisodesFull(series, cfg)
+	return e, b
+}
+
+// splitEpisodesFull additionally returns each SYMBOL's own baseline.
+//
+// A pooled baseline mixes two completely different questions. Any feature that
+// merely differs between "coins that pop" and "coins that do not" — which for a
+// list containing both BTC and a fresh micro-cap is most of them — shows a gap
+// even with zero timing information. Comparing a coin against ITSELF strips
+// that out, leaving only "did this coin deviate from its own normal, before the
+// move". That is the only version of the question an entry rule can use.
+func splitEpisodesFull(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, base map[string][]float64, bySym map[string]map[string][]float64) {
 	base = map[string][]float64{}
+	bySym = map[string]map[string][]float64{}
 	gapMs := int64(cfg.EpisodeGap / time.Millisecond)
 	visPct := cfg.VisiblePct
 	if visPct <= 0 {
@@ -428,14 +442,18 @@ func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, 
 				continue
 			}
 			if f, ok := featuresAt(bs, i); ok {
+				if bySym[sym] == nil {
+					bySym[sym] = map[string][]float64{}
+				}
 				for k, v := range f {
 					base[k] = append(base[k], v)
+					bySym[sym][k] = append(bySym[sym][k], v)
 				}
 			}
 		}
 	}
 	sort.Slice(eps, func(i, j int) bool { return eps[i].ts < eps[j].ts })
-	return eps, base
+	return eps, base, bySym
 }
 
 // featuresAt computes the strictly backward-looking feature set at bs[i].
@@ -818,6 +836,9 @@ func (r *report) tradable(eps []episode, visPct float64) {
 	}
 
 	r.line("")
+	r.line("  ⚠ 這張表同樣只跑在「事後確認有行情」的那些 K 棒上,所以命中率與總報酬都偏樂觀。")
+	r.line("    實盤數字看最上面掃描表的「全觸發淨報酬」那一欄。")
+	r.line("")
 	medToPeak := pct(toPeak, 0.5)
 	if medToPeak <= 90 {
 		r.line("  ⚠ 從看得見到見頂只有 %.0f 秒(中位)— 人工點擊來不及,這條路必須自動化,",
@@ -868,13 +889,26 @@ func (r *report) q3(eps []episode, base map[string][]float64) {
 	r.line("  這些是「事件當根」的值 — 真正有領先性的,應該在事件發生前就已經偏離。")
 }
 
-// q3b is the answer to "does anything move BEFORE the move".
-func (r *report) q3b(eps []episode, base map[string][]float64) {
-	r.head("Q3b 事件前的軌跡 — 指標是提早偏離,還是跟著價格一起動?")
+// q3b answers "does anything move BEFORE the move", measured against each
+// coin's OWN normal rather than the market's.
+//
+// Reported as a deviation, so a row sitting near zero across every column has
+// no timing information regardless of how different that coin looks from the
+// market on average.
+func (r *report) q3b(eps []episode, bySym map[string]map[string][]float64) {
+	r.head("Q3b 事件前的軌跡 — 相對「同一隻幣自己的常態」偏離多少")
 	if len(eps) == 0 {
 		return
 	}
-	// collect feature names present in the trajectories
+	// each symbol's own median per feature
+	med := map[string]map[string]float64{}
+	for sym, feats := range bySym {
+		med[sym] = map[string]float64{}
+		for k, v := range feats {
+			sort.Float64s(v)
+			med[sym][k] = pct(v, 0.5)
+		}
+	}
 	names := map[string]bool{}
 	for _, e := range eps {
 		for _, f := range e.traj {
@@ -894,7 +928,7 @@ func (r *report) q3b(eps []episode, base map[string][]float64) {
 	}
 
 	hdr := "  %-22s"
-	args := []any{"指標"}
+	args := []any{"指標(與自身常態的差)"}
 	for _, off := range trajOffsets {
 		hdr += " %8s"
 		if off == 0 {
@@ -903,44 +937,43 @@ func (r *report) q3b(eps []episode, base map[string][]float64) {
 			args = append(args, fmt.Sprintf("T-%d", off))
 		}
 	}
-	hdr += " %9s"
-	args = append(args, "平常")
 	r.line(hdr, args...)
-	r.line("  %s", strings.Repeat("-", 22+9*len(trajOffsets)+10))
+	r.line("  %s", strings.Repeat("-", 22+9*len(trajOffsets)))
 
 	for _, k := range keys {
 		row := "  %-22s"
 		vals := []any{k}
 		for _, off := range trajOffsets {
-			var v []float64
+			var d []float64
 			for _, e := range eps {
-				if f, ok := e.traj[off]; ok {
-					if x, ok2 := f[k]; ok2 {
-						v = append(v, x)
-					}
+				f, ok := e.traj[off]
+				if !ok {
+					continue
 				}
+				x, ok2 := f[k]
+				if !ok2 {
+					continue
+				}
+				m, ok3 := med[e.symbol][k]
+				if !ok3 {
+					continue
+				}
+				d = append(d, x-m)
 			}
 			row += " %8s"
-			if len(v) == 0 {
+			if len(d) == 0 {
 				vals = append(vals, "-")
 				continue
 			}
-			sort.Float64s(v)
-			vals = append(vals, fmt.Sprintf("%.2f", pct(v, 0.5)))
-		}
-		row += " %9s"
-		if b := base[k]; len(b) > 0 {
-			sort.Float64s(b)
-			vals = append(vals, fmt.Sprintf("%.2f", pct(b, 0.5)))
-		} else {
-			vals = append(vals, "-")
+			sort.Float64s(d)
+			vals = append(vals, fmt.Sprintf("%+.2f", pct(d, 0.5)))
 		}
 		r.line(row, vals...)
 	}
 	r.line("")
-	r.line("  怎麼讀:從右往左看。某一列如果一路到 T-1 都貼著「平常」那一欄,")
-	r.line("  只有 T-0 才跳開 —— 那它是同步指標,看到時價格已經在動了,無法用來進場。")
-	r.line("  真正有價值的是在 T-10、T-20 就已經明顯偏離「平常」的那幾列。")
+	r.line("  0 代表「跟這隻幣平常沒兩樣」。整列都貼近 0 的指標,對『何時進場』毫無資訊,")
+	r.line("  即使它在上一張表裡跟全市場差很多 —— 那只是說明這隻幣本來就跟大盤不同。")
+	r.line("  要找的是在 T-10、T-20 就明顯不為 0,且往 T-0 持續放大的那幾列。")
 }
 
 func (r *report) footer(eps []episode, cfg AnalyzeConfig) {

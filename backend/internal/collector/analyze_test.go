@@ -3,6 +3,7 @@ package collector
 import (
 	"bytes"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -531,5 +532,52 @@ func TestTrajectoryRejectsRowDistance(t *testing.T) {
 	}
 	if _, ok := tr[1]; !ok {
 		t.Error("T-1 sits inside the contiguous stretch and should still be sampled")
+	}
+}
+
+// A pooled baseline cannot separate "which coin" from "when". If one coin sits
+// permanently above the market on some feature, a market-wide comparison
+// reports a large gap even when that coin is behaving exactly as it always
+// does — and a screener built on it would fire constantly and time nothing.
+func TestPerSymbolBaselineRemovesCrossSectionalOffset(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	// QUIET is a normal coin; ODD trades at a permanently different taker mix
+	// but has an identical event. Only ODD's own baseline can tell them apart.
+	mk := func(takerFrac float64, evt bool) []abar {
+		bs := mkSeries(base, 400, 100)
+		for i := range bs {
+			bs[i].takerBuyQuote = bs[i].volQuote * takerFrac
+		}
+		if evt {
+			bs[200].mfe5 = 0.12
+		}
+		return bs
+	}
+	series := map[string][]abar{
+		"QUIETUSDT": mk(0.50, false),
+		"ODDUSDT":   mk(0.80, true),
+	}
+	cfg := DefaultAnalyzeConfig()
+	eps, pooled, bySym := splitEpisodesFull(series, cfg)
+	if len(eps) != 1 {
+		t.Fatalf("episodes = %d, want 1", len(eps))
+	}
+
+	const key = "主動買佔比"
+	// pooled baseline is dragged toward QUIET, so ODD looks very different…
+	p := append([]float64(nil), pooled[key]...)
+	sort.Float64s(p)
+	if math.Abs(0.80-pct(p, 0.5)) < 0.05 {
+		t.Fatalf("pooled baseline %.3f should sit far from ODD's 0.80", pct(p, 0.5))
+	}
+	// …but against its OWN baseline, ODD's event bar is not unusual at all
+	own := append([]float64(nil), bySym["ODDUSDT"][key]...)
+	sort.Float64s(own)
+	if math.Abs(pct(own, 0.5)-0.80) > 1e-6 {
+		t.Errorf("ODD's own baseline = %.4f, want 0.80", pct(own, 0.5))
+	}
+	if dev := 0.80 - pct(own, 0.5); math.Abs(dev) > 1e-6 {
+		t.Errorf("deviation from its own normal = %.4f, want ~0 — the coin is behaving normally", dev)
 	}
 }
