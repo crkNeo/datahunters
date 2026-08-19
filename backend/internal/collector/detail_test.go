@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -43,5 +44,30 @@ func TestEventTableRendersAndMarksAnchor(t *testing.T) {
 	}
 	if !strings.Contains(minus2, "-") {
 		t.Errorf("unsampled depth should render as '-', got: %s", minus2)
+	}
+}
+
+// A dump's size is its downward excursion. Ranking or labelling it by mfe5 —
+// how far it bounced afterwards — surfaces the wrong events entirely and
+// reports every magnitude wrong, which is worse than showing nothing.
+func TestMagnitudeFollowsSide(t *testing.T) {
+	up := episode{dir: 1, mfe5: 0.12, mae5: -0.01}
+	down := episode{dir: -1, mfe5: 0.01, mae5: -0.09}
+
+	if got := up.magnitude(); math.Abs(got-0.12) > 1e-9 {
+		t.Errorf("up magnitude = %v, want 0.12", got)
+	}
+	if got := down.magnitude(); math.Abs(got-0.09) > 1e-9 {
+		t.Errorf("down magnitude = %v, want 0.09 (the fall, not the 1%% bounce)", got)
+	}
+	// ranking must put the big dump ahead of a small pump
+	small := episode{dir: -1, mfe5: 0.50, mae5: -0.02}
+	if small.magnitude() >= down.magnitude() {
+		t.Errorf("a -2%% dump (%.3f) outranked a -9%% dump (%.3f) — sorted by the bounce",
+			small.magnitude(), down.magnitude())
+	}
+	// an episode with no direction set must still behave as a long
+	if got := (episode{mfe5: 0.07}).magnitude(); math.Abs(got-0.07) > 1e-9 {
+		t.Errorf("default magnitude = %v, want 0.07", got)
 	}
 }

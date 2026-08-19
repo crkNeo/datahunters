@@ -364,6 +364,16 @@ type episode struct {
 	path                         []pathBar
 }
 
+// magnitude is the size of the move in the direction being studied. Reading
+// mfe5 regardless of side would rank dumps by how far they bounced UP, which
+// silently surfaces the wrong events and mislabels every one of their sizes.
+func (e episode) magnitude() float64 {
+	if e.dir < 0 {
+		return -e.mae5
+	}
+	return e.mfe5
+}
+
 // pathBar is one bar of what happened after a (hypothetical) entry. Keeping the
 // path lets the report simulate any take-profit / stop pair without re-reading
 // the database, and — more importantly — forces the verdict to account for the

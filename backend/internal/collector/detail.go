@@ -58,7 +58,7 @@ func RunEventDetail(db *sql.DB, cfg AnalyzeConfig, w io.Writer, topN, before, af
 		return nil
 	}
 	// biggest first — the clearest specimens are the most informative to read
-	sort.Slice(eps, func(i, j int) bool { return eps[i].mfe5 > eps[j].mfe5 })
+	sort.Slice(eps, func(i, j int) bool { return eps[i].magnitude() > eps[j].magnitude() })
 	if topN > 0 && topN < len(eps) {
 		eps = eps[:topN]
 	}
@@ -198,7 +198,7 @@ func (r *report) eventTable(e episode, rows []detailRow, before int) {
 	r.line("")
 	r.rule()
 	r.line("  %s   錨點 %s UTC   事件幅度 %.1f%%   進場後可得 %.1f%%",
-		e.symbol, time.UnixMilli(e.ts).UTC().Format("01-02 15:04"), e.mfe5*100, e.visMFE*100)
+		e.symbol, time.UnixMilli(e.ts).UTC().Format("01-02 15:04"), e.magnitude()*100, e.visMFE*100)
 	r.rule()
 	r.line("  %7s %10s %7s %8s %6s %7s %9s %7s %7s %8s %9s %9s %7s",
 		"T", "價格", "1m%", "量(K)", "volZ", "主買%", "OI(M)", "ΔOI5m", "資費bp", "基差bp", "現貨比", "賣深(K)", "大盤%")
@@ -208,10 +208,14 @@ func (r *report) eventTable(e episode, rows []detailRow, before int) {
 	// construction up to five minutes earlier, so without this the eye lands on
 	// T0 and reads the quiet minutes before the spike as though they were the
 	// spike — which is the opposite of what the table is for.
+	dir := e.dir
+	if dir == 0 {
+		dir = 1
+	}
 	spikeIdx, spikeRet := -1, 0.0
 	for i, d := range rows {
-		if d.ts >= e.ts && d.ret1m > spikeRet {
-			spikeIdx, spikeRet = i, d.ret1m
+		if d.ts >= e.ts && dir*d.ret1m > spikeRet {
+			spikeIdx, spikeRet = i, dir*d.ret1m
 		}
 	}
 
