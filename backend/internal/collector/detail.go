@@ -200,15 +200,29 @@ func (r *report) eventTable(e episode, rows []detailRow, before int) {
 	r.line("  %s   錨點 %s UTC   事件幅度 %.1f%%   進場後可得 %.1f%%",
 		e.symbol, time.UnixMilli(e.ts).UTC().Format("01-02 15:04"), e.mfe5*100, e.visMFE*100)
 	r.rule()
-	r.line("  %6s %10s %7s %8s %6s %7s %9s %7s %7s %8s %9s %9s %7s",
+	r.line("  %7s %10s %7s %8s %6s %7s %9s %7s %7s %8s %9s %9s %7s",
 		"T", "價格", "1m%", "量(K)", "volZ", "主買%", "OI(M)", "ΔOI5m", "資費bp", "基差bp", "現貨比", "賣深(K)", "大盤%")
 	r.line("  %s", "-------------------------------------------------------------------------------------------------------------")
 
-	for _, d := range rows {
+	// Mark the bar where the move actually happened. The anchor is by
+	// construction up to five minutes earlier, so without this the eye lands on
+	// T0 and reads the quiet minutes before the spike as though they were the
+	// spike — which is the opposite of what the table is for.
+	spikeIdx, spikeRet := -1, 0.0
+	for i, d := range rows {
+		if d.ts >= e.ts && d.ret1m > spikeRet {
+			spikeIdx, spikeRet = i, d.ret1m
+		}
+	}
+
+	for i, d := range rows {
 		off := int((d.ts - e.ts) / 60_000)
 		mark := fmt.Sprintf("%+d", off)
 		if off == 0 {
 			mark = "  T0"
+		}
+		if i == spikeIdx {
+			mark = "★" + mark
 		}
 		depthCell := "       -"
 		if d.hasDepth {
@@ -218,7 +232,7 @@ func (r *report) eventTable(e episode, rows []detailRow, before int) {
 		if d.spotRatio > 0 {
 			spotCell = fmt.Sprintf("%9.2f", d.spotRatio)
 		}
-		r.line("  %6s %10.6g %+7.2f %8.0f %+6.1f %7.1f %9.2f %+7.2f %7.2f %+8.1f %s %s %+7.2f",
+		r.line("  %7s %10.6g %+7.2f %8.0f %+6.1f %7.1f %9.2f %+7.2f %7.2f %+8.1f %s %s %+7.2f",
 			mark, d.close_, d.ret1m, d.volQuote/1000, d.volZ, d.takerPct,
 			d.oiUSD/1e6, d.dOI5m, d.fundBps, d.basisBps, spotCell, depthCell, d.mktRet)
 	}
