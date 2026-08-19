@@ -56,6 +56,9 @@ func main() {
 	noUnlocks := flag.Bool("no-unlocks", false, "skip the daily token-unlock schedule capture")
 	analyze := flag.Bool("analyze", false, "print the research report and exit (does not collect)")
 	analyzeDays := flag.Int("analyze-days", 0, "limit -analyze to the last N days (0 = all history)")
+	detail := flag.Int("event-detail", 0, "-analyze: 改為逐分鐘回放最大的 N 次事件(0 = 印統計報表)")
+	detailBefore := flag.Int("detail-before", 30, "-event-detail: 回放事件前幾分鐘")
+	detailAfter := flag.Int("detail-after", 10, "-event-detail: 回放事件後幾分鐘")
 	side := flag.String("side", "up", "-analyze: which tail to study — up (暴漲) or down (暴跌)")
 	visPct := flag.Float64("visible-pct", 0, "-analyze: move already made before entry is assumed possible (0 = scale from -event-pct)")
 	flag.Parse()
@@ -91,6 +94,12 @@ func main() {
 		acfg.EventPct = *evPct
 		acfg.VisiblePct = *visPct
 		acfg.Side = *side
+		if *detail > 0 {
+			if err := collector.RunEventDetail(db, acfg, os.Stdout, *detail, *detailBefore, *detailAfter); err != nil {
+				log.Fatalf("event-detail: %v", err)
+			}
+			return
+		}
 		if err := collector.RunAnalysis(db, acfg, os.Stdout); err != nil {
 			log.Fatalf("analyze: %v", err)
 		}
