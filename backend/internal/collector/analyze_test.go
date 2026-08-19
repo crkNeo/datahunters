@@ -374,3 +374,80 @@ func TestSweepThresholdsAreNested(t *testing.T) {
 		t.Error("lowering the threshold must never reduce the episode count")
 	}
 }
+
+// The whole point of simulateTriggers is that it does NOT select on the
+// outcome: a rule fired on a series where nothing ever happens must show up as
+// a loss, not be quietly excluded the way the episode population is.
+func TestSimulateTriggersCountsLosersToo(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	// a 3% pop over five minutes that immediately gives everything back —
+	// exactly the false positive the episode view never sees
+	for i, px := range []float64{100.6, 101.2, 101.8, 102.4, 103.0} {
+		j := 100 + i
+		bs[j].high, bs[j].low, bs[j].close_ = px, px-0.2, px
+	}
+	for j := 105; j < 115; j++ {
+		bs[j].high, bs[j].low, bs[j].close_ = 100.5, 96.0, 96.5 // round trip down
+	}
+	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
+		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+
+	if st.n == 0 {
+		t.Fatal("trigger never fired on a clear +3% five-minute move")
+	}
+	if st.wins != 0 {
+		t.Errorf("wins = %d, want 0 — this move only ever loses after entry", st.wins)
+	}
+	if st.total >= 0 {
+		t.Errorf("total = %v, want negative", st.total)
+	}
+	if st.hits != 0 {
+		t.Errorf("hits = %d, want 0 — no episodes were supplied", st.hits)
+	}
+}
+
+// A flat market must produce no triggers at all, so the denominator cannot be
+// silently inflated by bars that never crossed the threshold.
+func TestSimulateTriggersQuietMarket(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
+		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+	if st.n != 0 {
+		t.Errorf("triggers = %d on a flat series, want 0", st.n)
+	}
+}
+
+// Precision is the fraction of triggers that landed inside a real episode.
+// Getting it wrong in either direction misstates how many false signals must be
+// paid for, so pin both the hit and the miss.
+func TestSimulateTriggersPrecision(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 400, 100)
+	rise := func(at int) {
+		for i, px := range []float64{100.6, 101.2, 101.8, 102.4, 103.0} {
+			j := at + i
+			bs[j].high, bs[j].low, bs[j].close_ = px, px-0.2, px
+		}
+		for j := at + 5; j < at+20 && j < len(bs); j++ {
+			bs[j].high, bs[j].low, bs[j].close_ = 103, 102.5, 102.8
+		}
+	}
+	rise(100)
+	rise(200)
+	// Only the first rise sits inside a declared episode window. The anchor is
+	// the START of the move (bar 100), matching how splitEpisodes anchors — the
+	// trigger then fires a few bars later, once the move is big enough to see,
+	// and lands inside the anchor's window.
+	epsBySym := map[string][]int64{"AAAUSDT": {bs[100].ts}}
+
+	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
+		epsBySym, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+	if st.n != 2 {
+		t.Fatalf("triggers = %d, want 2", st.n)
+	}
+	if st.hits != 1 {
+		t.Errorf("hits = %d, want 1 (only the first trigger is inside an episode)", st.hits)
+	}
+}

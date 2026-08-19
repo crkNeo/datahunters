@@ -113,6 +113,67 @@ func RunAnalysis(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	return nil
 }
 
+// trigStats is the outcome of trading EVERY trigger, not only the ones that
+// turned into events.
+type trigStats struct {
+	n, wins, hits int
+	total         float64
+}
+
+// simulateTriggers is the honest counterpart to the episode simulation.
+//
+// The episode-based numbers are selected on the outcome: every bar in that
+// population is there BECAUSE a large move followed it. Trading only those is
+// not a strategy, it is hindsight, and it will report a high win rate no matter
+// what rule is applied.
+//
+// This walks the same rule over every bar where the trigger would actually have
+// fired — a 5-minute return crossing visPct — whether or not anything came of
+// it. The trades that fire and go nowhere are exactly the ones missing above,
+// and they are where live money is lost.
+func simulateTriggers(series map[string][]abar, epsBySym map[string][]int64,
+	visPct, tp, sl, cost float64, cooldownMin int, gapMs int64) trigStats {
+
+	var st trigStats
+	for sym, bs := range series {
+		lastTrig := -1 << 30
+		for j := 5; j < len(bs); j++ {
+			if j-lastTrig < cooldownMin {
+				continue
+			}
+			// the lookback must really span five minutes, not five rows
+			if bs[j].ts-bs[j-5].ts != 5*60_000 || bs[j-5].close_ <= 0 || bs[j].close_ <= 0 {
+				continue
+			}
+			if bs[j].close_/bs[j-5].close_-1 < visPct {
+				continue
+			}
+			lastTrig = j
+
+			e := episode{entry: bs[j].close_}
+			for k := j + 1; k < len(bs) && bs[k].ts <= bs[j].ts+5*60_000; k++ {
+				e.path = append(e.path, pathBar{bs[k].high, bs[k].low, bs[k].close_})
+			}
+			if len(e.path) == 0 {
+				continue
+			}
+			ret := e.simulate(tp, sl, cost)
+			st.n++
+			st.total += ret
+			if ret > 0 {
+				st.wins++
+			}
+			for _, ats := range epsBySym[sym] {
+				if bs[j].ts >= ats && bs[j].ts <= ats+gapMs {
+					st.hits++
+					break
+				}
+			}
+		}
+	}
+	return st
+}
+
 // sweepTargets are the move sizes worth comparing side by side. A smaller
 // target fires far more often but leaves less room once detection has taken its
 // cut, and the two effects pull in opposite directions — which is precisely why
@@ -130,8 +191,19 @@ func (r *report) sweep(series map[string][]abar, cfg AnalyzeConfig) {
 	r.line("  偵測門檻隨事件門檻自動縮放(取 1/3,上限 2%%),否則小行情會被偵測本身吃光。")
 	r.line("  模擬規則固定為 TP = 幅度一半、SL = 幅度四分之一,不逐列最佳化。")
 	r.line("")
-	r.line("  %-8s %8s %6s %9s %11s %9s %10s", "門檻", "事件/天", "標的", "偵測延遲", "進場後MFE", "進場→頂", "平均淨報酬")
-	r.line("  %s", strings.Repeat("-", 70))
+	r.line("  %-7s %7s %8s %7s %10s %12s %12s", "門檻", "事件/天", "觸發/天", "精準度", "進場後MFE", "事件內淨報酬", "全觸發淨報酬")
+	r.line("  %s", strings.Repeat("-", 76))
+
+	days := 1.0
+	for _, bs := range series {
+		if len(bs) > 1 {
+			d := float64(bs[len(bs)-1].ts-bs[0].ts) / float64(24*time.Hour/time.Millisecond)
+			if d > days {
+				days = d
+			}
+		}
+	}
+	gapMs := int64(cfg.EpisodeGap / time.Millisecond)
 
 	for _, thr := range sweepTargets {
 		c := cfg
@@ -140,54 +212,55 @@ func (r *report) sweep(series map[string][]abar, cfg AnalyzeConfig) {
 		eps, _ := splitEpisodes(series, c)
 
 		var vis []episode
+		epsBySym := map[string][]int64{}
 		for _, e := range eps {
+			epsBySym[e.symbol] = append(epsBySym[e.symbol], e.ts)
 			if e.hasVis {
 				vis = append(vis, e)
 			}
 		}
-		if len(eps) == 0 {
-			r.line("  +%-6.0f%% %8s %6s %9s %11s %9s %10s", thr*100, "0", "-", "-", "-", "-", "-")
-			continue
-		}
-		span := float64(eps[len(eps)-1].ts-eps[0].ts) / float64(24*time.Hour/time.Millisecond)
-		if span < 0.01 {
-			span = 0.01
-		}
-		coins := map[string]bool{}
-		for _, e := range eps {
-			coins[e.symbol] = true
-		}
-		perDay := float64(len(eps)) / span
+		tp, sl := thr/2, thr/4
+		st := simulateTriggers(series, epsBySym, c.VisiblePct, tp, sl, 0.003,
+			int(cfg.EpisodeGap/time.Minute), gapMs)
 
-		if len(vis) == 0 {
-			r.line("  +%-6.0f%% %8.1f %6d %9s %11s %9s %10s", thr*100, perDay, len(coins), "-", "-", "-", "-")
+		if len(eps) == 0 && st.n == 0 {
+			r.line("  +%-6.0f%% %7s %8s %7s %10s %12s %12s", thr*100, "0", "0", "-", "-", "-", "-")
 			continue
 		}
-		colOf := func(f func(episode) float64) []float64 {
-			var v []float64
+		perDay := float64(len(eps)) / days
+		trigPerDay := float64(st.n) / days
+		prec := 0.0
+		if st.n > 0 {
+			prec = float64(st.hits) / float64(st.n) * 100
+		}
+		medMFE, evAvg := 0.0, 0.0
+		if len(vis) > 0 {
+			var mf []float64
+			var tot float64
 			for _, e := range vis {
-				v = append(v, f(e))
+				mf = append(mf, e.visMFE)
+				tot += e.simulate(tp, sl, 0.003)
 			}
-			sort.Float64s(v)
-			return v
+			sort.Float64s(mf)
+			medMFE = pct(mf, 0.5) * 100
+			evAvg = tot / float64(len(vis)) * 100
 		}
-		medDelay := pct(colOf(func(e episode) float64 { return e.visSecs }), 0.5)
-		medMFE := pct(colOf(func(e episode) float64 { return e.visMFE }), 0.5)
-		medPeak := pct(colOf(func(e episode) float64 { return e.visToPeakSec }), 0.5)
-
-		var total float64
-		for _, e := range vis {
-			total += e.simulate(thr/2, thr/4, 0.003)
+		trigAvg := 0.0
+		if st.n > 0 {
+			trigAvg = st.total / float64(st.n) * 100
 		}
-		avg := total / float64(len(vis)) * 100
-
 		mark := ""
-		if avg > 0 {
-			mark = "  ←正"
+		if trigAvg > 0 {
+			mark = " ←正"
 		}
-		r.line("  +%-6.0f%% %8.1f %6d %8.0fs %10.1f%% %8.0fs %9.2f%%%s",
-			thr*100, perDay, len(coins), medDelay, medMFE*100, medPeak, avg, mark)
+		r.line("  +%-6.0f%% %7.1f %8.1f %6.1f%% %9.1f%% %11.2f%% %11.2f%%%s",
+			thr*100, perDay, trigPerDay, prec, medMFE, evAvg, trigAvg, mark)
 	}
+	r.line("")
+	r.line("  ⚠ 「事件內淨報酬」是事後挑出真的有噴的那些 K 棒來模擬 —— 它一定漂亮,")
+	r.line("    因為那個母體本身就是用結果篩出來的。實盤看的是「全觸發淨報酬」:")
+	r.line("    訊號亮了就進場,包含所有亮了卻沒行情的單。兩欄的落差就是這個偏誤的大小。")
+	r.line("  「精準度」= 觸發之中真的落在事件裡的比例。它的倒數就是你要吃多少次假訊號。")
 	r.line("")
 	r.line("  「進場後MFE」才是你真正能搶的那一段 — 門檻本身的數字已經被偵測延遲吃掉一部分。")
 	r.line("  想實盤拿到 3%%,看的是這一欄有沒有明顯高於 3%% + 成本,而不是看門檻寫 3%%。")
