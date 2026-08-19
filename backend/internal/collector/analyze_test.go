@@ -225,7 +225,7 @@ func TestAddTradableView(t *testing.T) {
 	set(107, 106.0, 103.0, 104.0)
 
 	var e episode
-	addTradableView(&e, bs, 100, 0.02)
+	addTradableView(&e, bs, 100, 0.02, 1)
 	if !e.hasVis {
 		t.Fatal("move should have been visible")
 	}
@@ -255,7 +255,7 @@ func TestAddTradableViewWickOnly(t *testing.T) {
 	bs := mkSeries(base, 200, 100)
 	bs[103].high = 130 // a huge wick, but every close stays at 100
 	var e episode
-	addTradableView(&e, bs, 100, 0.02)
+	addTradableView(&e, bs, 100, 0.02, 1)
 	if e.hasVis {
 		t.Errorf("wick-only move must not be reported as tradable, got %+v", e)
 	}
@@ -263,7 +263,7 @@ func TestAddTradableViewWickOnly(t *testing.T) {
 
 func TestSimulate(t *testing.T) {
 	const cost = 0.003
-	e := func(path ...pathBar) episode { return episode{entry: 100, path: path} }
+	e := func(path ...pathBar) episode { return episode{entry: 100, dir: 1, path: path} }
 
 	near := func(name string, got, want float64) {
 		t.Helper()
@@ -302,7 +302,7 @@ func TestAddTradableViewCapturesPath(t *testing.T) {
 	bs[103].high, bs[103].low, bs[103].close_ = 110.0, 102.0, 109.0
 
 	var e episode
-	addTradableView(&e, bs, 100, 0.02)
+	addTradableView(&e, bs, 100, 0.02, 1)
 	if !e.hasVis {
 		t.Fatal("expected a visible move")
 	}
@@ -391,7 +391,7 @@ func TestSimulateTriggersCountsLosersToo(t *testing.T) {
 		bs[j].high, bs[j].low, bs[j].close_ = 100.5, 96.0, 96.5 // round trip down
 	}
 	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
-		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000, 1)
 
 	if st.n == 0 {
 		t.Fatal("trigger never fired on a clear +3% five-minute move")
@@ -413,7 +413,7 @@ func TestSimulateTriggersQuietMarket(t *testing.T) {
 	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
 	bs := mkSeries(base, 200, 100)
 	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
-		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+		map[string][]int64{}, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000, 1)
 	if st.n != 0 {
 		t.Errorf("triggers = %d on a flat series, want 0", st.n)
 	}
@@ -443,11 +443,93 @@ func TestSimulateTriggersPrecision(t *testing.T) {
 	epsBySym := map[string][]int64{"AAAUSDT": {bs[100].ts}}
 
 	st := simulateTriggers(map[string][]abar{"AAAUSDT": bs},
-		epsBySym, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000)
+		epsBySym, 0.02, 0.05, 0.02, 0.003, 30, 30*60_000, 1)
 	if st.n != 2 {
 		t.Fatalf("triggers = %d, want 2", st.n)
 	}
 	if st.hits != 1 {
 		t.Errorf("hits = %d, want 1 (only the first trigger is inside an episode)", st.hits)
+	}
+}
+
+// The down tail must be measured symmetrically. If a dump were scored with the
+// long-side formulas, MFE would come out negative and every dump would look
+// like a losing trade — the fastest way to conclude the short side has no edge
+// when the analysis simply had the sign backwards.
+func TestDownSideIsMirrorOfUp(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	// price slides: visible at bar 102 (-3%), bottoms at bar 103
+	bs[101].high, bs[101].low, bs[101].close_ = 100.0, 99.4, 99.5
+	bs[102].high, bs[102].low, bs[102].close_ = 99.6, 96.8, 97.0
+	bs[103].high, bs[103].low, bs[103].close_ = 98.0, 90.0, 91.0
+	bs[104].high, bs[104].low, bs[104].close_ = 94.0, 91.0, 93.0
+	// bars past the move must stay down: mkSeries leaves them at 100, which
+	// would otherwise be the short's true worst case rather than bar 103's high
+	for j := 105; j < 110; j++ {
+		bs[j].high, bs[j].low, bs[j].close_ = 93.0, 91.0, 92.0
+	}
+
+	var e episode
+	addTradableView(&e, bs, 100, 0.02, -1)
+	if !e.hasVis {
+		t.Fatal("the down move should have been visible")
+	}
+	if e.entry != 97.0 {
+		t.Errorf("entry = %v, want the visible bar's close 97.0", e.entry)
+	}
+	// a short entered at 97 profits down to the low of 90
+	if want := 1 - 90.0/97.0; math.Abs(e.visMFE-want) > 1e-9 {
+		t.Errorf("visMFE = %v, want %v (profit measured downwards)", e.visMFE, want)
+	}
+	// and is hurt by the high of 98
+	if want := 1 - 98.0/97.0; math.Abs(e.visMAE-want) > 1e-9 {
+		t.Errorf("visMAE = %v, want %v", e.visMAE, want)
+	}
+	if e.visMFE <= 0 {
+		t.Error("a short on a dump must show POSITIVE favourable excursion")
+	}
+}
+
+func TestSimulateShortSide(t *testing.T) {
+	const cost = 0.003
+	short := func(path ...pathBar) episode { return episode{entry: 100, dir: -1, path: path} }
+	near := func(name string, got, want float64) {
+		t.Helper()
+		if math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	// price falls to 94 → a 5% take-profit for a short
+	near("short TP", short(pathBar{101, 94, 95}).simulate(0.05, 0.02, cost), 0.05-cost)
+	// price rises to 103 → the short's stop
+	near("short SL", short(pathBar{103, 99, 102}).simulate(0.05, 0.02, cost), -0.02-cost)
+	// both touched in one bar → stop wins, same conservative rule as the long side
+	near("short both", short(pathBar{103, 94, 95}).simulate(0.05, 0.02, cost), -0.02-cost)
+	// neither → time stop, profit measured downwards
+	near("short time stop", short(pathBar{100.5, 98, 98}).simulate(0.10, 0.05, cost), 0.02-cost)
+}
+
+// Trajectory columns must be spaced by real minutes. A collection gap that
+// shifted the rows would silently relabel a T-1 sample as T-20 and could
+// manufacture a leading indicator out of nothing.
+func TestTrajectoryRejectsRowDistance(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	bs := mkSeries(base, 200, 100)
+	tr := trajectoryAt(bs, 150)
+	if len(tr) != len(trajOffsets) {
+		t.Fatalf("contiguous series gave %d offsets, want %d", len(tr), len(trajOffsets))
+	}
+	// Open a hole early enough that the far offsets' own 60-minute feature
+	// windows straddle it, while T-1's window (bars 89..149) stays contiguous.
+	for i := 0; i < 89; i++ {
+		bs[i].ts -= 3 * 60 * 60_000
+	}
+	tr = trajectoryAt(bs, 150)
+	if _, ok := tr[30]; ok {
+		t.Error("T-30 was sampled across a 3-hour gap — the offset is not really 30 minutes")
+	}
+	if _, ok := tr[1]; !ok {
+		t.Error("T-1 sits inside the contiguous stretch and should still be sampled")
 	}
 }

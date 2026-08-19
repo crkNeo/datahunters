@@ -37,6 +37,14 @@ type AnalyzeConfig struct {
 	// per-event statistic toward the middle of moves rather than their start.
 	EpisodeGap time.Duration
 	TopCoins   int
+	// Side selects which tail to study: "up" for pumps, "down" for dumps.
+	//
+	// Both are the same physics — a forced-liquidation cascade into a thin book
+	// — only the side being liquidated differs. A screener built solely on the
+	// up tail is blind to half of the events its own thesis predicts, and the
+	// down tail is where long liquidations live.
+	Side string
+
 	// VisiblePct is how far price must already have moved before a live system
 	// could plausibly react. 0 = derive it from EventPct.
 	//
@@ -45,6 +53,16 @@ type AnalyzeConfig struct {
 	// a 3% one — hold it constant and small targets look unprofitable purely
 	// because of the measurement, not because of the market.
 	VisiblePct float64
+}
+
+// dirOf maps the configured side to the sign every return is measured with:
+// +1 goes long a pump, -1 goes short a dump. Keeping it as a multiplier means
+// one code path measures both tails and neither can drift out of step.
+func dirOf(side string) float64 {
+	if side == "down" {
+		return -1
+	}
+	return 1
 }
 
 // autoVisible derives the detection threshold from the event threshold, capped
@@ -61,7 +79,7 @@ func autoVisible(eventPct float64) float64 {
 }
 
 func DefaultAnalyzeConfig() AnalyzeConfig {
-	return AnalyzeConfig{Days: 0, EventPct: 0.10, EpisodeGap: 30 * time.Minute, TopCoins: 12}
+	return AnalyzeConfig{Days: 0, EventPct: 0.10, EpisodeGap: 30 * time.Minute, TopCoins: 12, Side: "up"}
 }
 
 // abar is one minute of one symbol, with everything the features need.
@@ -109,6 +127,7 @@ func RunAnalysis(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	rep.q1(eps, series, cfg)
 	rep.q4(eps, cfg, visPct)
 	rep.q3(eps, base)
+	rep.q3b(eps, base)
 	rep.footer(eps, cfg)
 	return nil
 }
@@ -132,7 +151,11 @@ type trigStats struct {
 // it. The trades that fire and go nowhere are exactly the ones missing above,
 // and they are where live money is lost.
 func simulateTriggers(series map[string][]abar, epsBySym map[string][]int64,
-	visPct, tp, sl, cost float64, cooldownMin int, gapMs int64) trigStats {
+	visPct, tp, sl, cost float64, cooldownMin int, gapMs int64, dir float64) trigStats {
+
+	if dir == 0 {
+		dir = 1
+	}
 
 	var st trigStats
 	for sym, bs := range series {
@@ -145,12 +168,12 @@ func simulateTriggers(series map[string][]abar, epsBySym map[string][]int64,
 			if bs[j].ts-bs[j-5].ts != 5*60_000 || bs[j-5].close_ <= 0 || bs[j].close_ <= 0 {
 				continue
 			}
-			if bs[j].close_/bs[j-5].close_-1 < visPct {
+			if dir*(bs[j].close_/bs[j-5].close_-1) < visPct {
 				continue
 			}
 			lastTrig = j
 
-			e := episode{entry: bs[j].close_}
+			e := episode{entry: bs[j].close_, dir: dir}
 			for k := j + 1; k < len(bs) && bs[k].ts <= bs[j].ts+5*60_000; k++ {
 				e.path = append(e.path, pathBar{bs[k].high, bs[k].low, bs[k].close_})
 			}
@@ -187,7 +210,11 @@ var sweepTargets = []float64{0.03, 0.05, 0.08, 0.10, 0.15}
 // would make every threshold look good and would say nothing about the next
 // month of trading.
 func (r *report) sweep(series map[string][]abar, cfg AnalyzeConfig) {
-	r.head("門檻掃描 — 想抓多大的行情?")
+	sideZh := "暴漲"
+	if dirOf(cfg.Side) < 0 {
+		sideZh = "暴跌"
+	}
+	r.head(fmt.Sprintf("門檻掃描(%s)— 想抓多大的行情?", sideZh))
 	r.line("  偵測門檻隨事件門檻自動縮放(取 1/3,上限 2%%),否則小行情會被偵測本身吃光。")
 	r.line("  模擬規則固定為 TP = 幅度一半、SL = 幅度四分之一,不逐列最佳化。")
 	r.line("")
@@ -221,7 +248,7 @@ func (r *report) sweep(series map[string][]abar, cfg AnalyzeConfig) {
 		}
 		tp, sl := thr/2, thr/4
 		st := simulateTriggers(series, epsBySym, c.VisiblePct, tp, sl, 0.003,
-			int(cfg.EpisodeGap/time.Minute), gapMs)
+			int(cfg.EpisodeGap/time.Minute), gapMs, dirOf(cfg.Side))
 
 		if len(eps) == 0 && st.n == 0 {
 			r.line("  +%-6.0f%% %7s %8s %7s %10s %12s %12s", thr*100, "0", "0", "-", "-", "-", "-")
@@ -323,6 +350,8 @@ type episode struct {
 	mfe5, mae5, mfe15, secsPeak float64
 	feat                        map[string]float64
 
+	dir                          float64 // +1 long a pump, -1 short a dump
+	traj                         map[int]map[string]float64
 	hasVis                       bool
 	visSecs                      float64 // anchor → the move becoming visible
 	visMFE, visMAE, visToPeakSec float64 // measured FROM the visible bar
@@ -351,11 +380,22 @@ func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, 
 		visPct = autoVisible(cfg.EventPct)
 	}
 
+	dir := dirOf(cfg.Side)
+	isEvent := func(b abar) bool {
+		if !b.labelled {
+			return false
+		}
+		if dir < 0 {
+			return b.mae5 <= -cfg.EventPct
+		}
+		return b.mfe5 >= cfg.EventPct
+	}
+
 	for sym, bs := range series {
 		var lastEventTs int64 = math.MinInt32
 		excl := map[int]bool{}
 		for i, b := range bs {
-			if !b.labelled || b.mfe5 < cfg.EventPct {
+			if !isEvent(b) {
 				continue
 			}
 			if b.ts-lastEventTs <= gapMs {
@@ -367,14 +407,15 @@ func splitEpisodes(series map[string][]abar, cfg AnalyzeConfig) (eps []episode, 
 			if !ok {
 				continue // not enough history behind this bar
 			}
-			e := episode{symbol: sym, i: i, ts: b.ts,
+			e := episode{symbol: sym, i: i, ts: b.ts, dir: dir,
 				mfe5: b.mfe5, mae5: b.mae5, mfe15: b.mfe15, secsPeak: b.secsPeak, feat: f}
-			addTradableView(&e, bs, i, visPct)
+			e.traj = trajectoryAt(bs, i)
+			addTradableView(&e, bs, i, visPct, dir)
 			eps = append(eps, e)
 		}
 		// mark the neighbourhood of every event bar as unusable for baseline
 		for i, b := range bs {
-			if b.labelled && b.mfe5 >= cfg.EventPct {
+			if isEvent(b) {
 				for j := i - winLong; j <= i+winLong; j++ {
 					if j >= 0 && j < len(bs) {
 						excl[j] = true
@@ -456,7 +497,7 @@ func featuresAt(bs []abar, i int) (map[string]float64, bool) {
 
 // addTradableView re-measures the episode from the first bar a live system
 // could have reacted to, rather than from the unknowable anchor.
-func addTradableView(e *episode, bs []abar, i int, visiblePct float64) {
+func addTradableView(e *episode, bs []abar, i int, visiblePct, dir float64) {
 	base := bs[i].close_
 	if base <= 0 {
 		return
@@ -464,7 +505,7 @@ func addTradableView(e *episode, bs []abar, i int, visiblePct float64) {
 	// walk forward within the 5-minute window looking for the move to show up
 	vis := -1
 	for j := i + 1; j < len(bs) && bs[j].ts <= bs[i].ts+5*60_000; j++ {
-		if bs[j].close_/base-1 >= visiblePct {
+		if dir*(bs[j].close_/base-1) >= visiblePct {
 			vis = j
 			break
 		}
@@ -480,26 +521,33 @@ func addTradableView(e *episode, bs []abar, i int, visiblePct float64) {
 	e.visSecs = float64(bs[vis].ts-bs[i].ts) / 1000
 
 	// From the visible bar, look ahead the same 5 minutes an entry would hold.
-	var hi, lo float64
+	// "best" and "worst" are relative to the side being traded: a short profits
+	// from the low and is hurt by the high, so the two swap rather than being
+	// re-derived — a separate down-side formula is how the tails drift apart.
+	var best, worst float64
 	var peakTs int64
 	have := false
 	for j := vis + 1; j < len(bs) && bs[j].ts <= bs[vis].ts+5*60_000; j++ {
+		fav, adv := bs[j].high, bs[j].low
+		if dir < 0 {
+			fav, adv = bs[j].low, bs[j].high
+		}
 		if !have {
-			hi, lo, peakTs, have = bs[j].high, bs[j].low, bs[j].ts, true
+			best, worst, peakTs, have = fav, adv, bs[j].ts, true
 			continue
 		}
-		if bs[j].high > hi {
-			hi, peakTs = bs[j].high, bs[j].ts
+		if dir*(fav-best) > 0 {
+			best, peakTs = fav, bs[j].ts
 		}
-		if bs[j].low < lo {
-			lo = bs[j].low
+		if dir*(adv-worst) < 0 {
+			worst = adv
 		}
 	}
 	if !have {
 		return
 	}
-	e.visMFE = hi/entry - 1
-	e.visMAE = lo/entry - 1
+	e.visMFE = dir * (best/entry - 1)
+	e.visMAE = dir * (worst/entry - 1)
 	e.visToPeakSec = float64(peakTs-bs[vis].ts) / 1000
 	e.entry = entry
 	for j := vis + 1; j < len(bs) && bs[j].ts <= bs[vis].ts+5*60_000; j++ {
@@ -514,18 +562,53 @@ func addTradableView(e *episode, bs []abar, i int, visiblePct float64) {
 // data cannot say which came first within the minute, and choosing the
 // favourable reading is how a backtest quietly turns losses into wins.
 func (e episode) simulate(tp, sl, cost float64) float64 {
+	d := e.dir
+	if d == 0 {
+		d = 1
+	}
 	for _, b := range e.path {
-		if b.low/e.entry-1 <= -sl {
+		adv, fav := b.low, b.high
+		if d < 0 {
+			adv, fav = b.high, b.low
+		}
+		if d*(adv/e.entry-1) <= -sl {
 			return -sl - cost
 		}
-		if b.high/e.entry-1 >= tp {
+		if d*(fav/e.entry-1) >= tp {
 			return tp - cost
 		}
 	}
 	if len(e.path) == 0 {
 		return 0
 	}
-	return e.path[len(e.path)-1].close_/e.entry - 1 - cost
+	return d*(e.path[len(e.path)-1].close_/e.entry-1) - cost
+}
+
+// trajOffsets are how many minutes BEFORE the anchor each column is sampled.
+//
+// This is the whole question: an indicator that only differs at T-0 is
+// coincident and useless for entry — by the time it moves, so has price. One
+// that already differs at T-20 is a genuine early warning, and is the only kind
+// worth putting in a screener.
+var trajOffsets = []int{30, 20, 15, 10, 5, 3, 1, 0}
+
+// trajectoryAt samples the feature set at each offset before bs[i].
+func trajectoryAt(bs []abar, i int) map[int]map[string]float64 {
+	out := map[int]map[string]float64{}
+	for _, off := range trajOffsets {
+		j := i - off
+		if j < winLong {
+			continue
+		}
+		// the offset must be a real time distance, not just a row distance
+		if bs[i].ts-bs[j].ts != int64(off)*60_000 {
+			continue
+		}
+		if f, ok := featuresAt(bs, j); ok {
+			out[off] = f
+		}
+	}
+	return out
 }
 
 // ---------- report ----------
@@ -574,7 +657,11 @@ func (r *report) health(series map[string][]abar) {
 }
 
 func (r *report) q1(eps []episode, series map[string][]abar, cfg AnalyzeConfig) {
-	r.head(fmt.Sprintf("Q1 機會頻率 — 5 分鐘內 ≥ +%.0f%%", cfg.EventPct*100))
+	dirWord, sign := "上漲", "+"
+	if dirOf(cfg.Side) < 0 {
+		dirWord, sign = "下跌", "-"
+	}
+	r.head(fmt.Sprintf("Q1 機會頻率 — 5 分鐘內%s ≥ %s%.0f%%", dirWord, sign, cfg.EventPct*100))
 	if len(eps) == 0 {
 		r.line("  這段期間沒有任何事件。")
 		r.line("  資料還太少,或這個門檻對目前的市況太高 — 用 -event-pct 0.05 再看一次。")
@@ -779,6 +866,81 @@ func (r *report) q3(eps []episode, base map[string][]float64) {
 	r.line("")
 	r.line("  讀法:兩欄差距不明顯的指標就是沒有資訊量,別再往上加權重。")
 	r.line("  這些是「事件當根」的值 — 真正有領先性的,應該在事件發生前就已經偏離。")
+}
+
+// q3b is the answer to "does anything move BEFORE the move".
+func (r *report) q3b(eps []episode, base map[string][]float64) {
+	r.head("Q3b 事件前的軌跡 — 指標是提早偏離,還是跟著價格一起動?")
+	if len(eps) == 0 {
+		return
+	}
+	// collect feature names present in the trajectories
+	names := map[string]bool{}
+	for _, e := range eps {
+		for _, f := range e.traj {
+			for k := range f {
+				names[k] = true
+			}
+		}
+	}
+	var keys []string
+	for k := range names {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		r.line("  樣本不足以構成軌跡(事件太靠近資料起點)。")
+		return
+	}
+
+	hdr := "  %-22s"
+	args := []any{"指標"}
+	for _, off := range trajOffsets {
+		hdr += " %8s"
+		if off == 0 {
+			args = append(args, "T-0")
+		} else {
+			args = append(args, fmt.Sprintf("T-%d", off))
+		}
+	}
+	hdr += " %9s"
+	args = append(args, "平常")
+	r.line(hdr, args...)
+	r.line("  %s", strings.Repeat("-", 22+9*len(trajOffsets)+10))
+
+	for _, k := range keys {
+		row := "  %-22s"
+		vals := []any{k}
+		for _, off := range trajOffsets {
+			var v []float64
+			for _, e := range eps {
+				if f, ok := e.traj[off]; ok {
+					if x, ok2 := f[k]; ok2 {
+						v = append(v, x)
+					}
+				}
+			}
+			row += " %8s"
+			if len(v) == 0 {
+				vals = append(vals, "-")
+				continue
+			}
+			sort.Float64s(v)
+			vals = append(vals, fmt.Sprintf("%.2f", pct(v, 0.5)))
+		}
+		row += " %9s"
+		if b := base[k]; len(b) > 0 {
+			sort.Float64s(b)
+			vals = append(vals, fmt.Sprintf("%.2f", pct(b, 0.5)))
+		} else {
+			vals = append(vals, "-")
+		}
+		r.line(row, vals...)
+	}
+	r.line("")
+	r.line("  怎麼讀:從右往左看。某一列如果一路到 T-1 都貼著「平常」那一欄,")
+	r.line("  只有 T-0 才跳開 —— 那它是同步指標,看到時價格已經在動了,無法用來進場。")
+	r.line("  真正有價值的是在 T-10、T-20 就已經明顯偏離「平常」的那幾列。")
 }
 
 func (r *report) footer(eps []episode, cfg AnalyzeConfig) {
