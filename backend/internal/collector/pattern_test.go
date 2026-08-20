@@ -242,3 +242,31 @@ func TestMarketReturnIsRecordedNotFiltered(t *testing.T) {
 		t.Errorf("mkt_ret = %v, want 1.36 — it has to reach the row to be measurable later", h.MktRet)
 	}
 }
+
+// forwardFrom must bound its window by timestamp. A collection gap that shifted
+// the rows would otherwise let a "5 minute" outcome reach hours ahead, and the
+// replay would report an edge that only exists where data is missing.
+func TestForwardFromRespectsTimeWindow(t *testing.T) {
+	bs := baseSeries(20)
+	for i := 11; i < len(bs); i++ {
+		bs[i].high, bs[i].low, bs[i].close_ = 200, 190, 195 // a huge move, far away
+		bs[i].ts += 3 * 60 * 60_000                         // …three hours later
+	}
+	for i := 6; i <= 10; i++ {
+		bs[i].high, bs[i].low, bs[i].close_ = 101, 99.5, 100.5
+	}
+	mfe, _, _, ok := forwardFrom(bs, 5, 5)
+	if !ok {
+		t.Fatal("forward window should have found the five bars that are in range")
+	}
+	if mfe > 0.02 {
+		t.Errorf("mfe = %v — the window reached past the gap into the far bars", mfe)
+	}
+}
+
+func TestForwardFromNoData(t *testing.T) {
+	bs := baseSeries(3)
+	if _, _, _, ok := forwardFrom(bs, len(bs)-1, 5); ok {
+		t.Error("a bar with nothing after it must not report an outcome")
+	}
+}
