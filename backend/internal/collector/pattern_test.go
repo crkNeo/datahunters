@@ -270,3 +270,48 @@ func TestForwardFromNoData(t *testing.T) {
 		t.Error("a bar with nothing after it must not report an outcome")
 	}
 }
+
+// A boundary set outside the data puts every row on one side, which looks
+// exactly like a working split. The report has to say so rather than print a
+// tidy table of zeroes against a full one.
+func TestOOSBoundaryOutsideDataIsDetectable(t *testing.T) {
+	dataLo := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC).UnixMilli()
+	dataHi := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	cases := map[string]struct {
+		at      time.Time
+		outside bool
+	}{
+		"正確年份,落在資料中間": {time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC), false},
+		"年份少一年":       {time.Date(2025, 8, 20, 0, 0, 0, 0, time.UTC), true},
+		"年份多一年":       {time.Date(2027, 8, 20, 0, 0, 0, 0, time.UTC), true},
+	}
+	for name, c := range cases {
+		ms := c.at.UnixMilli()
+		outside := ms < dataLo || ms > dataHi
+		if outside != c.outside {
+			t.Errorf("%s: 判定為 outside=%v, want %v", name, outside, c.outside)
+		}
+	}
+}
+
+// The rate column must divide by the window it describes. Using the whole
+// period for a short out-of-sample stretch understates it by the ratio of the
+// two — 22 firings in five hours would read as 8 a day instead of 106.
+func TestPerWindowRate(t *testing.T) {
+	day := float64(24 * time.Hour / time.Millisecond)
+	whole := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	oos := time.Date(2026, 8, 19, 19, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+
+	wholeSpan := float64(end.Sub(whole).Milliseconds()) / day
+	winSpan := float64(end.Sub(oos).Milliseconds()) / day
+
+	const n = 22
+	if wrong := n / wholeSpan; wrong > 10 {
+		t.Errorf("whole-period rate %.1f should be the understated one", wrong)
+	}
+	if right := n / winSpan; right < 100 {
+		t.Errorf("window rate = %.1f, want > 100 for 22 firings in 5 hours", right)
+	}
+}

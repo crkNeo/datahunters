@@ -47,6 +47,8 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	}
 	var shots []shot
 	var span float64
+	var dataLo int64 = 1 << 62
+	var dataHi int64
 	// One setup can stay true for several consecutive bars. Counting each of
 	// them as a separate trade inflates the sample with near-identical,
 	// perfectly correlated outcomes — the fastest way to turn three
@@ -58,6 +60,12 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 			d := float64(bs[len(bs)-1].ts-bs[0].ts) / float64(24*time.Hour/time.Millisecond)
 			if d > span {
 				span = d
+			}
+			if bs[0].ts < dataLo {
+				dataLo = bs[0].ts
+			}
+			if bs[len(bs)-1].ts > dataHi {
+				dataHi = bs[len(bs)-1].ts
 			}
 		}
 		for i := range bs {
@@ -89,9 +97,19 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	rep.line("  期間 %.1f 天,標的 %d 檔(同一標的同型態 %d 分鐘內只算一次)",
 		span, len(series), int(cfg.EpisodeGap/time.Minute))
 	if cfg.OOSFrom > 0 {
+		// The year is printed deliberately. Without it a boundary set a year off
+		// looks identical to a correct one, every row lands on one side, and the
+		// split silently reports nothing while appearing to work.
 		rep.line("  樣本外起點 %s UTC — 之前的資料是條件被寫出來時看過的,",
-			time.UnixMilli(cfg.OOSFrom).UTC().Format("01-02 15:04"))
+			time.UnixMilli(cfg.OOSFrom).UTC().Format("2006-01-02 15:04"))
 		rep.line("  在那上面的表現不算證據,只有之後的才算。")
+		if cfg.OOSFrom < dataLo || cfg.OOSFrom > dataHi {
+			rep.line("")
+			rep.line("  ⚠ 這個起點落在資料範圍(%s ~ %s UTC)之外,",
+				time.UnixMilli(dataLo).UTC().Format("2006-01-02 15:04"),
+				time.UnixMilli(dataHi).UTC().Format("2006-01-02 15:04"))
+			rep.line("    所有紀錄都會被歸到同一側 —— 這樣的切分沒有意義,請確認年份。")
+		}
 	}
 	rep.line("")
 	rep.line("  %-10s %8s %9s %10s %10s %11s %12s", "型態", "觸發數", "每天", "命中率", "MFE中位", "MAE中位", "平均淨報酬")
@@ -225,4 +243,18 @@ func forwardFrom(bs []pbar, i, mins int) (mfe, mae, ret float64, ok bool) {
 		return 0, 0, 0, false
 	}
 	return hi/base - 1, lo/base - 1, last/base - 1, true
+}
+
+func maxI64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minI64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
