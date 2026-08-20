@@ -124,7 +124,9 @@ func (c *Collector) DetectPatterns(barTs int64) {
 		return
 	}
 	if err := writePatternHits(c.db, hits); err != nil {
-		log.Printf("patterns: %v", err)
+		// Losing a detection is worse than a noisy log: the board stops gaining
+		// rows and that is indistinguishable from nothing having triggered.
+		log.Printf("patterns: ⚠ 偵測到 %d 筆但寫入失敗,這些訊號已經遺失: %v", len(hits), err)
 		return
 	}
 	for _, h := range hits {

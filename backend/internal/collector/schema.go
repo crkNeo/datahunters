@@ -233,6 +233,45 @@ const unlockSnapshotDDL = `CREATE TABLE IF NOT EXISTS unlock_snapshot_1d (
   PRIMARY KEY (day, coin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 
+// addedColumns lists columns introduced after a table first shipped.
+//
+// CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a
+// column added to a DDL never reaches an installation running an earlier build.
+// Every INSERT then fails on the missing column while the process keeps going —
+// the write path logs once a minute and the table simply stops growing, which
+// looks exactly like nothing having happened. That is the worst failure shape
+// available: silent, and indistinguishable from a normal quiet period.
+//
+// Same idempotent information_schema + ALTER approach cache/db.go uses. Any new
+// column added to a DDL above must also be listed here.
+var addedColumns = map[string]map[string]string{
+	"pattern_hits": {
+		"mkt_ret": "ADD COLUMN mkt_ret DOUBLE NOT NULL DEFAULT 0",
+	},
+}
+
+// ensureColumns applies addedColumns. Safe to call on every start.
+func ensureColumns(db *sql.DB) error {
+	for table, cols := range addedColumns {
+		for col, ddl := range cols {
+			var has int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS
+			     WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?`,
+				table, col).Scan(&has); err != nil {
+				return fmt.Errorf("check %s.%s: %w", table, col, err)
+			}
+			if has > 0 {
+				continue
+			}
+			if _, err := db.Exec("ALTER TABLE " + table + " " + ddl); err != nil {
+				return fmt.Errorf("add %s.%s: %w", table, col, err)
+			}
+			log.Printf("collector: 已補上 %s.%s 欄位", table, col)
+		}
+	}
+	return nil
+}
+
 // dayKey renders a UTC time as the YYYYMMDD partition key.
 func dayKey(t time.Time) int {
 	t = t.UTC()
@@ -275,6 +314,9 @@ func ensureSchema(db *sql.DB, retentionDays int) error {
 		return fmt.Errorf("create unlock_snapshot_1d: %w", err)
 	}
 	if err := ensurePatternSchema(db); err != nil {
+		return err
+	}
+	if err := ensureColumns(db); err != nil {
 		return err
 	}
 	return ensurePartitions(db, retentionDays)
