@@ -47,7 +47,13 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 	}
 	var shots []shot
 	var span float64
+	// One setup can stay true for several consecutive bars. Counting each of
+	// them as a separate trade inflates the sample with near-identical,
+	// perfectly correlated outcomes — the fastest way to turn three
+	// observations into a confident-looking thirty.
+	cooldown := int(cfg.EpisodeGap / time.Minute)
 	for sym, bs := range series {
+		lastFire := map[string]int{}
 		if len(bs) > 1 {
 			d := float64(bs[len(bs)-1].ts-bs[0].ts) / float64(24*time.Hour/time.Millisecond)
 			if d > span {
@@ -59,9 +65,13 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 				pat string
 				fn  func(string, []pbar, int) (patternHit, bool)
 			}{{"A", detectA}, {"B", detectB}} {
+				if last, seen := lastFire[c.pat]; seen && i-last < cooldown {
+					continue
+				}
 				if _, ok := c.fn(sym, bs, i); !ok {
 					continue
 				}
+				lastFire[c.pat] = i
 				mfe, mae, ret, ok := forwardFrom(bs, i, 5)
 				if !ok {
 					continue
@@ -76,42 +86,67 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 
 	rep := newReport(w)
 	rep.head("型態回放 — 把現在的偵測條件跑過全部歷史")
-	rep.line("  期間 %.1f 天,標的 %d 檔", span, len(series))
+	rep.line("  期間 %.1f 天,標的 %d 檔(同一標的同型態 %d 分鐘內只算一次)",
+		span, len(series), int(cfg.EpisodeGap/time.Minute))
+	if cfg.OOSFrom > 0 {
+		rep.line("  樣本外起點 %s UTC — 之前的資料是條件被寫出來時看過的,",
+			time.UnixMilli(cfg.OOSFrom).UTC().Format("01-02 15:04"))
+		rep.line("  在那上面的表現不算證據,只有之後的才算。")
+	}
 	rep.line("")
-	rep.line("  %-6s %8s %9s %10s %10s %11s %12s", "型態", "觸發數", "每天", "命中率", "MFE中位", "MAE中位", "平均淨報酬")
+	rep.line("  %-10s %8s %9s %10s %10s %11s %12s", "型態", "觸發數", "每天", "命中率", "MFE中位", "MAE中位", "平均淨報酬")
 	rep.line("  %s", "--------------------------------------------------------------------------")
-	for _, pat := range []string{"A", "B"} {
-		var mfe, mae, ret []float64
-		for _, s := range shots {
-			if s.pat != pat {
+	rows := []struct {
+		label  string
+		lo, hi int64
+	}{{"全部", 0, 1 << 62}}
+	if cfg.OOSFrom > 0 {
+		rows = []struct {
+			label  string
+			lo, hi int64
+		}{{"設計期內", 0, cfg.OOSFrom}, {"樣本外", cfg.OOSFrom, 1 << 62}}
+	}
+	for _, win := range rows {
+		for _, pat := range []string{"A", "B"} {
+			var mfe, mae, ret []float64
+			for _, s := range shots {
+				if s.pat != pat {
+					continue
+				}
+				if ts := series[s.sym][s.i].ts; ts < win.lo || ts >= win.hi {
+					continue
+				}
+				mfe = append(mfe, s.mfe5)
+				mae = append(mae, s.mae5)
+				ret = append(ret, s.ret5)
+			}
+			name := pat
+			if cfg.OOSFrom > 0 {
+				name = win.label + " " + pat
+			}
+			if len(mfe) == 0 {
+				rep.line("  %-10s %8d %9s %10s %10s %11s %12s", name, 0, "-", "-", "-", "-", "-")
 				continue
 			}
-			mfe = append(mfe, s.mfe5)
-			mae = append(mae, s.mae5)
-			ret = append(ret, s.ret5)
-		}
-		if len(mfe) == 0 {
-			rep.line("  %-6s %8d %9s %10s %10s %11s %12s", pat, 0, "-", "-", "-", "-", "-")
-			continue
-		}
-		sort.Float64s(mfe)
-		sort.Float64s(mae)
-		var wins int
-		var tot float64
-		for _, r := range ret {
-			tot += r
-		}
-		for _, m := range mfe {
-			if m >= 0.01 {
-				wins++
+			sort.Float64s(mfe)
+			sort.Float64s(mae)
+			var wins int
+			var tot float64
+			for _, r := range ret {
+				tot += r
 			}
+			for _, m := range mfe {
+				if m >= 0.01 {
+					wins++
+				}
+			}
+			const cost = 0.003
+			rep.line("  %-10s %8d %9.1f %9.1f%% %9.2f%% %10.2f%% %11.2f%%",
+				name, len(mfe), float64(len(mfe))/span,
+				float64(wins)/float64(len(mfe))*100,
+				pct(mfe, 0.5)*100, pct(mae, 0.5)*100,
+				(tot/float64(len(ret))-cost)*100)
 		}
-		const cost = 0.003
-		rep.line("  %-6s %8d %9.1f %9.1f%% %9.2f%% %10.2f%% %11.2f%%",
-			pat, len(mfe), float64(len(mfe))/span,
-			float64(wins)/float64(len(mfe))*100,
-			pct(mfe, 0.5)*100, pct(mae, 0.5)*100,
-			(tot/float64(len(ret))-cost)*100)
 	}
 
 	// recall: of the real moves, how many did a detector fire anywhere near?
