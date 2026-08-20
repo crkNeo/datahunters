@@ -53,6 +53,8 @@ const hits = computed(() => {
 
 function sign(n) { return n > 0 ? 'pos' : n < 0 ? 'neg' : '' }
 function num(n, d = 2) { return (n ?? 0).toFixed(d) }
+// 大盤同分鐘也在大幅移動 = 這一筆比較像 beta,不是選到幣
+function isBeta(mktRet) { return Math.abs(mktRet ?? 0) >= 0.3 }
 
 onMounted(() => {
   load(true)
@@ -127,6 +129,7 @@ onUnmounted(() => clearInterval(timer))
             <td class="r">{{ num(h.taker_pct, 0) }}</td>
             <td class="r" :class="sign(h.basis_bps)">{{ num(h.basis_bps, 1) }}</td>
             <td class="r">{{ num(h.funding_bps, 2) }}</td>
+            <td class="r" :class="{ warn: isBeta(h.mkt_ret) }">{{ num(h.mkt_ret, 2) }}</td>
             <td class="r" :class="sign(h.run_pct)">{{ num(h.run_pct) }}%</td>
             <td class="r"><span v-if="h.done" class="pos">{{ num(h.mfe_5m) }}%</span><span v-else class="pend">—</span></td>
             <td class="r"><span v-if="h.done" class="neg">{{ num(h.mae_5m) }}%</span><span v-else class="pend">—</span></td>
@@ -136,7 +139,7 @@ onUnmounted(() => clearInterval(timer))
               <span v-else class="neg">✗ {{ num(h.ret_5m) }}%</span>
             </td>
           </tr>
-          <tr v-if="!hits.length"><td colspan="13" class="pb-none">尚無紀錄</td></tr>
+          <tr v-if="!hits.length"><td colspan="14" class="pb-none">尚無紀錄</td></tr>
         </tbody>
       </table>
     </div>
@@ -174,5 +177,7 @@ onUnmounted(() => clearInterval(timer))
 .pos { color: #4caf7d; }
 .neg { color: #d9534f; }
 .pend { opacity: .45; }
+/* 大盤同時在動 = 這一筆比較像 beta,標出來以免被當成選幣能力 */
+.warn { color: #d8a94a; font-weight: 600; }
 .pb-none { text-align: center; opacity: .6; padding: 14px; }
 </style>

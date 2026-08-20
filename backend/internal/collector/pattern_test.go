@@ -138,7 +138,6 @@ func TestDetectBRequiresEveryCondition(t *testing.T) {
 		},
 		"基差為負(型態C)":  func(bs []pbar) { bs[len(bs)-1].basisBps = -5 },
 		"基差沒有上升":     func(bs []pbar) { bs[len(bs)-1].basisBps = 1 },
-		"資金費為負(型態C)": func(bs []pbar) { bs[len(bs)-1].fundingBps = -2 },
 		"現貨比過低(型態C)": func(bs []pbar) { bs[len(bs)-1].spotRatio = 0.01 },
 	}
 	for name, mutate := range cases {
@@ -177,5 +176,69 @@ func TestCFilterDistinguishesNoSpotFromThinSpot(t *testing.T) {
 	}
 	if passesCFilter(thinSpot) {
 		t.Error("a coin with real but negligible spot volume should be rejected")
+	}
+}
+
+// Funding sign must NOT reject on its own.
+//
+// The first version treated negative funding as a 型態 C tell because GPS had
+// it. WLD then ran negative funding for the entire build-up and still returned
+// 9.5% — the two differ on BASIS at the trigger (GPS -10.9 bp, WLD +26.0 bp).
+// Rejecting on funding would have discarded the better of the two trades on a
+// coincidence, so the discriminator is basis alone.
+func TestDetectBAcceptsNegativeFundingWithPositiveBasis(t *testing.T) {
+	bs := setupB(40)
+	for i := range bs {
+		bs[i].fundingBps = -2.17 // WLD's actual funding through the whole move
+	}
+	if _, ok := detectB("WLDUSDT", bs, len(bs)-1); !ok {
+		t.Error("negative funding alone rejected the setup — basis is the discriminator, not funding")
+	}
+	// but negative BASIS still rejects, which is the GPS case
+	bs[len(bs)-1].basisBps = -10.9
+	if _, ok := detectB("GPSUSDT", bs, len(bs)-1); ok {
+		t.Error("negative basis at the trigger must still reject — that is the 型態 C failure")
+	}
+}
+
+// The trigger threshold has to admit the moves that actually happened. Read off
+// the single biggest case it sat at 5%, which threw away three of the four real
+// setups observed while the one true failure was nowhere near it.
+func TestDetectBTriggerThresholdAdmitsObservedMoves(t *testing.T) {
+	observed := map[string]struct {
+		oiChg float64
+		want  bool
+	}{
+		"BTW +6.21%":      {0.0621, true},
+		"WLD +3.51%":      {0.0351, true},
+		"STAR +2.95%":     {0.0295, true},
+		"PUMP +2.67%":     {0.0267, true},
+		"GPS -0.37%(型態C)": {-0.0037, false},
+	}
+	for name, c := range observed {
+		bs := setupB(40)
+		bs[len(bs)-1].oiChg5m = c.oiChg
+		_, ok := detectB("X", bs, len(bs)-1)
+		if ok != c.want {
+			t.Errorf("%s: 觸發=%v, want %v(門檻 %.2f%%)", name, ok, c.want, bTrigOIChg*100)
+		}
+	}
+}
+
+// The market's own move that minute is recorded, never filtered on. Two of the
+// observed pumps fired in the same minute the whole market jumped 1.36%: those
+// are beta rather than selection, and several at once are one bet, not several.
+// The right threshold is unknown, so it has to be measured before it can reject.
+func TestMarketReturnIsRecordedNotFiltered(t *testing.T) {
+	bs := setupB(40)
+	for i := range bs {
+		bs[i].mktRet = 1.36 // the whole board moving
+	}
+	h, ok := detectB("X", bs, len(bs)-1)
+	if !ok {
+		t.Fatal("a market-wide minute must still be recorded, not silently dropped")
+	}
+	if h.MktRet != 1.36 {
+		t.Errorf("mkt_ret = %v, want 1.36 — it has to reach the row to be measurable later", h.MktRet)
 	}
 }
