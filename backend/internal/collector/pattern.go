@@ -422,6 +422,21 @@ func RunPatternOutcomes(db *sql.DB, every time.Duration, stop <-chan struct{}) {
 	}
 }
 
+// LogPatternThresholds prints the conditions actually compiled into this
+// binary.
+//
+// run.sh builds on start, so a pull without a restart leaves the previous
+// thresholds running — and the only visible symptom is "fewer hits than
+// expected", which is indistinguishable from a quiet market. Printing them at
+// startup makes the running version answerable from the log rather than by
+// guessing.
+func LogPatternThresholds() {
+	log.Printf("patterns: A 條件 連續紅K≥%d/%d根 跌幅≤%.1f%% ΔOI5m≤%.0f%% volZ≥%.0f 主買<%.0f%% 基差<0 → 觸發根需收紅+主買>%.0f%%+基差>0",
+		aMinRedBars, aLookback, aMinDrop*100, aMaxOIChg*100, aMinVolZ, aMaxTaker, aTrigTaker)
+	log.Printf("patterns: B 條件 ΔOI5m 連%d根為正且遞增 主買均值>%.0f%% 基差正且上升 → 觸發需 volZ>%.0f 且 ΔOI5m>%.0f%%(現貨比>0 時需≥%.2f)",
+		bBuildBars, bMinTaker, bTrigVolZ, bTrigOIChg*100, cMinSpotRatio)
+}
+
 func ensurePatternSchema(db *sql.DB) error {
 	if _, err := db.Exec(patternHitsDDL); err != nil {
 		return fmt.Errorf("create pattern_hits: %w", err)

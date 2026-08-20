@@ -144,6 +144,7 @@ func main() {
 	if !*labelOnly {
 		log.Printf("collector: tracking %d symbols, depth every %dm (limit %d), spot every %dm, retention %dd",
 			cfg.Universe, cfg.DepthEvery, cfg.DepthLimit, cfg.SpotEvery, cfg.RetentionDays)
+		collector.LogPatternThresholds()
 		go c.Run(stop)
 		if !*noUnlocks {
 			// Sparse, slow-moving and on entirely different hosts — its own
