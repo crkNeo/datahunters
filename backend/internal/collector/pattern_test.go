@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -295,23 +296,33 @@ func TestOOSBoundaryOutsideDataIsDetectable(t *testing.T) {
 	}
 }
 
-// The rate column must divide by the window it describes. Using the whole
-// period for a short out-of-sample stretch understates it by the ratio of the
-// two — 22 firings in five hours would read as 8 a day instead of 106.
-func TestPerWindowRate(t *testing.T) {
-	day := float64(24 * time.Hour / time.Millisecond)
-	whole := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
-	oos := time.Date(2026, 8, 19, 19, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-
-	wholeSpan := float64(end.Sub(whole).Milliseconds()) / day
-	winSpan := float64(end.Sub(oos).Milliseconds()) / day
-
-	const n = 22
-	if wrong := n / wholeSpan; wrong > 10 {
-		t.Errorf("whole-period rate %.1f should be the understated one", wrong)
+// The rate column must divide by the window it describes, and this has to
+// exercise the real function — an earlier version of this test did the
+// arithmetic inside the test body, so it passed while the production code was
+// still dividing by the whole period.
+func TestWindowDays(t *testing.T) {
+	ms := func(y, mo, d, h int) int64 {
+		return time.Date(y, time.Month(mo), d, h, 0, 0, 0, time.UTC).UnixMilli()
 	}
-	if right := n / winSpan; right < 100 {
-		t.Errorf("window rate = %.1f, want > 100 for 22 firings in 5 hours", right)
+	dataLo, dataHi := ms(2026, 8, 17, 0), ms(2026, 8, 20, 0) // three days collected
+	oos := ms(2026, 8, 19, 19)                               // last five hours
+
+	near := func(name string, got, want float64) {
+		t.Helper()
+		if math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s = %v days, want %v", name, got, want)
+		}
+	}
+	near("whole period", windowDays(0, 1<<62, dataLo, dataHi), 3)
+	near("design window", windowDays(0, oos, dataLo, dataHi), 2+19.0/24)
+	near("oos window", windowDays(oos, 1<<62, dataLo, dataHi), 5.0/24)
+
+	// 22 firings in that five-hour tail is a rate of ~106/day, not ~7/day
+	if got := 22 / windowDays(oos, 1<<62, dataLo, dataHi); got < 100 {
+		t.Errorf("oos rate = %.1f/day, want >100 — the window is not being clamped", got)
+	}
+	// a window with no overlap must not blow up the divide
+	if got := windowDays(ms(2025, 1, 1, 0), ms(2025, 1, 2, 0), dataLo, dataHi); got != 0.01 {
+		t.Errorf("non-overlapping window = %v, want the 0.01 guard", got)
 	}
 }

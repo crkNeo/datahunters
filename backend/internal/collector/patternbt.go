@@ -160,7 +160,7 @@ func PatternBacktest(db *sql.DB, cfg AnalyzeConfig, w io.Writer) error {
 			}
 			const cost = 0.003
 			rep.line("  %-10s %8d %9.1f %9.1f%% %9.2f%% %10.2f%% %11.2f%%",
-				name, len(mfe), float64(len(mfe))/span,
+				name, len(mfe), float64(len(mfe))/windowDays(win.lo, win.hi, dataLo, dataHi),
 				float64(wins)/float64(len(mfe))*100,
 				pct(mfe, 0.5)*100, pct(mae, 0.5)*100,
 				(tot/float64(len(ret))-cost)*100)
@@ -257,4 +257,26 @@ func minI64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// windowDays is the length in days of the slice of collected data a window
+// actually covers, clamped to what exists.
+//
+// The rate column has to divide by THIS, not by the whole collection period.
+// A short out-of-sample stretch scored against the full span is understated by
+// the ratio of the two — 22 firings in five hours read as 8 a day rather than
+// 106, which is the difference between "occasional" and "constant".
+func windowDays(lo, hi, dataLo, dataHi int64) float64 {
+	const day = float64(24 * time.Hour / time.Millisecond)
+	if lo < dataLo {
+		lo = dataLo
+	}
+	if hi > dataHi {
+		hi = dataHi
+	}
+	d := float64(hi-lo) / day
+	if d < 0.01 {
+		return 0.01 // guard the divide; a sub-15-minute window is not a rate
+	}
+	return d
 }
