@@ -62,6 +62,7 @@ var tabMeta = []struct {
 	{"smc", "SMC教練", "admin", false},
 	{"srmtf", "錘頭/射擊星", "admin", false},
 	{"smcv2", "SMC_V2", "admin", false},
+	{"patterns", "爆發型態", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -77,6 +78,7 @@ var tabDefaultKind = map[string]string{
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
 	"smc": "signal", "srmtf": "signal", "smcv2": "signal",
+	"patterns": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.

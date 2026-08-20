@@ -5,12 +5,13 @@
   這個分離是這張表可信的關鍵:訊號在結果出現「之前」就已經落盤,無法事後
   挑選。因此這裡的命中率是真正的樣本外統計,不是回頭整理出來的漂亮數字。
 
-  刻意只給管理員看:這兩個型態目前各只有 1~2 個觀察案例,尚未驗證,
-  放給會員看會被當成推薦。
+  預設只有管理員看得到:這兩個型態目前各只有 1~2 個觀察案例,尚未驗證,
+  放給會員看會被當成推薦。權限走後台「標籤權限」那張表,所以之後命中率
+  真的站得住腳時,開放給 VIP 是改設定而不是改程式。
 -->
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { authFetch } from '../../lib/api'
+import { authFetch } from '../lib/api'
 
 const emit = defineEmits(['msg'])
 
@@ -32,7 +33,7 @@ async function load(quiet = false) {
   if (busy.value) return
   busy.value = true
   try {
-    const res = await authFetch('/api/admin/patterns')
+    const res = await authFetch('/api/patterns')
     if (res.ok) {
       data.value = await res.json()
       if (!quiet) emit('msg', '✓ 已重新載入(共 ' + (data.value.hits || []).length + ' 筆)')

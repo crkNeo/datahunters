@@ -93,7 +93,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
-	mux.HandleFunc("/api/admin/patterns", s.gate(A, s.handlePatterns)) // 爆發型態 A/B 偵測紀錄
 	mux.HandleFunc("/api/admin/users", s.gate(A, s.handleAdminUsers))
 
 	// uploaded images (asset proofs, article images, logo, QR), read-only.
@@ -105,6 +104,7 @@ func (s *Server) Routes() http.Handler {
 	// 調高成會員/VIP 時,API 必須跟著擋,否則只是在導覽列藏起來而已。
 	mux.HandleFunc("/api/ranking", s.gateTab("ranking", s.handleRanking))
 	mux.HandleFunc("/api/events", s.gateTab("events", s.handleEvents))
+	mux.HandleFunc("/api/patterns", s.gateTab("patterns", s.handlePatterns)) // 爆發型態 A/B 偵測紀錄
 	mux.HandleFunc("/api/liquidations", s.gateTab("flow", s.handleLiquidations))
 	mux.HandleFunc("/api/upbit", s.gateTab("upbit", s.handleUpbit))             // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/news", s.gateTab("news", s.handleNews))                // GDELT market headlines (zh-TW)
@@ -859,9 +859,12 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLiquidations serves the recent liquidation feed.
-// handlePatterns serves the 爆發型態 board. Admin-only: these are unvalidated
-// hypotheses with a handful of observations behind them, and a half-tested
-// signal shown to members would be read as a recommendation.
+// handlePatterns serves the 爆發型態 board.
+//
+// Gated through the configurable tab table rather than a hard-coded admin
+// check: it defaults to admin because these are unvalidated hypotheses with a
+// handful of observations behind them, but once the recorded hit rate says
+// something, opening it to VIP should be a setting rather than a code change.
 func (s *Server) handlePatterns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Patterns(200))
 }

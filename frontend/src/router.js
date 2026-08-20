@@ -19,7 +19,7 @@ export const ROUTE_TABS = [
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'smcv2', 'srmtf',
-  'admin', 'referral',
+  'admin', 'referral', 'patterns',
 ]
 
 export const router = createRouter({
