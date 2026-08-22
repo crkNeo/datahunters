@@ -17,6 +17,7 @@ import (
 // PatternHit is one recorded firing plus its outcome.
 type PatternHit struct {
 	Time       string  `json:"time"`
+	AgeMin     int     `json:"age_min"` // 觸發至今幾分鐘 —— 決定這筆還能不能用
 	Symbol     string  `json:"symbol"`
 	Pattern    string  `json:"pattern"` // "A" | "B"
 	Price      float64 `json:"price"`
@@ -95,6 +96,11 @@ func (s *Store) Patterns(limit int) PatternData {
 			continue
 		}
 		h.Time = time.UnixMilli(ts).UTC().Format("01-02 15:04")
+		// The board is a record, not a live feed: a row describes a bar that
+		// closed, and by the time it is on screen the move it names is already
+		// running. Age is shown so a stale row can never be mistaken for one
+		// that is still actionable.
+		h.AgeMin = int(time.Since(time.UnixMilli(ts)).Minutes())
 		h.Done = done == 1
 		// stored as fractions; the board reads in percent
 		h.OIChg5m *= 100
