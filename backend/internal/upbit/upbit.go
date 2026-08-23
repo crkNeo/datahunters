@@ -192,3 +192,46 @@ func (w *Watcher) TranslateKo(text string) string {
 	}
 	return b.String()
 }
+
+// TranslateMyMemory translates ko→zh-TW via MyMemory's free (keyless) API. Unlike
+// the unofficial Google endpoint it doesn't IP-block; the anonymous ~5000 words/day
+// limit is ample for announcement titles. ok=false on error / quota exhaustion so
+// the caller can fall back and NOT cache the miss.
+func (w *Watcher) TranslateMyMemory(text string) (string, bool) {
+	if strings.TrimSpace(text) == "" {
+		return text, true
+	}
+	u := "https://api.mymemory.translated.net/get?langpair=ko|zh-TW&q=" + url.QueryEscape(text)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return text, false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := w.http.Do(req)
+	if err != nil {
+		return text, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return text, false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return text, false
+	}
+	var r struct {
+		ResponseData struct {
+			TranslatedText string `json:"translatedText"`
+		} `json:"responseData"`
+		QuotaFinished bool `json:"quotaFinished"`
+	}
+	if json.Unmarshal(body, &r) != nil {
+		return text, false
+	}
+	t := strings.TrimSpace(r.ResponseData.TranslatedText)
+	// quota exhausted → translatedText carries an English WARNING, not a translation
+	if r.QuotaFinished || t == "" || strings.Contains(strings.ToUpper(t), "MYMEMORY WARNING") {
+		return text, false
+	}
+	return t, true
+}

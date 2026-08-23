@@ -527,6 +527,40 @@ type UpbitNotice struct {
 	Listing  bool   `json:"listing"` // trading-support / new-listing notice
 }
 
+// upbitTranslate turns a Korean title into Traditional Chinese. It tries the free
+// Google endpoint first (fast); when that 429s / fails it falls back to the AI
+// client (Gemini, else keyless Pollinations) which isn't IP-rate-limited. ok=false
+// means BOTH failed → caller returns the Korean original but must NOT cache it, so
+// it retries next tick. geminiBudget (nil = unlimited) caps AI calls per board
+// rebuild so one tick can't stall on a big backlog of untranslated titles.
+func (s *Store) upbitTranslate(text string, geminiBudget *int) (string, bool) {
+	if strings.TrimSpace(text) == "" {
+		return text, true
+	}
+	// 主翻譯:MyMemory(免金鑰、不封 IP)。Google 免費端點已因封 IP 淘汰。
+	if zh, ok := s.upbitW.TranslateMyMemory(text); ok && zh != text {
+		return zh, true
+	}
+	if geminiBudget != nil && *geminiBudget <= 0 {
+		return text, false // 本輪 AI 額度用完 → 下輪再補
+	}
+	if s.maiW != nil {
+		zh, err := s.maiW.Analyze(
+			"你是專業翻譯。把使用者提供的韓國交易所公告標題翻成繁體中文,只輸出翻譯後的標題本身,不要加引號、說明或任何前後綴。",
+			text)
+		if geminiBudget != nil {
+			*geminiBudget--
+		}
+		if err == nil {
+			zh = strings.TrimSpace(strings.Trim(strings.TrimSpace(zh), "\"'「」"))
+			if zh != "" && zh != text {
+				return zh, true
+			}
+		}
+	}
+	return text, false
+}
+
 // UpbitTick polls Upbit announcements: it pushes any newly posted ones to
 // Telegram/Web Push, and rebuilds the on-page board (titles translated to
 // Traditional Chinese). The push side no-ops when no channel is configured.
@@ -549,10 +583,12 @@ func (s *Store) UpbitTick() {
 		}
 		// translate the title to zh-TW once, and reuse it for the board (seed the
 		// cache) so both the push and Telegram messages are in Traditional Chinese.
-		zh := s.upbitW.TranslateKo(n.Title)
-		s.upbitMu.Lock()
-		s.upbitTrans[n.ID] = zh
-		s.upbitMu.Unlock()
+		zh, ok := s.upbitTranslate(n.Title, nil) // fresh 很少,不限 AI 額度
+		if ok {
+			s.upbitMu.Lock()
+			s.upbitTrans[n.ID] = zh
+			s.upbitMu.Unlock()
+		}
 		// Web Push opens our own Upbit board tab (not upbit.com); the Telegram
 		// message still links out to the real notice.
 		s.PushSend(tag, zh, "/?tab=upbit")
@@ -565,15 +601,19 @@ func (s *Store) UpbitTick() {
 // title is translated only once) and publishes the board newest-first.
 func (s *Store) updateUpbitBoard(notices []upbit.Notice) {
 	board := make([]UpbitNotice, 0, len(notices))
+	geminiBudget := 6 // 每輪最多用 AI 補譯 6 筆,避免一次 tick 卡在整批未譯標題上
 	for _, n := range notices {
 		s.upbitMu.RLock()
-		zh, ok := s.upbitTrans[n.ID]
+		zh, cached := s.upbitTrans[n.ID]
 		s.upbitMu.RUnlock()
-		if !ok {
-			zh = s.upbitW.TranslateKo(n.Title)
-			s.upbitMu.Lock()
-			s.upbitTrans[n.ID] = zh
-			s.upbitMu.Unlock()
+		if !cached {
+			z, ok := s.upbitTranslate(n.Title, &geminiBudget)
+			zh = z
+			if ok { // 只快取「成功」的翻譯;失敗(回原文)不快取,下輪重試
+				s.upbitMu.Lock()
+				s.upbitTrans[n.ID] = zh
+				s.upbitMu.Unlock()
+			}
 		}
 		board = append(board, UpbitNotice{
 			ID: n.ID, Title: n.Title, TitleZH: zh, Category: n.Category,
