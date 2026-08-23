@@ -59,6 +59,8 @@ func main() {
 	detail := flag.Int("event-detail", 0, "-analyze: 改為逐分鐘回放最大的 N 次事件(0 = 印統計報表)")
 	detailBefore := flag.Int("detail-before", 30, "-event-detail: 回放事件前幾分鐘")
 	detailAfter := flag.Int("detail-after", 10, "-event-detail: 回放事件後幾分鐘")
+	oosFrom := flag.String("oos-from", "", "-pattern-backtest: 樣本外起始日 (YYYY-MM-DD),之前的資料視為設計期")
+	patBT := flag.Bool("pattern-backtest", false, "-analyze: 把型態 A/B 的偵測條件跑過全部歷史,看觸發數與涵蓋率")
 	lev := flag.Float64("leverage", 1, "-analyze: 以幾倍槓桿換算保證金報酬與強平距離(1 = 只看價格)")
 	side := flag.String("side", "up", "-analyze: which tail to study — up (暴漲) or down (暴跌)")
 	visPct := flag.Float64("visible-pct", 0, "-analyze: move already made before entry is assumed possible (0 = scale from -event-pct)")
@@ -96,6 +98,19 @@ func main() {
 		acfg.VisiblePct = *visPct
 		acfg.Side = *side
 		acfg.Leverage = *lev
+		if *oosFrom != "" {
+			t, err := time.Parse("2006-01-02", *oosFrom)
+			if err != nil {
+				log.Fatalf("-oos-from: %v (格式應為 YYYY-MM-DD)", err)
+			}
+			acfg.OOSFrom = t.UnixMilli()
+		}
+		if *patBT {
+			if err := collector.PatternBacktest(db, acfg, os.Stdout); err != nil {
+				log.Fatalf("pattern-backtest: %v", err)
+			}
+			return
+		}
 		if *detail > 0 {
 			if err := collector.RunEventDetail(db, acfg, os.Stdout, *detail, *detailBefore, *detailAfter); err != nil {
 				log.Fatalf("event-detail: %v", err)
@@ -129,6 +144,7 @@ func main() {
 	if !*labelOnly {
 		log.Printf("collector: tracking %d symbols, depth every %dm (limit %d), spot every %dm, retention %dd",
 			cfg.Universe, cfg.DepthEvery, cfg.DepthLimit, cfg.SpotEvery, cfg.RetentionDays)
+		collector.LogPatternThresholds()
 		go c.Run(stop)
 		if !*noUnlocks {
 			// Sparse, slow-moving and on entirely different hosts — its own

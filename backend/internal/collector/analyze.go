@@ -42,6 +42,11 @@ type AnalyzeConfig struct {
 	// 0 or 1 = report in price terms only.
 	Leverage float64
 
+	// OOSFrom marks where out-of-sample begins: data before it was visible when
+	// the rules were written, so performance on it is not evidence. 0 disables
+	// the split.
+	OOSFrom int64
+
 	// Side selects which tail to study: "up" for pumps, "down" for dumps.
 	//
 	// Both are the same physics — a forced-liquidation cascade into a thin book

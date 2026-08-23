@@ -34,10 +34,14 @@ const (
 	aMaxTaker   = 40.0 // sellers in control
 	aTrigTaker  = 60.0 // buyers seize it back
 	// ---- 型態 B:OI 擴張動能 ----
-	bBuildBars  = 3    // consecutive bars of rising, positive ΔOI
-	bMinTaker   = 55.0 // sustained aggressive buying
-	bTrigVolZ   = 10.0
-	bTrigOIChg  = 0.05
+	bBuildBars = 3    // consecutive bars of rising, positive ΔOI
+	bMinTaker  = 55.0 // sustained aggressive buying
+	bTrigVolZ  = 10.0
+	// 0.05 was read off the single BTW case (+6.2%) and rejected almost every
+	// other real move: WLD +3.5, STAR +3.0, PUMP +2.7 all cleared their volume
+	// condition and were thrown away on this one. GPS — the 型態 C failure — sat
+	// at -0.4, so it is still excluded with room to spare.
+	bTrigOIChg  = 0.02
 	bMinPriceUp = 0.0 // price must be up over the build window
 	// ---- 型態 C 過濾(兩種型態都套用)----
 	cMinSpotRatio = 0.05 // below this, a coin WITH a spot pair is pure leverage
@@ -61,6 +65,7 @@ const patternHitsDDL = `CREATE TABLE IF NOT EXISTS pattern_hits (
   basis_bps    DOUBLE NOT NULL DEFAULT 0,
   funding_bps  DOUBLE NOT NULL DEFAULT 0,
   spot_ratio   DOUBLE NOT NULL DEFAULT 0,
+  mkt_ret      DOUBLE NOT NULL DEFAULT 0,
   run_bars     INT    NOT NULL DEFAULT 0,
   run_pct      DOUBLE NOT NULL DEFAULT 0,
   outcome_done TINYINT NOT NULL DEFAULT 0,
@@ -81,6 +86,7 @@ type pbar struct {
 	oiUSD, oiChg5m          float64
 	fundingBps, basisBps    float64
 	volZ, spotRatio         float64
+	mktRet                  float64 // market median return that minute
 }
 
 // DetectPatterns evaluates both setups on the most recently closed bar of every
@@ -118,7 +124,9 @@ func (c *Collector) DetectPatterns(barTs int64) {
 		return
 	}
 	if err := writePatternHits(c.db, hits); err != nil {
-		log.Printf("patterns: %v", err)
+		// Losing a detection is worse than a noisy log: the board stops gaining
+		// rows and that is indistinguishable from nothing having triggered.
+		log.Printf("patterns: ⚠ 偵測到 %d 筆但寫入失敗,這些訊號已經遺失: %v", len(hits), err)
 		return
 	}
 	for _, h := range hits {
@@ -222,8 +230,14 @@ func detectB(sym string, bs []pbar, i int) (patternHit, bool) {
 // passesCFilter rejects the pure-leverage shape that looks identical on price
 // and volume but retraces immediately. spotRatio of exactly 0 means the coin
 // has no spot pair at all, which is not the same as having one nobody trades.
+//
+// Funding sign is deliberately NOT a condition. It was in the first version
+// because GPS had negative funding, but WLD ran negative funding throughout and
+// still returned 9.5% — the two differ on BASIS at the trigger (GPS -10.9,
+// WLD +26.0), not on funding. Rejecting on funding would have discarded the
+// better of the two trades on a coincidence.
 func passesCFilter(b pbar) bool {
-	if b.basisBps <= 0 || b.fundingBps < 0 {
+	if b.basisBps <= 0 {
 		return false
 	}
 	if b.spotRatio > 0 && b.spotRatio < cMinSpotRatio {
@@ -239,6 +253,7 @@ type patternHit struct {
 	OIChg5m, VolZ         float64
 	TakerPct, BasisBps    float64
 	FundingBps, SpotRatio float64
+	MktRet                float64
 	RunBars               int
 	RunPct                float64
 }
@@ -248,6 +263,7 @@ func newHit(sym, pat string, b pbar, runBars int, runPct float64) patternHit {
 		Ts: b.ts, Symbol: sym, Pattern: pat, Price: b.close_,
 		OIChg5m: b.oiChg5m, VolZ: b.volZ, TakerPct: b.takerPct,
 		BasisBps: b.basisBps, FundingBps: b.fundingBps, SpotRatio: b.spotRatio,
+		MktRet:  b.mktRet,
 		RunBars: runBars, RunPct: runPct,
 	}
 }
@@ -255,9 +271,11 @@ func newHit(sym, pat string, b pbar, runBars int, runPct float64) patternHit {
 func loadPatternSeries(db *sql.DB, from, to int64) (map[string][]pbar, error) {
 	rows, err := db.Query(`SELECT s.symbol, s.ts, s.open, s.high, s.low, s.close,
 	                              s.vol_quote, s.taker_buy_quote, s.oi_usd, s.funding,
-	                              s.mark, s.index_px, COALESCE(p.vol_quote, 0)
+	                              s.mark, s.index_px, COALESCE(p.vol_quote, 0),
+	                              COALESCE(g.median_ret, 0)
 	                       FROM snap_1m s
 	                       LEFT JOIN spot_1m p ON p.ts = s.ts AND p.symbol = s.symbol
+	                       LEFT JOIN regime_1m g ON g.ts = s.ts
 	                       WHERE s.ts >= ? AND s.ts <= ? AND s.close > 0
 	                       ORDER BY s.symbol, s.ts`, from, to)
 	if err != nil {
@@ -269,9 +287,9 @@ func loadPatternSeries(db *sql.DB, from, to int64) (map[string][]pbar, error) {
 	for rows.Next() {
 		var sym string
 		var b pbar
-		var taker, funding, mark, index, spotVol float64
+		var taker, funding, mark, index, spotVol, mktRet float64
 		if err := rows.Scan(&sym, &b.ts, &b.open, &b.high, &b.low, &b.close_,
-			&b.volQuote, &taker, &b.oiUSD, &funding, &mark, &index, &spotVol); err != nil {
+			&b.volQuote, &taker, &b.oiUSD, &funding, &mark, &index, &spotVol, &mktRet); err != nil {
 			return nil, err
 		}
 		if b.volQuote > 0 {
@@ -279,6 +297,11 @@ func loadPatternSeries(db *sql.DB, from, to int64) (map[string][]pbar, error) {
 			b.spotRatio = spotVol / b.volQuote
 		}
 		b.fundingBps = funding * 10000
+		// Recorded rather than filtered on. Two of the observed moves fired in
+		// the same minute the whole market jumped 1.36% — those are beta, not
+		// selection, and taking several at once is one bet, not several. The
+		// right threshold is unknown, so measure it before rejecting on it.
+		b.mktRet = mktRet * 100
 		if index > 0 && mark > 0 {
 			b.basisBps = (mark - index) / index * 10000
 		}
@@ -312,12 +335,12 @@ func loadPatternSeries(db *sql.DB, from, to int64) (map[string][]pbar, error) {
 
 func writePatternHits(db execer, hits []patternHit) error {
 	cols := []string{"day", "ts", "symbol", "pattern", "price", "oi_chg_5m", "vol_z",
-		"taker_pct", "basis_bps", "funding_bps", "spot_ratio", "run_bars", "run_pct"}
+		"taker_pct", "basis_bps", "funding_bps", "spot_ratio", "mkt_ret", "run_bars", "run_pct"}
 	return insertChunkRows(db, "pattern_hits", cols, len(hits), func(i int) []any {
 		h := hits[i]
 		return []any{dayKeyMs(h.Ts), h.Ts, h.Symbol, h.Pattern, h.Price,
 			h.OIChg5m, h.VolZ, h.TakerPct, h.BasisBps, h.FundingBps,
-			h.SpotRatio, h.RunBars, h.RunPct}
+			h.SpotRatio, h.MktRet, h.RunBars, h.RunPct}
 	})
 }
 
@@ -399,6 +422,21 @@ func RunPatternOutcomes(db *sql.DB, every time.Duration, stop <-chan struct{}) {
 			}
 		}
 	}
+}
+
+// LogPatternThresholds prints the conditions actually compiled into this
+// binary.
+//
+// run.sh builds on start, so a pull without a restart leaves the previous
+// thresholds running — and the only visible symptom is "fewer hits than
+// expected", which is indistinguishable from a quiet market. Printing them at
+// startup makes the running version answerable from the log rather than by
+// guessing.
+func LogPatternThresholds() {
+	log.Printf("patterns: A 條件 連續紅K≥%d/%d根 跌幅≤%.1f%% ΔOI5m≤%.0f%% volZ≥%.0f 主買<%.0f%% 基差<0 → 觸發根需收紅+主買>%.0f%%+基差>0",
+		aMinRedBars, aLookback, aMinDrop*100, aMaxOIChg*100, aMinVolZ, aMaxTaker, aTrigTaker)
+	log.Printf("patterns: B 條件 ΔOI5m 連%d根為正且遞增 主買均值>%.0f%% 基差正且上升 → 觸發需 volZ>%.0f 且 ΔOI5m>%.0f%%(現貨比>0 時需≥%.2f)",
+		bBuildBars, bMinTaker, bTrigVolZ, bTrigOIChg*100, cMinSpotRatio)
 }
 
 func ensurePatternSchema(db *sql.DB) error {

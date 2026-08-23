@@ -17,6 +17,7 @@ import (
 // PatternHit is one recorded firing plus its outcome.
 type PatternHit struct {
 	Time       string  `json:"time"`
+	AgeMin     int     `json:"age_min"` // 觸發至今幾分鐘 —— 決定這筆還能不能用
 	Symbol     string  `json:"symbol"`
 	Pattern    string  `json:"pattern"` // "A" | "B"
 	Price      float64 `json:"price"`
@@ -26,6 +27,7 @@ type PatternHit struct {
 	BasisBps   float64 `json:"basis_bps"`
 	FundingBps float64 `json:"funding_bps"`
 	SpotRatio  float64 `json:"spot_ratio"`
+	MktRet     float64 `json:"mkt_ret"` // 當分鐘全市場中位數報酬(%)
 	RunBars    int     `json:"run_bars"`
 	RunPct     float64 `json:"run_pct"` // percent
 	Done       bool    `json:"done"`
@@ -76,7 +78,7 @@ func (s *Store) Patterns(limit int) PatternData {
 		limit = 200
 	}
 	rows, err := s.db.sql.Query(`SELECT ts, symbol, pattern, price, oi_chg_5m, vol_z,
-	        taker_pct, basis_bps, funding_bps, spot_ratio, run_bars, run_pct,
+	        taker_pct, basis_bps, funding_bps, spot_ratio, mkt_ret, run_bars, run_pct,
 	        outcome_done, mfe_5m, mae_5m, ret_5m, mfe_15m
 	      FROM pattern_hits ORDER BY ts DESC LIMIT ?`, limit)
 	if err != nil {
@@ -89,11 +91,16 @@ func (s *Store) Patterns(limit int) PatternData {
 		var ts int64
 		var done int
 		if err := rows.Scan(&ts, &h.Symbol, &h.Pattern, &h.Price, &h.OIChg5m, &h.VolZ,
-			&h.TakerPct, &h.BasisBps, &h.FundingBps, &h.SpotRatio, &h.RunBars, &h.RunPct,
+			&h.TakerPct, &h.BasisBps, &h.FundingBps, &h.SpotRatio, &h.MktRet, &h.RunBars, &h.RunPct,
 			&done, &h.MFE5, &h.MAE5, &h.Ret5, &h.MFE15); err != nil {
 			continue
 		}
 		h.Time = time.UnixMilli(ts).UTC().Format("01-02 15:04")
+		// The board is a record, not a live feed: a row describes a bar that
+		// closed, and by the time it is on screen the move it names is already
+		// running. Age is shown so a stale row can never be mistaken for one
+		// that is still actionable.
+		h.AgeMin = int(time.Since(time.UnixMilli(ts)).Minutes())
 		h.Done = done == 1
 		// stored as fractions; the board reads in percent
 		h.OIChg5m *= 100

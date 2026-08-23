@@ -53,6 +53,19 @@ const hits = computed(() => {
 
 function sign(n) { return n > 0 ? 'pos' : n < 0 ? 'neg' : '' }
 function num(n, d = 2) { return (n ?? 0).toFixed(d) }
+// 大盤同分鐘也在大幅移動 = 這一筆比較像 beta,不是選到幣
+function isBeta(mktRet) { return Math.abs(mktRet ?? 0) >= 0.3 }
+// 偵測到落盤約 40~100 秒,前端又是每分鐘輪詢,所以看到時已經過了 1~2 分鐘。
+// 而先前量到「進場到見頂」的中位數只有 180 秒 —— 超過三分鐘的訊號,
+// 行情多半已經走完,列在這裡是紀錄用的,不是還能進場的。
+const FRESH_MIN = 3
+function ageLabel(m) {
+  if (m == null) return '—'
+  if (m < 1) return '剛剛'
+  if (m < 60) return m + ' 分前'
+  if (m < 1440) return Math.floor(m / 60) + ' 小時前'
+  return Math.floor(m / 1440) + ' 天前'
+}
 
 onMounted(() => {
   load(true)
@@ -68,6 +81,13 @@ onUnmounted(() => clearInterval(timer))
       <h3>爆發型態偵測</h3>
       <button class="pb-btn" :disabled="busy" @click="load(false)">重新載入</button>
     </div>
+
+    <p class="pb-lag">
+      ⏱ <strong>這是紀錄,不是即時訊號。</strong>偵測到落盤約 40~100 秒,前端每分鐘輪詢,
+      所以看到時已經過了 1~2 分鐘。表上的「觸發價」是那根 K 棒的收盤價;
+      下方的 MFE / 平均淨報酬全部從該價格起算,<strong>等同假設你在收盤價瞬間成交</strong>,
+      實際進場拿不到那個數字。
+    </p>
 
     <p class="pb-warn">
       ⚠ 這是<strong>未驗證的假說</strong>。型態 A 目前只有 1 個觀察案例、B 只有 2 個,
@@ -106,7 +126,8 @@ onUnmounted(() => clearInterval(timer))
       <table class="pb-table">
         <thead>
           <tr>
-            <th>時間(UTC)</th><th>幣種</th><th>型態</th><th class="r">價格</th>
+            <th>時間(UTC)</th><th>經過</th><th>幣種</th><th>型態</th>
+            <th class="r" title="觸發那根 K 棒的收盤價,不是現在的價格">觸發價</th>
             <th class="r" title="持倉量 5 分鐘變化">ΔOI5m</th>
             <th class="r" title="成交量對前 60 分鐘的 z 分數">volZ</th>
             <th class="r">主買%</th><th class="r">基差bp</th><th class="r">資費bp</th>
@@ -119,6 +140,7 @@ onUnmounted(() => clearInterval(timer))
         <tbody>
           <tr v-for="(h, i) in hits" :key="i">
             <td>{{ h.time }}</td>
+            <td :class="{ fresh: h.age_min < FRESH_MIN }">{{ ageLabel(h.age_min) }}</td>
             <td class="sym">{{ h.symbol }}</td>
             <td><span class="tag" :class="'t' + h.pattern">{{ h.pattern }}</span></td>
             <td class="r">{{ h.price }}</td>
@@ -127,6 +149,7 @@ onUnmounted(() => clearInterval(timer))
             <td class="r">{{ num(h.taker_pct, 0) }}</td>
             <td class="r" :class="sign(h.basis_bps)">{{ num(h.basis_bps, 1) }}</td>
             <td class="r">{{ num(h.funding_bps, 2) }}</td>
+            <td class="r" :class="{ warn: isBeta(h.mkt_ret) }">{{ num(h.mkt_ret, 2) }}</td>
             <td class="r" :class="sign(h.run_pct)">{{ num(h.run_pct) }}%</td>
             <td class="r"><span v-if="h.done" class="pos">{{ num(h.mfe_5m) }}%</span><span v-else class="pend">—</span></td>
             <td class="r"><span v-if="h.done" class="neg">{{ num(h.mae_5m) }}%</span><span v-else class="pend">—</span></td>
@@ -136,7 +159,7 @@ onUnmounted(() => clearInterval(timer))
               <span v-else class="neg">✗ {{ num(h.ret_5m) }}%</span>
             </td>
           </tr>
-          <tr v-if="!hits.length"><td colspan="13" class="pb-none">尚無紀錄</td></tr>
+          <tr v-if="!hits.length"><td colspan="15" class="pb-none">尚無紀錄</td></tr>
         </tbody>
       </table>
     </div>
@@ -174,5 +197,9 @@ onUnmounted(() => clearInterval(timer))
 .pos { color: #4caf7d; }
 .neg { color: #d9534f; }
 .pend { opacity: .45; }
+/* 大盤同時在動 = 這一筆比較像 beta,標出來以免被當成選幣能力 */
+.warn { color: #d8a94a; font-weight: 600; }
+.fresh { color: #4caf7d; font-weight: 700; }
+.pb-lag { background: #16242e; border-left: 3px solid #4a90c8; padding: 8px 10px; margin: 8px 0; line-height: 1.6; }
 .pb-none { text-align: center; opacity: .6; padding: 14px; }
 </style>
