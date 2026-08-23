@@ -85,6 +85,25 @@ async function deleteUser(u) {
   emit('reload')
 }
 
+// 管理員重置某用戶密碼:產生新密碼並顯示一次,由管理員複製後交給用戶。
+const resetInfo = ref(null) // { username, password }
+async function resetPw(u) {
+  if (!(await askConfirm('重置「' + u.username + '」的密碼?會產生一組新密碼,舊密碼立即失效。'))) return
+  const res = await authFetch('/api/admin/reset-pw', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u.username }),
+  })
+  if (res.ok) {
+    resetInfo.value = { username: u.username, password: (await res.json()).password }
+    emit('msg', '✓ 已重置 ' + u.username + ' 的密碼')
+  } else {
+    emit('msg', '✗ ' + (await res.text()).trim())
+  }
+}
+async function copyResetPw() {
+  try { await navigator.clipboard.writeText(resetInfo.value.password); emit('msg', '已複製密碼') } catch (e) { /* ignore */ }
+}
+
 const pendingUsers = computed(() => props.users.filter((u) => u.status === 'pending'))
 
 // ---- 名單篩選 ----
@@ -188,8 +207,15 @@ function fmtReg(ms) {
     <button :class="{ on: userSort === 'new' }" @click="userSort = 'new'">新→舊</button>
     <button :class="{ on: userSort === 'old' }" @click="userSort = 'old'">舊→新</button>
   </div>
+  <div v-if="resetInfo" class="pwreset">
+    <b>「{{ resetInfo.username }}」的新密碼:</b>
+    <code class="pwreset-code">{{ resetInfo.password }}</code>
+    <button class="okbtn" @click="copyResetPw">複製</button>
+    <button class="nobtn" @click="resetInfo = null">關閉</button>
+    <span class="pwreset-hint">請複製後交給用戶,此密碼只顯示這一次。</span>
+  </div>
   <table class="grid">
-    <thead><tr><th>證明</th><th>帳號</th><th>UID / Email</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">刪除</th></tr></thead>
+    <thead><tr><th>證明</th><th>帳號</th><th>UID / Email</th><th>角色</th><th class="r">註冊時間</th><th class="r">VIP</th><th class="r">啟用</th><th class="r">密碼</th><th class="r">刪除</th></tr></thead>
     <tbody>
       <tr v-for="u in filteredUsers" :key="u.username">
         <td><img v-if="u.proof" :src="u.proof" class="proofthumb" @click="$emit('proof', u.proof)" /><span v-else>—</span></td>
@@ -210,6 +236,9 @@ function fmtReg(ms) {
             <span class="sw-track"></span>
           </label>
           <em v-else class="qtag good">{{ u.username === username ? '本人' : '—' }}</em>
+        </td>
+        <td class="r">
+          <button class="regbtn" @click="resetPw(u)" title="重置為一組新密碼">重置</button>
         </td>
         <td class="r">
           <button v-if="u.username !== username" class="delbtn" @click="deleteUser(u)" title="刪除帳號">🗑</button>
@@ -243,3 +272,9 @@ function fmtReg(ms) {
 </section>
 
 </template>
+
+<style scoped>
+.pwreset { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; padding: 8px 12px; background: #1c2a1c; border: 1px solid #2ea86a; border-radius: 8px; }
+.pwreset-code { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: 1px; color: #a9dd8b; background: #0f1a0f; padding: 3px 10px; border-radius: 6px; user-select: all; }
+.pwreset-hint { font-size: 11px; color: #8b909a; }
+</style>

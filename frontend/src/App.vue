@@ -245,6 +245,39 @@ function logout() {
   clearAuth('')
   mainTab.value = 'ranking'
 }
+
+// ---- 修改密碼(用戶自助)----
+const pwModal = ref(false)
+const pwForm = ref({ old: '', new1: '', new2: '' })
+const pwErr = ref('')
+const pwBusy = ref(false)
+function openPwModal() {
+  pwForm.value = { old: '', new1: '', new2: '' }
+  pwErr.value = ''
+  pwModal.value = true
+}
+async function submitPw() {
+  if (pwBusy.value) return
+  pwErr.value = ''
+  if (pwForm.value.new1.length < 6) { pwErr.value = '新密碼至少 6 碼'; return }
+  if (pwForm.value.new1 !== pwForm.value.new2) { pwErr.value = '兩次新密碼不一致'; return }
+  pwBusy.value = true
+  try {
+    const res = await authFetch('/api/auth/change-pw', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old: pwForm.value.old, new: pwForm.value.new1 }),
+    })
+    if (res.ok) {
+      pwModal.value = false
+      showToast('密碼已更新', 'ok')
+    } else {
+      pwErr.value = (await res.text()).trim() || '更新失敗'
+    }
+  } catch (e) {
+    pwErr.value = '更新失敗,請稍後再試'
+  }
+  pwBusy.value = false
+}
 const ranking = ref(null)
 async function loadRanking() {
   try {
@@ -1506,12 +1539,26 @@ watch([role, tabPerms, authReady], () => {
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
         <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
+        <button class="regbtn" @click="openPwModal" title="修改密碼">🔑 密碼</button>
         <button class="regbtn" @click="logout">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
       <span class="brand">數據看板</span>
     </div>
   </header>
+
+  <!-- 修改密碼(自助)-->
+  <div v-if="pwModal" class="overlay overlay-center" @click="pwModal = false">
+    <div class="authcard authmodal" @click.stop>
+      <button class="xbtn authx" @click="pwModal = false">✕</button>
+      <h3 class="pwtitle">修改密碼</h3>
+      <input :value="pwForm.old" @input="pwForm.old = sanitizePw($event.target.value)" class="authin" type="password" placeholder="目前密碼" autocomplete="current-password" />
+      <input :value="pwForm.new1" @input="pwForm.new1 = sanitizePw($event.target.value)" class="authin" type="password" placeholder="新密碼(6–16 碼)" autocomplete="new-password" />
+      <input :value="pwForm.new2" @input="pwForm.new2 = sanitizePw($event.target.value)" class="authin" type="password" placeholder="再次輸入新密碼" autocomplete="new-password" @keyup.enter="submitPw" />
+      <button class="authbtn" :disabled="pwBusy" @click="submitPw">{{ pwBusy ? '更新中…' : '確認修改' }}</button>
+      <div v-if="pwErr" class="autherr">{{ pwErr }}</div>
+    </div>
+  </div>
 
   <!-- 登入 / 註冊彈窗。首頁改為公開瀏覽後,這裡是進入會員/VIP 的唯一入口 ——
        原本這兩份表單住在全屏登入牆裡,牆拿掉後整組搬進來,不能只留登入。 -->
@@ -3152,6 +3199,7 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 /* .overlay 原本是給右側抽屜用的(justify-content:flex-end),彈窗要置中 */
 .overlay-center { justify-content: center; align-items: center; padding: 16px; }
 .authmodal { position: relative; max-height: 88vh; overflow-y: auto; }
+.pwtitle { text-align: center; color: #e6e8ec; font-size: 16px; font-weight: 600; margin: 4px 0 14px; }
 .authx { position: absolute; top: 8px; right: 10px; }
 .authcard {
   width: 100%; max-width: 380px;

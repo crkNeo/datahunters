@@ -277,6 +277,18 @@ func (db *DB) upsertUser(username, passHash, role, status string) {
 		username, passHash, role, status, time.Now().UnixMilli())
 }
 
+// setPassword updates ONLY the password hash for an existing user (case-sensitive
+// match). upsertUser intentionally never touches pass_hash, so password changes go
+// through here. Returns false if no such user (0 rows affected) or on error.
+func (db *DB) setPassword(username, passHash string) bool {
+	res, err := db.sql.Exec(`UPDATE users SET pass_hash=? WHERE username=? COLLATE utf8mb4_bin`, passHash, username)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
 // userAuth returns (passHash, role, status) for a username, ok=false if absent.
 // COLLATE utf8mb4_bin forces a CASE-SENSITIVE match: "Hsuan" must not log into
 // "hsuan" (MySQL's default ci collation would otherwise treat them as equal).

@@ -94,6 +94,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/me", s.handleMe)
 	mux.HandleFunc("/api/admin/users", s.gate(A, s.handleAdminUsers))
+	mux.HandleFunc("/api/admin/reset-pw", s.gate(A, s.handleAdminResetPw)) // 管理員重置某用戶密碼(回傳新密碼)
+	mux.HandleFunc("/api/auth/change-pw", s.gate(M, s.handleChangePw))     // 用戶自行修改密碼(需舊密碼)
 
 	// uploaded images (asset proofs, article images, logo, QR), read-only.
 	// noDirListing: Go's FileServer would otherwise render an index for
@@ -382,6 +384,46 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"username": user, "role": role, "status": status, "created": s.store.UserCreated(user)})
+}
+
+// handleAdminResetPw (admin): POST {username} → {password}. Sets a fresh random
+// password and returns the plaintext ONCE so the admin can hand it to the user.
+func (s *Server) handleAdminResetPw(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Username string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil || strings.TrimSpace(in.Username) == "" {
+		http.Error(w, "缺少 username", http.StatusBadRequest)
+		return
+	}
+	pw, ok := s.store.AdminResetPassword(strings.TrimSpace(in.Username))
+	if !ok {
+		http.Error(w, "使用者不存在或無法重置", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"password": pw})
+}
+
+// handleChangePw (member+): POST {old, new}. Verifies the caller's current password
+// then updates it. The caller is the token's user — you can only change your OWN.
+func (s *Server) handleChangePw(w http.ResponseWriter, r *http.Request) {
+	user := s.userOf(r)
+	if user == "" {
+		http.Error(w, "未登入", http.StatusUnauthorized)
+		return
+	}
+	var in struct{ Old, New string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if len(in.New) < 6 || len(in.New) > 64 {
+		http.Error(w, "新密碼長度需 6–64 碼", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.ChangePassword(user, in.Old, in.New); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleAdminUsers: GET lists users; POST creates; PUT sets role/status. Admin only.

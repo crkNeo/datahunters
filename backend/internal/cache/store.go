@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -737,6 +738,62 @@ func (s *Store) Users() []User {
 		return nil
 	}
 	return s.db.listUsers()
+}
+
+// randPassword makes a readable random password (crypto/rand) from an
+// ambiguity-free alphabet (no 0/O/1/l/I) so it can be dictated/copied cleanly.
+func randPassword(n int) string {
+	const alpha = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	for i := range b {
+		b[i] = alpha[int(b[i])%len(alpha)]
+	}
+	return string(b)
+}
+
+// AdminResetPassword sets a fresh random password for a user and returns the
+// PLAINTEXT (shown once to the admin to hand over). ok=false if user absent / db off.
+func (s *Store) AdminResetPassword(username string) (string, bool) {
+	if s.db == nil {
+		return "", false
+	}
+	pw := randPassword(10)
+	if pw == "" {
+		return "", false
+	}
+	h, err := auth.HashPassword(pw)
+	if err != nil {
+		return "", false
+	}
+	if !s.db.setPassword(username, h) {
+		return "", false
+	}
+	return pw, true
+}
+
+// ChangePassword verifies the caller's CURRENT password, then sets a new one.
+func (s *Store) ChangePassword(username, oldPw, newPw string) error {
+	if s.db == nil {
+		return errors.New("persistence disabled")
+	}
+	hash, _, _, ok := s.db.userAuth(username)
+	if !ok {
+		return errors.New("使用者不存在")
+	}
+	if !auth.CheckPassword(hash, oldPw) {
+		return errors.New("目前密碼不正確")
+	}
+	nh, err := auth.HashPassword(newPw)
+	if err != nil {
+		return err
+	}
+	if !s.db.setPassword(username, nh) {
+		return errors.New("更新失敗")
+	}
+	return nil
 }
 
 func (s *Store) CreateUser(username, password, role, status string) error {
