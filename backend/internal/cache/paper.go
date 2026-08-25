@@ -51,6 +51,7 @@ type PaperTrade struct {
 	ID         string     `json:"id"` // book|coin|dir|opentime; also the manual-close key
 	Coin       string     `json:"coin"`
 	Dir        string     `json:"dir"` // long | short
+	TF         string     `json:"tf,omitempty"` // 週期標籤(2155多:1h/4h/1d)— 供多週期同頁分類,serve 時填
 	Score      int        `json:"score"`
 	Entry      float64    `json:"entry"` // fill price (market at signal)
 	TP         float64    `json:"tp"`
@@ -451,10 +452,8 @@ func bookLabel(name string) string {
 		return "布乖v2" // 兩腿共用一個對外名稱
 	case "bollema":
 		return "海王星"
-	case "smc":
-		return "SMC教練"
-	case "smcv2":
-		return "SMC_V2"
+	case "ema2155", "ema2155_4h", "ema2155_1d":
+		return "2155多"
 	}
 	return "星軌"
 }
@@ -508,8 +507,10 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "smc", "smcv2":
+	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "bollema", "ema2155":
 		return name
+	case "ema2155_4h", "ema2155_1d": // 三週期共用一個分頁
+		return "ema2155"
 	}
 	return "paper" // main
 }
@@ -635,8 +636,7 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 // 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
 func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
-	// smcv2 需要兩段止盈(TP1 50% + TP2),走專屬 mirrorSMCV2;其餘書用通用單一 TP 鏡射。
-	if s.trader != nil && book != "smcv2" { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
+	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
 		s.trader.mirrorOpen(book, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
 	}
 	strat := stratKeyOf(book)

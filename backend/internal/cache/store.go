@@ -138,8 +138,7 @@ type Store struct {
 	bgv2Dev      *microBook // 布乖v2 腿1:乖離回歸 1h 只做空 (admin, microrev.go)
 	bgv2Boll     *microBook // 布乖v2 腿2:布林重回 4h 只做空 (admin, microrev.go)
 	bollEMABook  *microBook // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
-	smcBook      *smcBook   // SMC 教練 15M 多單狀態機 (admin, smc.go)
-	smcv2Book    *smcv2Book // SMC_V2 共振回撤 1h 多空,市價觸發 (smcv2.go)
+	ema2155Books []*microBook // 2155多:EMA21/55 金叉 只做多,死叉即時止損;1h/4h/1d 三週期同頁 (microrev.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -247,6 +246,15 @@ func NewStore(coins []string) *Store {
 	// admin mean-reversion strategies (microrev.go)
 	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: bollFadeSignal}
 	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
+	// 2155多:EMA21/55 金叉進場(只做多)、SL=近20根低點、TP 1:2/1:3/1:4 分批、死叉即時出場。
+	// expiry=0 → 無時間出場;分批位置(50%/75% → 2R/3R)與比例由 strat 設定驅動。
+	// 三個週期(1h/4h/1d)同頁呈現、共用一個開關與設定(stratKey=ema2155),各自獨立持倉、
+	// 不做同幣互斥(同一幣可同時在 1h 與 4h 各開一單,以 TF 欄位分類)。
+	s.ema2155Books = []*microBook{
+		{name: "ema2155", tf: "1h", barSec: 3600, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross},
+		{name: "ema2155_4h", tf: "4h", barSec: 14400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross},
+		{name: "ema2155_1d", tf: "1d", barSec: 86400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross},
+	}
 	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
 	// 照回測規格原樣上線 — 單段止盈(plan nil)、無 maxSLPct 濾網(SL 本就刻意放寬到 4 ATR)、逾時 64 根。
 	bgv2Mu := &sync.Mutex{} // 家族共用鎖:序列化兩腿的進場判斷
@@ -257,8 +265,6 @@ func NewStore(coins []string) *Store {
 
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
-	s.smcBook = newSMCBook() // SMC 教練 15M 多單(狀態機在 smc.go)
-	s.smcv2Book = newSMCV2Book() // SMC_V2 共振回撤 1h 多空(smcv2.go)
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -278,8 +284,9 @@ func NewStore(coins []string) *Store {
 		s.bgv2Dev.trades = db.loadTrades("bgv2dev")
 		s.bgv2Boll.trades = db.loadTrades("bgv2boll")
 		s.bollEMABook.trades = db.loadTrades("bollema")
-		s.smcv2Book.trades = db.loadTrades("smcv2")
-		s.smcBook.trades = db.loadTrades("smc")
+		for _, b := range s.ema2155Books {
+			b.trades = db.loadTrades(b.name)
+		}
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}

@@ -36,6 +36,13 @@ type microBook struct {
 	maxSLPct float64 // skip entries whose SL distance exceeds this % of entry (0 = no filter)
 	beAt     float64 // >0: 保本位 cue at entry + beAt×(TP−entry). NOTIFY-ONLY — never moves the stop.
 	signal   func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
+	// exitSignal (optional): checked on each bar close for an OPEN position — return
+	// true to close it at that close ("reversed"). Used for signal-based exits like
+	// 2155多's 死叉 (EMA21 crosses back below EMA55). nil = no signal exit.
+	exitSignal func(cs []exchange.Candle) bool
+	// tfTag: stamp this book's tf onto its trades at serve time, so a multi-timeframe
+	// page (2155多 = 1h/4h/1d 同頁) can show a 週期 column. Off for single-tf books.
+	tfTag bool
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -304,6 +311,48 @@ func bgv2DevSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return "short", roundPx(price), roundPx(s), roundPx(ema50), true
 }
 
+// ema2155Signal (2155多): 只做多。EMA21 上穿 EMA55(金叉)→ 進場。止損=最近 20 根的
+// 最低低點;風險 R=進場−止損;最終止盈 TP3=進場+4R(1:4)。分批止盈由 strat 設定
+// (SplitA=50%→TP1=2R、SplitB=75%→TP2=3R)。持倉中若死叉,由 ema2155DeathCross 收盤平倉。
+func ema2155Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	n := len(cs)
+	if n < 56 {
+		return
+	}
+	e21 := emaSeries(cs, 21)
+	e55 := emaSeries(cs, 55)
+	// 金叉:本根 EMA21>EMA55,前一根 EMA21<=EMA55
+	if !(e21[n-1] > e55[n-1] && e21[n-2] <= e55[n-2]) {
+		return
+	}
+	price := cs[n-1].Close
+	low := cs[n-1].Low
+	for i := n - 20; i < n; i++ { // 近 20 根最低低點
+		if i < 0 {
+			continue
+		}
+		if cs[i].Low < low {
+			low = cs[i].Low
+		}
+	}
+	risk := price - low
+	if risk <= 0 {
+		return
+	}
+	return "long", roundPx(price), roundPx(low), roundPx(price + 4*risk), true // TP3 = 1:4
+}
+
+// ema2155DeathCross: EMA21 下穿 EMA55(死叉)→ 收盤即時平倉(2155多 的訊號出場)。
+func ema2155DeathCross(cs []exchange.Candle) bool {
+	n := len(cs)
+	if n < 56 {
+		return false
+	}
+	e21 := emaSeries(cs, 21)
+	e55 := emaSeries(cs, 55)
+	return e21[n-1] < e55[n-1] && e21[n-2] >= e55[n-2]
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -365,7 +414,10 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				exit, outcome, px = true, "tp3", open.TP
 			}
 		}
-		if !exit && (last.Ts-open.OpenTime.UnixMilli())/barMs >= int64(b.expiry) {
+		if !exit && b.exitSignal != nil && b.exitSignal(cs) { // 訊號出場(2155多 死叉)→ 收盤平倉
+			exit, outcome, px = true, "reversed", last.Close
+		}
+		if !exit && b.expiry > 0 && (last.Ts-open.OpenTime.UnixMilli())/barMs >= int64(b.expiry) {
 			exit, outcome, px = true, "expired", last.Close
 		}
 		if exit {
@@ -578,6 +630,11 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 	var all []*PaperTrade
 	for _, b := range bs {
 		b.mu.Lock()
+		if b.tfTag { // 只有多週期同頁的書(2155多)才標 TF,其餘策略不顯示週期欄
+			for _, tr := range b.trades {
+				tr.TF = b.tf
+			}
+		}
 		all = append(all, b.trades...)
 		b.mu.Unlock()
 	}
@@ -621,11 +678,21 @@ func (s *Store) MeanRevTick()  { s.microTick(s.meanRevBook) }
 func (s *Store) BGV2DevTick()  { s.microTick(s.bgv2Dev) }
 func (s *Store) BGV2BollTick() { s.microTick(s.bgv2Boll) }
 func (s *Store) BollEMATick()  { s.microTick(s.bollEMABook) }
+func (s *Store) EMA2155Tick() {
+	for _, b := range s.ema2155Books {
+		s.microTick(b)
+	}
+}
 
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
 func (s *Store) BGV2MarkTick()     { s.microMarkTick(s.bgv2Dev); s.microMarkTick(s.bgv2Boll) }
 func (s *Store) BollEMAMarkTick()  { s.microMarkTick(s.bollEMABook) }
+func (s *Store) EMA2155MarkTick() {
+	for _, b := range s.ema2155Books {
+		s.microMarkTick(b)
+	}
+}
 
 // keepIf filters trades to those still open (closedOnly=true) or wipes all (false).
 func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
@@ -658,6 +725,20 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
 		s.bollEMABook.mu.Unlock()
+	case "ema2155": // 一個開關清三個週期(1h/4h/1d)
+		for _, b := range s.ema2155Books {
+			b.mu.Lock()
+			b.trades = keepIf(b.trades, closedOnly)
+			b.mu.Unlock()
+			if s.db != nil {
+				if closedOnly {
+					s.db.clearClosedTrades(b.name)
+				} else {
+					s.db.clearTrades(b.name)
+				}
+			}
+		}
+		return true // DB 已在上面各週期處理
 	case "bgv2": // 家族:一個開關清兩腿
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
@@ -676,17 +757,6 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
 		s.convMu.Unlock()
-	case "smc":
-		s.smcBook.mu.Lock()
-		s.smcBook.trades = keepIf(s.smcBook.trades, closedOnly)
-		if !closedOnly {
-			s.smcBook.states = map[string]*smcState{} // 全清時狀態機也歸零
-		}
-		s.smcBook.mu.Unlock()
-	case "smcv2":
-		s.smcv2Book.mu.Lock()
-		s.smcv2Book.trades = keepIf(s.smcv2Book.trades, closedOnly)
-		s.smcv2Book.mu.Unlock()
 	case "main", "gamble", "emaonly":
 		s.paperMu.Lock()
 		b := s.paperMain
@@ -757,4 +827,5 @@ func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) 
 
 // BGV2State merges both legs into ONE tab payload (布乖v2 是一個策略,不是兩個)。
 func (s *Store) BGV2State() PaperState    { return s.microState(s.bgv2Dev, s.bgv2Boll) }
-func (s *Store) BollEMAState() PaperState { return s.microState(s.bollEMABook) }
+func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) }
+func (s *Store) EMA2155State() PaperState  { return s.microState(s.ema2155Books...) }

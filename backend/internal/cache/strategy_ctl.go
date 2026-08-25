@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "smc", "smcv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -79,11 +79,8 @@ var stratDefaults = map[string]StratCfg{
 	"bgv2": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single"},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
-	// SMC 教練:15M 多單狀態機,固定 1:2 RR、結構止損。單段止盈(不分批)。
-	// MaxSLPct 預設 0(結構止損距離不定,靠固定風險倉位控管,見 smc.go 規格 §6)。
-	"smc": {Tags: []string{"保守", "低頻", "短線"}, ExitMode: "single", NotifyOpen: true, NotifyClose: true},
-	// SMC_V2 自管兩段出場(TP1 50%@1R / TP2 / 固定SL),不走 multitp;預設值只影響開關與通知。
-	"smcv2": {Tags: []string{"短線"}, ExitMode: "single", NotifyOpen: true, NotifyClose: true},
+	// 2155多:TP3=1:4(4R),分批位 50%/75% → TP1=2R(1:2)、TP2=3R(1:3),比例 40/30/30。
+	"ema2155": {Tags: []string{"順勢", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -336,6 +333,8 @@ func stratKeyOf(book string) string {
 	switch book {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2"
+	case "ema2155_4h", "ema2155_1d": // 2155多 的 4h/1d 週期併回主 key
+		return "ema2155"
 	}
 	return book
 }
@@ -434,6 +433,17 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.bollEMABook.mu.Lock()
 		done = closeIn(s.bollEMABook.trades)
 		s.bollEMABook.mu.Unlock()
+	case "ema2155": // 三週期都找,記下命中的那個以便寫回正確的 DB book
+		for _, b := range s.ema2155Books {
+			b.mu.Lock()
+			if tr := closeIn(b.trades); tr != nil {
+				done, dbBook = tr, b.name
+			}
+			b.mu.Unlock()
+			if done != nil {
+				break
+			}
+		}
 	case "bgv2": // 家族:兩腿都找,並記下命中的那一腿以便寫回正確的 DB book
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
@@ -449,17 +459,6 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)
 		s.convMu.Unlock()
-	case "smc":
-		s.smcBook.mu.Lock()
-		done = closeIn(s.smcBook.trades)
-		if done != nil {
-			delete(s.smcBook.states, done.Coin) // 手動平倉後狀態機也要重置
-		}
-		s.smcBook.mu.Unlock()
-	case "smcv2":
-		s.smcv2Book.mu.Lock()
-		done = closeIn(s.smcv2Book.trades) // 只平已成交(open)的;待觸發前端不給出場鈕
-		s.smcv2Book.mu.Unlock()
 	default:
 		return false
 	}

@@ -107,34 +107,6 @@ func buildAccount(label, prefix, key, secret string) *bitunixAccount {
 	return &bitunixAccount{label: label, cli: bitunix.New(key, secret), pct: pct, lev: lev, margin: margin, books: books}
 }
 
-// mirrorSMCV2 fires SMC_V2's two-TP entry per matching account: market entry with
-// full-position SL + TP2, plus a reduce-only TP1 (50%). Slippage-guarded at 0.08%
-// (spec §4). Async + isolated; failures only logged.
-func (s *Store) mirrorSMCV2(tr *PaperTrade) {
-	if s.trader == nil {
-		return
-	}
-	for _, a := range s.trader.accts {
-		if !a.wants("smcv2") {
-			continue
-		}
-		a := a
-		coin, dir, entry, sl, tp1, tp2 := tr.Coin, tr.Dir, tr.Entry, tr.SL, tr.TP1, tr.TP
-		go func() {
-			res, tp1Fail, err := a.cli.OpenSMC(coin+"USDT", dir, entry, sl, tp1, tp2, smcv2TP1Pct, a.lev, "USDT", a.margin, a.pct, 0.08)
-			if err != nil {
-				log.Printf("bitunix autotrade: %s [smcv2] %s %s FAILED: %v", a.label, coin, dir, err)
-				return
-			}
-			log.Printf("bitunix autotrade: %s [smcv2] %s %s OK — qty %s · %dx · TP1 %.6g(50%%) · TP2 %.6g · SL %.6g",
-				a.label, coin, dir, res.Qty, res.Lev, tp1, tp2, sl)
-			if tp1Fail != nil { // 倉位已建(SL+TP2),只有 TP1 掛單失敗
-				log.Printf("bitunix autotrade: %s [smcv2] %s %s ⚠️ TP1 掛單失敗(倉位仍有 SL+TP2): %v", a.label, coin, dir, tp1Fail)
-			}
-		}()
-	}
-}
-
 // mirrorOpen fires a real Bitunix order per matching account. Async and fully
 // isolated: any failure is logged and never affects the paper engine.
 func (t *bitunixTrader) mirrorOpen(book, coin, dir string, entry, tp, sl float64) {

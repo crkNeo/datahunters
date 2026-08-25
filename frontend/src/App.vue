@@ -693,20 +693,11 @@ async function loadBollema() {
     /* secondary */
   }
 }
-const smc = ref(null)
-async function loadSMC() {
+const ema2155 = ref(null)
+async function loadEMA2155() {
   try {
-    const res = await authFetch('/api/smc')
-    if (res.ok) smc.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const smcv2 = ref(null)
-async function loadSMCV2() {
-  try {
-    const res = await authFetch('/api/smcv2')
-    if (res.ok) smcv2.value = await res.json()
+    const res = await authFetch('/api/ema2155')
+    if (res.ok) ema2155.value = await res.json()
   } catch (e) {
     /* secondary */
   }
@@ -746,17 +737,13 @@ const microMeta = {
     title: '布乖v2 · 1h乖離 + 4h布林 · 只做空', load: loadBgv2, get: () => bgv2.value,
     help: "<b>只做空的雙腿策略</b>——1h「乖離腿」與 4h「布林腿」共用一個分頁、一個開關。<br><br><b>【通用設定】</b><br>・<b>市場過濾</b>:收盤 &lt; EMA200(各腿用自己週期的 EMA200)<br>・<b>止損</b>:進場 + <b>4.0×ATR(14)</b>(寬止損,扛插針)<br>・<b>時間出場</b>:持滿 <b>64 根</b>收盤平倉<br>・<b>盈虧比閘門</b>:RR 落在 0.4–3.0 才進場<br>・<b>冷卻</b>:訊號後 4 根內不重複進場<br>・<b>同幣互斥</b>:同一幣種同時只允許本家族<b>一個</b>倉位(兩腿誰先觸發誰佔位,另一腿跳過)<br>・所有條件以 <b>K 棒收盤</b>判斷,收盤市價進場;同根同觸止損與目標 → 一律算<b>止損</b>(保守)<br><br><b>【腿 1:乖離回歸 v2 · 1h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② <b>(收盤 − EMA50) / ATR &gt; +2.0</b>(反彈高出 EMA50 兩個 ATR)③ 以「目標 EMA50、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的 <b>EMA50</b> 值 ｜ <b>時間</b>:64 根 ≈ <b>2.7 天</b><br><br><b>【腿 2:布林重回 v2 · 4h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② 前一根收盤 <b>&gt; 布林(50, 2σ) 上軌</b>(衝出通道)③ 本根收盤<b>跌回上軌內、且仍在中軌(SMA50)上方</b>(收回但未跌過頭)④ 以「目標中軌、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的<b>中軌(SMA50)</b>值 ｜ <b>時間</b>:64 根 ≈ <b>10.7 天</b><br><br><b>【倉位】</b>每筆風險 ≤ <b>0.5%</b> 資金(歷史 maxDD 約 20–35R)。<br><br><b>單段止盈,不分批</b> — 照回測規格原樣上線。<br><br>管理員專屬模擬單,⚠️ 非投資建議。",
   },
+  ema2155: {
+    title: '2155多 · 1h / 4h / 日線', load: loadEMA2155, get: () => ema2155.value,
+    help: '<b>只做多的順勢策略</b>——EMA21 上穿 EMA55（金叉)進場。<br><b>三個週期同頁</b>:<b>1H / 4H / 日線</b>各自獨立掃描、獨立持倉(同一幣可在不同週期各開一單),列表以「<b>週期</b>」欄分類。<br><b>進場</b>:該週期收盤出現 <b>EMA21 金叉 EMA55</b> → 收盤市價做多。<br><b>止損</b>:金叉當下<b>近 20 根 K 棒的最低點</b>。<br><b>止盈</b>(以進場−止損為 1R 計):<b>TP1 = 1:2</b>、<b>TP2 = 1:3</b>、<b>最終 TP3 = 1:4</b>。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>50% / 75%</b>(即 2R / 3R);TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3 平剩餘 30%。<br><b>反向出場</b>:持倉過程中若出現 <b>EMA21 死叉 EMA55</b> → 該根收盤<b>即時平倉</b>。<br>無固定時間出場;冷卻 4 根。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
   meanrev: {
     title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
     help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
-  },
-  smcv2: {
-    title: 'SMC_V2 · 共振回撤 1h · 多空', load: loadSMCV2, get: () => smcv2.value,
-    help: "<b>SMC 共振回撤(多空對稱)</b> —— 1h 收盤偵測 BOS 結構突破 → 佈防價格觸發器(回踩訂單區邊緣)→ <b>現價觸及即市價進場</b>。<br><br><b>【進場計畫】</b>(1h 收盤鎖定)<br>・觸發價=OB 邊緣(多=最近陰線 High / 空=最近陽線 Low)<br>・止損=OB 另一端 ∓ 0.15×ATR<br>・TP2=剛被突破的擺動極值(鎖定不變)<br>・盈虧比需 ≥ 1.5;共振 ≥1(FVG 重疊 / OB中點貼 EMA50 ±0.5ATR / 4h+1d EMA20 同向)<br><br><b>【出場】</b>TP1 出 <b>50% @ +1R</b>,<b>同時把止損移到進場價(保本)</b>;TP2 出剩餘。<br><br><b>【風控】</b>觸發器壽命 10 小時、每幣一個計畫、<b>全帳戶同時持倉 ≤ 8</b>。<br><br>回測(市價觸發+滑價)每筆 +0.22~0.25R、勝率 ~44%、止損結局 ~56%。⚠️ 上線前 4-8 週請對照回測分布,非投資建議。",
-  },
-  smc: {
-    title: 'SMC 教練 · 15M 多單', load: loadSMC, get: () => smc.value,
-    help: "<b>只做多的 SMC 結構策略</b>——三週期:4H+1H 定方向、1H 選區域、15M 執行。每個幣種同時只有一個 setup。<br><br><b>【方向】</b>1H 與 4H 結構趨勢<b>同時為多</b>(嚴格,缺一不可);只看 4H 的模式回測全滅。<br><br><b>【七步狀態機】</b>(全部 15M 收盤判斷)<br>① 方向成立 → ② 觸碰 1H 多方需求區(FVG)→ ③ <b>IDM 掃蕩</b>:插針掃過下方流動性、收盤收回 → ④ <b>MSS</b>:收盤突破掃蕩前的高點 → ⑤ <b>BOS</b>:突破 MSS 後新形成的高點 → ⑥ 回踩區:BOS 後新生成的 15M 多方 FVG → ⑦ <b>進場</b>:掛限價在區域上緣,觸碰即成交。<br><br><b>【出場】</b><br>・<b>止損</b>:掃蕩保護低點(結構點,<b>無緩衝</b>,進場後不動)<br>・<b>止盈</b>:<b>固定 1:2</b>(entry + 2×風險);同棒同觸 SL/TP 一律算止損(保守)<br><br><b>【失效】</b>方向轉弱、逾時 80 根(20h)、跌破 1H 區/保護低點/掛單區 → 依規則重置或退回前一步。<br><br><b>【風控】</b>固定風險倉位:數量 = 單筆風險 ÷(entry−SL);單筆風險 ≤ 0.5%。勝率 42–47%,<b>連虧 5–8 筆是常態</b>。<br><br><b>單段止盈,不分批。</b>與空單家族方向互補。⚠️ 未經實盤驗證,管理員專屬模擬單,非投資建議。",
   },
 }
 const micro = computed(() => microMeta[mainTab.value] || null)
@@ -1201,8 +1188,7 @@ function loadAll() {
   if (canTab('meanrev')) loadMeanrev()
   if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
-  if (canTab('smc')) loadSMC()
-  if (canTab('smcv2')) loadSMCV2()
+  if (canTab('ema2155')) loadEMA2155()
   if (canTab('srmtf')) loadSRMTF()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
@@ -1275,7 +1261,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'smcv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1413,7 +1399,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', smc: 'admin', srmtf: 'admin', smcv2: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', ema2155: 'admin', srmtf: 'admin',
   patterns: 'admin',
 }
 const tabPerms = ref({})
@@ -1456,7 +1442,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', smc: 'signal', srmtf: 'signal', smcv2: 'signal',
+  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', ema2155: 'signal', srmtf: 'signal',
   patterns: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
@@ -1465,7 +1451,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'patterns', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'smc', 'smcv2', 'srmtf',
+  'admin', 'referral', 'patterns', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -1979,11 +1965,8 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
             海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
           </button>
-          <button v-if="inGroup('smcv2', grp[0])" :class="{ active: mainTab === 'smcv2' }" @click="mainTab = 'smcv2'; loadSMCV2()">
-            SMC_V2<em v-if="smcv2 && smcv2.open.length" class="navbadge">{{ smcv2.open.length }}</em>
-          </button>
-          <button v-if="inGroup('smc', grp[0])" :class="{ active: mainTab === 'smc' }" @click="mainTab = 'smc'; loadSMC()">
-            SMC教練<em v-if="smc && smc.open.length" class="navbadge">{{ smc.open.length }}</em>
+          <button v-if="inGroup('ema2155', grp[0])" :class="{ active: mainTab === 'ema2155' }" @click="mainTab = 'ema2155'; loadEMA2155()">
+            2155多<em v-if="ema2155 && ema2155.open.length" class="navbadge">{{ ema2155.open.length }}</em>
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘頭/射擊星</button>
         </div>

@@ -212,25 +212,6 @@ func main() {
 		}
 	}()
 
-	// SMC 教練 (15M 多單狀態機):每根收 K 推進一次。ticker 頻率密於 15M,靠內部
-	// bucket 保證同一根棒只處理一次。
-	go func() {
-		store.SMCTick()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			store.SMCTick()
-		}
-	}()
-
-	// SMC_V2 共振回撤 (1h 多空,市價觸發):每分鐘偵測一次(內部 1h bucket 去重)。
-	go func() {
-		store.SMCV2Tick()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			store.SMCV2Tick()
-		}
-	}()
-
 	// 出場改即時價:每 20s 用 WS 現價檢查止盈止損/停損(進場仍為各自的收 K)。
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
@@ -240,8 +221,7 @@ func main() {
 			store.MeanRevMarkTick()
 			store.BGV2MarkTick()
 			store.BollEMAMarkTick()
-			store.SMCMarkTick()
-			store.SMCV2MarkTick() // 觸發器成交 + TP1/TP2/SL
+			store.EMA2155MarkTick()
 		}
 	}()
 
@@ -280,6 +260,14 @@ func main() {
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.BollEMATick()
+		}
+	}()
+	// 2155多:EMA21/55 金叉(只做多),死叉即時出場。
+	go func() {
+		store.EMA2155Tick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.EMA2155Tick()
 		}
 	}()
 

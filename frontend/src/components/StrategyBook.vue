@@ -35,6 +35,12 @@ defineEmits(['coin', 'exit'])
 // 不能顯示 TP 進度/損益。以下把兩者分開計數,列上再逐筆用徽章區分。
 const openFilled = computed(() => (props.state?.open || []).filter((t) => t.status !== 'pending').length)
 const openPending = computed(() => (props.state?.open || []).filter((t) => t.status === 'pending').length)
+
+// 多週期策略(如 2155多:1h/4h/1d 同頁)才帶 tf 欄位;有才顯示「週期」欄,其餘策略維持原樣。
+const hasTf = computed(() =>
+  [...(props.state?.open || []), ...(props.state?.closed || [])].some((t) => t.tf)
+)
+const tfLabel = (tf) => (tf || '').toUpperCase()
 </script>
 
 <template>
@@ -73,10 +79,11 @@ const openPending = computed(() => (props.state?.open || []).filter((t) => t.sta
 
     <h3 class="psub" v-if="state && state.open.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
     <table v-if="state && state.open.length" class="grid">
-      <thead><tr><th>幣種</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
+          <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span><span v-if="t.status === 'pending'" class="pendtag" title="價格觸發器已佈防,尚未成交(等待回踩至觸發價)">⏳待觸發</span></td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ fmtPrice(t.cur) }}</td>
@@ -107,10 +114,11 @@ const openPending = computed(() => (props.state?.open || []).filter((t) => t.sta
 
     <h3 class="psub" v-if="state && state.closed.length">已結束 ({{ state.closed.length }})</h3>
     <table v-if="state && state.closed.length" class="grid">
-      <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in state.closed" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
+          <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ t.outcome === 'cancel' ? '—' : fmtPrice(t.cur) }}</td>
@@ -131,4 +139,5 @@ const openPending = computed(() => (props.state?.open || []).filter((t) => t.sta
 <style scoped>
 .pendtag { margin-left: 6px; font-size: 10px; color: #d8ad48; background: #2a2410; border-radius: 6px; padding: 1px 5px; white-space: nowrap; }
 .pendcount { color: #d8ad48; font-weight: 600; font-size: 13px; }
+.tfbadge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 1px 6px; border-radius: 5px; background: #22303f; color: #6db5ff; }
 </style>

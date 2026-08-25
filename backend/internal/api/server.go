@@ -147,9 +147,8 @@ func (s *Server) Routes() http.Handler {
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))    // 冥王星 (動態ATR均線收斂 4H)
-	mux.HandleFunc("/api/smc", s.gateTab("smc", s.handleSMC))       // SMC 教練 (15M 多單狀態機)
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF)) // 多週期支壓 (1H+4H 提示)
-	mux.HandleFunc("/api/smcv2", s.gateTab("smcv2", s.handleSMCV2)) // SMC_V2 共振回撤 (1h 多空,市價觸發)
+	mux.HandleFunc("/api/ema2155", s.gateTab("ema2155", s.handleEMA2155)) // 2155多 (EMA21/55 金叉)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bgv2", s.gateTab("bgv2", s.handleBGV2))
@@ -720,15 +719,11 @@ func (s *Server) handleBollEMA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.BollEMAState())
 }
 
-// handleSMC serves the SMC 教練 (15M 多單狀態機) tracker.
-func (s *Server) handleSMC(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.SMCState())
+// handleEMA2155 serves the 2155多 (EMA21/55 金叉 只做多) tracker.
+func (s *Server) handleEMA2155(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.EMA2155State())
 }
 
-// handleSMCV2 serves the SMC_V2 共振回撤 (1h 多空,市價觸發) tracker.
-func (s *Server) handleSMCV2(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.SMCV2State())
-}
 
 // handleSRMTF serves the 多週期支壓 (1H+4H 支撐壓力提示) board.
 func (s *Server) handleSRMTF(w http.ResponseWriter, r *http.Request) {
