@@ -372,32 +372,76 @@ func ema2155DeathCross(cs []exchange.Candle) bool {
 }
 
 // surgeSignal — 脈衝星進場規則。此書的宇宙已是「爆量熱名單」(成交量條件由 universe
-// 篩過),這裡只在 K 線上做「動能確認 + 不追高護欄 + 定 SL/TP」。只做多。
+// 篩過),這裡在 15m K 線上做多重過濾。只做多。脈衝星與 v2 共用;v2 另有 OI/CVD 閘門。
 //
-//   進場:收盤 > EMA20 且 收盤 > 前一根(價格正在向上突破,不是爆量下殺)
-//   不追高:現價離「近20根低點」不得超過 surgeMaxExt(還在起漲初段才進,埋伏不追)
-//   止損:近10根 swing low ｜ 止盈:1:4(R = 進場−止損),分批 50%/75% → 1:2 / 1:3
+//   ① 動能狀態:EMA5 > EMA20(多頭排列)且 本根收 > 前一根
+//   進場K棒體質(反插針):收陽、實體 ≥ 全距一半、上影線 ≤ 實體(排除衝高被打下來)
+//   ② 量能確認:進場根量 ≥ 1.2× 靜默基線(不在量縮回檔根追進)
+//   ③ 新鮮度:近 6 根內要有一根「爆量根」(量 ≥ 2.5× 基線),確保是剛起漲、不是追高
+//   不追高:現價離近20根低點 ≤ 25% ｜ 止損:近10根 swing low ｜ 止盈 1:4 分批
 func surgeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	const surgeMaxExt = 0.25 // 現價高出近20根低點 >25% 就算追高,跳過
+	const (
+		surgeMaxExt  = 0.25 // 現價高出近20根低點 >25% 就算追高
+		pinBodyMin   = 0.5  // 進場K棒實體 ≥ 全距的一半
+		pinWickMax   = 1.0  // 上影線 ≤ 實體
+		entryVolMult = 1.2  // 進場根量 ≥ 基線的倍數
+		freshVolMult = 2.5  // 「爆量根」= 量 ≥ 基線的倍數
+		freshWithin  = 6    // 爆量根需落在最近幾根內
+	)
 	n := len(cs)
-	if n < 30 {
+	if n < 40 {
 		return
 	}
 	price := cs[n-1].Close
+	last := cs[n-1]
+
+	// ① 動能:EMA5 > EMA20(狀態,不是金叉,避免落後)+ 本根向上
+	e5 := emaSeries(cs, 5)
 	e20 := emaSeries(cs, 20)
-	if !(price > e20[n-1] && price > cs[n-2].Close) { // 動能向上確認
+	if !(e5[n-1] > e20[n-1] && price > cs[n-2].Close) {
 		return
 	}
+	// 進場K棒體質(反插針):收陽、實體夠大、上影線不過長
+	rng := last.High - last.Low
+	body := last.Close - last.Open
+	if rng <= 0 || body <= 0 || body < pinBodyMin*rng || (last.High-last.Close) > pinWickMax*body {
+		return
+	}
+	// 靜默基線量 = 近期之前那 20 根(n-30..n-11)的均量,避開最近的爆量,避免自我循環
+	var vsum float64
+	for i := n - 30; i < n-10; i++ {
+		if i >= 0 {
+			vsum += cs[i].Volume
+		}
+	}
+	baseVol := vsum / 20
+	// ② 進場根量能確認
+	if baseVol > 0 && last.Volume < entryVolMult*baseVol {
+		return
+	}
+	// ③ 新鮮度:最近 freshWithin 根內要有一根爆量根
+	fresh := false
+	for i := n - freshWithin; i < n; i++ {
+		if i >= 0 && baseVol > 0 && cs[i].Volume >= freshVolMult*baseVol {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		return
+	}
+	// 不追高護欄
 	low20 := cs[n-1].Low
 	for i := n - 20; i < n; i++ {
 		if i >= 0 && cs[i].Low < low20 {
 			low20 = cs[i].Low
 		}
 	}
-	if low20 <= 0 || (price-low20)/low20 > surgeMaxExt { // 追高護欄
+	if low20 <= 0 || (price-low20)/low20 > surgeMaxExt {
 		return
 	}
-	low10 := cs[n-1].Low // swing-low 止損(近10根)
+	// 止損 = 近10根 swing low
+	low10 := cs[n-1].Low
 	for i := n - 10; i < n; i++ {
 		if i >= 0 && cs[i].Low < low10 {
 			low10 = cs[i].Low
