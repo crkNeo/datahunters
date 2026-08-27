@@ -49,6 +49,9 @@ type microBook struct {
 	// gate (optional): a quality filter checked AFTER signal + SL/TP pass. Return
 	// false to veto the entry. 脈衝星v2 uses it for the OI/CVD 品質閘門. nil = no gate.
 	gate func(coin string, cs []exchange.Candle) bool
+	// tpLevels (optional): explicit TP1/TP2/final prices, overriding the plan's a/b
+	// placement (but keeping its 分批比例/保本). 2155多 uses it for 固定5% + 1:1 + 1:2.
+	tpLevels func(entry, sl float64) (tp1, tp2, tp3 float64)
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -345,7 +348,16 @@ func ema2155Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	if risk <= 0 {
 		return
 	}
-	return "long", roundPx(price), roundPx(low), roundPx(price + 4*risk), true // TP3 = 1:4
+	return "long", roundPx(price), roundPx(low), roundPx(price + 2*risk), true // 最終止盈 = 1:2(實際三價位由 ema2155TPLevels 決定)
+}
+
+// ema2155TPLevels 是 2155多 的三價位止盈:TP1=固定 +5%、TP2=1:1(1R)、最終=1:2(2R)。
+// 三者排序後由小到大 = TP1/TP2/最終,所以「1:1 < 5%」時 TP1/TP2 自然對調,且順序永遠合法。
+func ema2155TPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
+	r := entry - sl
+	lv := []float64{entry * 1.05, entry + r, entry + 2*r} // +5% / 1:1 / 1:2
+	sort.Float64s(lv)
+	return roundPx(lv[0]), roundPx(lv[1]), roundPx(lv[2])
 }
 
 // ema2155DeathCross: EMA21 下穿 EMA55(死叉)→ 收盤即時平倉(2155多 的訊號出場)。
@@ -499,6 +511,11 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			}
 			plan, _ := s.tpFor(b.strat(), b.plan)
 			setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
+			if b.tpLevels != nil && plan != nil {
+				// 明確三價位止盈(2155多):TP1/TP2/最終各自獨立,覆蓋 plan 的 a/b 位置,
+				// 但仍沿用 plan 的分批比例(w1/w2/w3)與保本緩衝。
+				tr.TP1, tr.TP2, tr.TP = b.tpLevels(tr.Entry, tr.SL)
+			}
 			b.trades = append(b.trades, tr)
 			dirty = tr
 			opened = true

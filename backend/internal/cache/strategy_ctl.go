@@ -79,7 +79,9 @@ var stratDefaults = map[string]StratCfg{
 	"bgv2": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single"},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
-	// 2155多:TP3=1:4(4R),分批位 50%/75% → TP1=2R(1:2)、TP2=3R(1:3),比例 40/30/30。
+	// 2155多:三價位止盈由 ema2155TPLevels 決定 —— TP1=固定+5%、TP2=1:1、最終=1:2,
+	// 「1:1 < 5%」時 TP1/TP2 自動對調。SplitA/SplitB(位置)對本策略無效(被明確價位覆蓋);
+	// 仍沿用分批比例 40/30/30 與保本緩衝。
 	"ema2155": {Tags: []string{"順勢", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// 脈衝星:建在爆量熱名單上的觀察策略。TP3=1:4、分批 50/75 → 1:2/1:3。預設靜默觀察
 	// (通知全關),確認品質後再開通知/接實盤。
