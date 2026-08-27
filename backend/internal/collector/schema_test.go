@@ -14,10 +14,7 @@ func TestAddedColumnsMatchDDL(t *testing.T) {
 	for name, ddl := range tableDDL {
 		ddls[name] = ddl
 	}
-	ddls["universe_1d"] = universeDDL
 	ddls["collector_state"] = stateDDL
-	ddls["unlock_events"] = unlockEventsDDL
-	ddls["unlock_snapshot_1d"] = unlockSnapshotDDL
 
 	for table, cols := range addedColumns {
 		ddl, ok := ddls[table]

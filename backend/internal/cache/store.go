@@ -139,6 +139,9 @@ type Store struct {
 	bgv2Boll     *microBook // 布乖v2 腿2:布林重回 4h 只做空 (admin, microrev.go)
 	bollEMABook  *microBook // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
 	ema2155Books []*microBook // 2155多:EMA21/55 金叉 只做多,死叉即時止損;1h/4h/1d 三週期同頁 (microrev.go)
+	surge        *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
+	pulsarBook   *microBook   // 脈衝星:建在爆量熱名單上的觀察策略 (microrev.go)
+	pulsarV2Book *microBook   // 脈衝星v2:脈衝星 + OI/CVD 品質閘門 (microrev.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -195,6 +198,7 @@ func NewStore(coins []string) *Store {
 		details:           map[string]CoinDetail{},
 		ex:                exchange.NewClient(),
 		coins:             coins,
+		surge:             newSurgeEngine(),
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
 		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧;逾時6h)
 		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)
@@ -255,6 +259,12 @@ func NewStore(coins []string) *Store {
 		{name: "ema2155_4h", tf: "4h", barSec: 14400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross},
 		{name: "ema2155_1d", tf: "1d", barSec: 86400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross},
 	}
+	// 脈衝星:建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
+	// 15m 動能確認進場、近10根 swing-low 止損、1:4 分批(50/75 → 1:2/1:3)、12h 逾時。
+	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 48, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
+	// 脈衝星v2:與脈衝星完全相同,但多一道 OI/CVD 品質閘門(只放行 OI 擴張 + 買盤主導的爆量)。
+	// 兩本並存是為了 A/B 對照:閘門有沒有把品質拉起來。
+	s.pulsarV2Book = &microBook{name: "pulsarv2", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 48, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, gate: s.oiCvdGate}
 	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
 	// 照回測規格原樣上線 — 單段止盈(plan nil)、無 maxSLPct 濾網(SL 本就刻意放寬到 4 ATR)、逾時 64 根。
 	bgv2Mu := &sync.Mutex{} // 家族共用鎖:序列化兩腿的進場判斷
@@ -287,6 +297,8 @@ func NewStore(coins []string) *Store {
 		for _, b := range s.ema2155Books {
 			b.trades = db.loadTrades(b.name)
 		}
+		s.pulsarBook.trades = db.loadTrades("pulsar")
+		s.pulsarV2Book.trades = db.loadTrades("pulsarv2")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}
@@ -963,6 +975,7 @@ func (s *Store) Refresh() {
 	btcChg := tmap["BTCUSDT"].ChgPct
 	if len(tickers) > 0 {
 		s.setEMAUniverse(tickers, emaTopN) // top-N by volume → EMA strategy universe
+		s.surge.scan(tickers, time.Now())  // 爆量脈搏斥候(零額外 REST,純記憶體)
 	}
 
 	// OI 儀表板 / 數據訊號 / 評分穿越的監控幣池 = 動態「成交量前 N」(emaCoins,與策略同

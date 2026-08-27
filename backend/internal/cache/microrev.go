@@ -43,6 +43,12 @@ type microBook struct {
 	// tfTag: stamp this book's tf onto its trades at serve time, so a multi-timeframe
 	// page (2155多 = 1h/4h/1d 同頁) can show a 週期 column. Off for single-tf books.
 	tfTag bool
+	// universe (optional): the coin set this book scans each tick. nil = 銀河 top-80
+	// (emaCoins). 脈衝星 injects the 爆量熱名單 here so it can reach coins outside top-80.
+	universe func() []string
+	// gate (optional): a quality filter checked AFTER signal + SL/TP pass. Return
+	// false to veto the entry. 脈衝星v2 uses it for the OI/CVD 品質閘門. nil = no gate.
+	gate func(coin string, cs []exchange.Candle) bool
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -353,6 +359,45 @@ func ema2155DeathCross(cs []exchange.Candle) bool {
 	return e21[n-1] < e55[n-1] && e21[n-2] >= e55[n-2]
 }
 
+// surgeSignal — 脈衝星進場規則。此書的宇宙已是「爆量熱名單」(成交量條件由 universe
+// 篩過),這裡只在 K 線上做「動能確認 + 不追高護欄 + 定 SL/TP」。只做多。
+//
+//   進場:收盤 > EMA20 且 收盤 > 前一根(價格正在向上突破,不是爆量下殺)
+//   不追高:現價離「近20根低點」不得超過 surgeMaxExt(還在起漲初段才進,埋伏不追)
+//   止損:近10根 swing low ｜ 止盈:1:4(R = 進場−止損),分批 50%/75% → 1:2 / 1:3
+func surgeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	const surgeMaxExt = 0.25 // 現價高出近20根低點 >25% 就算追高,跳過
+	n := len(cs)
+	if n < 30 {
+		return
+	}
+	price := cs[n-1].Close
+	e20 := emaSeries(cs, 20)
+	if !(price > e20[n-1] && price > cs[n-2].Close) { // 動能向上確認
+		return
+	}
+	low20 := cs[n-1].Low
+	for i := n - 20; i < n; i++ {
+		if i >= 0 && cs[i].Low < low20 {
+			low20 = cs[i].Low
+		}
+	}
+	if low20 <= 0 || (price-low20)/low20 > surgeMaxExt { // 追高護欄
+		return
+	}
+	low10 := cs[n-1].Low // swing-low 止損(近10根)
+	for i := n - 10; i < n; i++ {
+		if i >= 0 && cs[i].Low < low10 {
+			low10 = cs[i].Low
+		}
+	}
+	risk := price - low10
+	if risk <= 0 {
+		return
+	}
+	return "long", roundPx(price), roundPx(low10), roundPx(price + 4*risk), true // TP3 = 1:4
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -367,7 +412,11 @@ func (s *Store) microTick(b *microBook) {
 		return
 	}
 	now := time.Now().UTC()
-	for _, coin := range s.emaCoins() {
+	coins := s.emaCoins()
+	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)
+		coins = b.universe()
+	}
+	for _, coin := range coins {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil || len(cs) < 2 {
 			continue
@@ -432,7 +481,8 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		}
 		dirty = open
 	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
-		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) && s.microTPOK(b, entry, tp) {
+		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) && s.microTPOK(b, entry, tp) &&
+			(b.gate == nil || b.gate(coin, cs)) { // 品質閘門(脈衝星v2 的 OI/CVD),nil=不設限
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:     coin,
@@ -683,6 +733,10 @@ func (s *Store) EMA2155Tick() {
 		s.microTick(b)
 	}
 }
+func (s *Store) PulsarTick()       { s.microTick(s.pulsarBook) }
+func (s *Store) PulsarMarkTick()   { s.microMarkTick(s.pulsarBook) }
+func (s *Store) PulsarV2Tick()     { s.microTick(s.pulsarV2Book) }
+func (s *Store) PulsarV2MarkTick() { s.microMarkTick(s.pulsarV2Book) }
 
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
@@ -739,6 +793,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 			}
 		}
 		return true // DB 已在上面各週期處理
+	case "pulsar":
+		s.pulsarBook.mu.Lock()
+		s.pulsarBook.trades = keepIf(s.pulsarBook.trades, closedOnly)
+		s.pulsarBook.mu.Unlock()
+	case "pulsarv2":
+		s.pulsarV2Book.mu.Lock()
+		s.pulsarV2Book.trades = keepIf(s.pulsarV2Book.trades, closedOnly)
+		s.pulsarV2Book.mu.Unlock()
 	case "bgv2": // 家族:一個開關清兩腿
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
@@ -829,3 +891,5 @@ func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) 
 func (s *Store) BGV2State() PaperState    { return s.microState(s.bgv2Dev, s.bgv2Boll) }
 func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) }
 func (s *Store) EMA2155State() PaperState  { return s.microState(s.ema2155Books...) }
+func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
+func (s *Store) PulsarV2State() PaperState  { return s.microState(s.pulsarV2Book) }

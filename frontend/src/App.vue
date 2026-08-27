@@ -702,6 +702,41 @@ async function loadEMA2155() {
     /* secondary */
   }
 }
+const pulsar = ref(null)
+async function loadPulsar() {
+  try {
+    const res = await authFetch('/api/pulsar')
+    if (res.ok) pulsar.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const pulsarv2 = ref(null)
+async function loadPulsarV2() {
+  try {
+    const res = await authFetch('/api/pulsarv2')
+    if (res.ok) pulsarv2.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+// 爆量脈搏面板(全市場相對爆量斥候,純觀察)
+const surge = ref(null)
+const surgeSort = ref('surge_x')
+async function loadSurge() {
+  try {
+    const res = await authFetch('/api/admin/surge')
+    if (res.ok) surge.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const surgeRows = computed(() => {
+  const rows = (surge.value || []).slice()
+  const k = surgeSort.value
+  rows.sort((a, b) => (b[k] ?? 0) - (a[k] ?? 0))
+  return rows
+})
 const srmtf = ref(null)
 async function loadSRMTF() {
   try {
@@ -740,6 +775,14 @@ const microMeta = {
   ema2155: {
     title: '2155多 · 1h / 4h / 日線', load: loadEMA2155, get: () => ema2155.value,
     help: '<b>只做多的順勢策略</b>——EMA21 上穿 EMA55（金叉)進場。<br><b>三個週期同頁</b>:<b>1H / 4H / 日線</b>各自獨立掃描、獨立持倉(同一幣可在不同週期各開一單),列表以「<b>週期</b>」欄分類。<br><b>進場</b>:該週期收盤出現 <b>EMA21 金叉 EMA55</b> → 收盤市價做多。<br><b>止損</b>:金叉當下<b>近 20 根 K 棒的最低點</b>。<br><b>止盈</b>(以進場−止損為 1R 計):<b>TP1 = 1:2</b>、<b>TP2 = 1:3</b>、<b>最終 TP3 = 1:4</b>。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>50% / 75%</b>(即 2R / 3R);TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3 平剩餘 30%。<br><b>反向出場</b>:持倉過程中若出現 <b>EMA21 死叉 EMA55</b> → 該根收盤<b>即時平倉</b>。<br>無固定時間出場;冷卻 4 根。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
+  },
+  pulsar: {
+    title: '脈衝星 · 爆量埋伏 · 15m', load: loadPulsar, get: () => pulsar.value,
+    help: '<b>建在「爆量脈搏」斥候上的觀察策略 · 只做多</b>,目標是埋伏「靜默後突然爆量」的暴漲初段。<br><br><b>【選幣】</b>不看成交量絕對排名,看「相對自身基線的爆量」——全市場 ~700 檔中,近30分鐘成交量脈搏 ≥ <b>3×</b> 自身基線者進熱名單(可含 top-80 以外的冷門幣),取前 40。<br><b>【進場】</b>(15m 收盤,同時成立):① 收盤 &gt; <b>EMA20</b> 且 收盤 &gt; 前一根(動能向上,不是爆量下殺) ② <b>不追高護欄</b>:現價離近 20 根最低點 ≤ <b>25%</b>(還在起漲初段)。<br><b>【止損】</b>近 10 根 swing low。<br><b>【止盈】</b>以 R = 進場−止損:<b>TP1=1:2、TP2=1:3、TP3=1:4</b>,分批 50%/75% → 40/30/30(TP1 後移保本、TP2 後移 TP1)。<br><b>【其他】</b>12h 逾時、冷卻 4 根。<br><br>⚠️ <b>此為「裸訊號」觀察書,不含 OI/CVD 品質閘門</b>(想看有閘門的版本 → 脈衝星v2)。預設靜默(不推播、不接實盤)。管理員專屬模擬單,非投資建議。',
+  },
+  pulsarv2: {
+    title: '脈衝星v2 · 爆量埋伏＋OI/CVD 閘門 · 15m', load: loadPulsarV2, get: () => pulsarv2.value,
+    help: '<b>= 脈衝星 + 一道 OI/CVD 品質閘門</b>。選幣、進場、止盈止損<b>與脈衝星完全相同</b>,差別只在多一層「有沒有真實需求」的把關。兩本並存是為了 <b>A/B 對照</b>:閘門把品質拉起來了嗎?<br><br><b>【選幣】</b>同脈衝星:全市場相對爆量 ≥ 3× 基線的熱名單。<br><b>【進場確認】</b>同脈衝星:15m 收盤 &gt; EMA20、動能向上、離近 20 根低點 ≤ 25%(不追高)。<br><b>【✚ OI/CVD 品質閘門】</b>訊號成立後還要<b>兩項都通過</b>才進場:<br>　① <b>CVD 為正</b>(近 3 小時淨主買佔比 &gt; 0)——積極買盤主導,不是被動掛單。<br>　② <b>OI 上升</b>(近 1 小時名目 OI 變化 &gt; 0)——新多進場,不是空頭回補。<br>　(對應點火哲學:量價齊升＋OI 擴張才是有底的行情;純槓桿/軋空的假爆量會被擋掉。缺 OI 資料時保守擋掉。)<br><b>【止損/止盈】</b>同脈衝星:近 10 根 swing low 止損;TP1=1:2 / TP2=1:3 / TP3=1:4 分批。<br><br>⚠️ 預設靜默(不推播、不接實盤)。管理員專屬模擬單,非投資建議。',
   },
   meanrev: {
     title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
@@ -1189,6 +1232,9 @@ function loadAll() {
   if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
   if (canTab('ema2155')) loadEMA2155()
+  if (canTab('pulsar')) loadPulsar()
+  if (canTab('pulsarv2')) loadPulsarV2()
+  if (canTab('surge')) loadSurge()
   if (canTab('srmtf')) loadSRMTF()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
   if (can('admin')) {
@@ -1261,7 +1307,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1399,7 +1445,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', ema2155: 'admin', srmtf: 'admin',
+  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', ema2155: 'admin', surge: 'admin', pulsar: 'admin', pulsarv2: 'admin', srmtf: 'admin',
   patterns: 'admin',
 }
 const tabPerms = ref({})
@@ -1442,7 +1488,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', ema2155: 'signal', srmtf: 'signal',
+  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', ema2155: 'signal', surge: 'signal', pulsar: 'signal', pulsarv2: 'signal', srmtf: 'signal',
   patterns: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
@@ -1451,7 +1497,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'patterns', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'srmtf',
+  'admin', 'referral', 'patterns', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -1968,6 +2014,15 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('ema2155', grp[0])" :class="{ active: mainTab === 'ema2155' }" @click="mainTab = 'ema2155'; loadEMA2155()">
             2155多<em v-if="ema2155 && ema2155.open.length" class="navbadge">{{ ema2155.open.length }}</em>
           </button>
+          <button v-if="inGroup('surge', grp[0])" :class="{ active: mainTab === 'surge' }" @click="mainTab = 'surge'; loadSurge()">
+            爆量脈搏<em v-if="surge && surge.length" class="navbadge">{{ surge.length }}</em>
+          </button>
+          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar' }" @click="mainTab = 'pulsar'; loadPulsar()">
+            脈衝星<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em>
+          </button>
+          <button v-if="inGroup('pulsarv2', grp[0])" :class="{ active: mainTab === 'pulsarv2' }" @click="mainTab = 'pulsarv2'; loadPulsarV2()">
+            脈衝星v2<em v-if="pulsarv2 && pulsarv2.open.length" class="navbadge">{{ pulsarv2.open.length }}</em>
+          </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘頭/射擊星</button>
         </div>
       </div>
@@ -2059,6 +2114,41 @@ watch([role, tabPerms, authReady], () => {
       <p v-else-if="srmtf" class="empty">尚無插針訊號 —— 需等 1H/4H 收盤出現符合條件的錘頭線或射擊星。</p>
       <p v-else class="loading">載入中…</p>
       <p class="loginhint" style="margin-top:12px">1H 或 4H 收盤出現錘頭線/射擊星時,會即時推播(需在裝置開啟通知)。純提示,不含任何下單訊號。</p>
+    </section>
+
+    <!-- 爆量脈搏面板 (全市場相對爆量斥候) · admin only -->
+    <section v-else-if="mainTab === 'surge' && canTab('surge')">
+      <div class="mk-head">
+        <h2>爆量脈搏<span class="help" tabindex="0">?<span class="help-pop"><b>全市場 ~700 檔的「相對爆量」斥候</b>(方向①+②的第一段)。<br>不看成交量絕對排名,而看「<b>近窗成交量脈搏 ÷ 該幣自身基線</b>」——問的不是「量大不大」,而是「<b>是不是突然醒了</b>」。<br>資料來自本來就會抓的 all-tickers(零額外 REST),每 2 分鐘更新。<br><b>爆量倍數</b>≥3× 者進「脈衝星」熱名單。<b>盲區</b>=排在 top-80 之外(現有雷達看不到)。<br><b>筆數倍數</b>是抗洗量的輔助訊號(單一鯨魚拉金額但拉不動筆數)。<br>⚠️ 這只是感測器,負責提名可疑對象,不含 OI/CVD 定罪閘門。</span></span></h2>
+        <span class="mk-actions"><span class="mk-count" v-if="surge">{{ surge.length }} 檔醒訊 · 每2分更新</span><button class="clearbtn" @click="loadSurge()">刷新</button></span>
+      </div>
+      <table class="grid" v-if="surge && surge.length">
+        <thead><tr>
+          <th>幣種</th>
+          <th class="r">現價</th>
+          <th class="r srt" :class="{ on: surgeSort==='chg24' }" @click="surgeSort='chg24'">24h%</th>
+          <th class="r srt" :class="{ on: surgeSort==='surge_x' }" @click="surgeSort='surge_x'">爆量倍數</th>
+          <th class="r srt" :class="{ on: surgeSort==='pulse_30m' }" @click="surgeSort='pulse_30m'">近30m脈搏</th>
+          <th class="r srt" :class="{ on: surgeSort==='vol_24h' }" @click="surgeSort='vol_24h'">24h量</th>
+          <th class="r srt" :class="{ on: surgeSort==='cnt_x' }" @click="surgeSort='cnt_x'">筆數倍數</th>
+          <th class="r">量排名</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="r in surgeRows" :key="r.coin" class="clickable" @click="openDetail(r.coin)">
+            <td class="coin">{{ r.coin }}<span v-if="r.hot" class="hotbadge" title="已達脈衝星熱名單門檻(≥3×)">🔥</span></td>
+            <td class="r">{{ fmtPrice(r.price) }}</td>
+            <td class="r" :class="r.chg24 >= 0 ? 'long' : 'short'">{{ fmtPct(r.chg24) }}</td>
+            <td class="r"><b :class="r.surge_x >= 3 ? 'long' : ''">{{ r.surge_x }}×</b></td>
+            <td class="r tsmall">{{ (r.pulse_30m/1e6).toFixed(2) }}M</td>
+            <td class="r tsmall">{{ (r.vol_24h/1e6).toFixed(1) }}M</td>
+            <td class="r tsmall">{{ r.cnt_x }}×</td>
+            <td class="r"><span :class="r.top80_out ? 'srge-out' : 'tsmall'">#{{ r.vol_rank }}<template v-if="r.top80_out"> · 盲區</template></span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else-if="surge" class="empty">目前無明顯爆量 —— 需等某檔幣的成交量脈搏相對自身基線放大(啟動後需累積約 2 小時基線才開始評分)。</p>
+      <p v-else class="loading">載入中…</p>
+      <p class="loginhint" style="margin-top:12px">此為觀察面板:純感測器輸出,不含品質閘門、不下單。點列可看該幣詳情。</p>
     </section>
 
     <!-- 冥王星 (動態ATR 4H 均線收斂) · VIP -->
@@ -3098,6 +3188,12 @@ body::before {
 .mk-actions { display: flex; align-items: center; gap: 10px; }
 .clearbtn { background: transparent; border: 1px solid #4a2c2c; color: #c56a6a; font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: .15s; }
 .clearbtn:hover { border-color: #e05555; color: #e05555; background: rgba(224, 85, 85, 0.08); }
+.srt { cursor: pointer; user-select: none; }
+.srt:hover { color: #cfd3da; }
+.srt.on { color: #6db5ff; }
+.srt.on::after { content: ' ▼'; font-size: 9px; }
+.hotbadge { margin-left: 5px; font-size: 11px; }
+.srge-out { font-size: 11px; font-weight: 700; color: #f4a548; background: #2f2410; border-radius: 5px; padding: 1px 6px; }
 .tpfunnel { background: #14161c; border-radius: 10px; padding: 12px 14px 13px; margin: 12px 0 4px; }
 .tpf-title { font-size: 12px; color: #8b909a; margin-bottom: 10px; }
 .tpf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

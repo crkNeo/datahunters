@@ -596,6 +596,7 @@ type MarketTicker struct {
 	Price    float64
 	ChgPct   float64
 	QuoteVol float64 // 24h notional turnover, USDT
+	Count    int64   // 24h trade count (harder to wash-fake than notional)
 }
 
 // BinanceAllTickers fetches the 24h ticker for every contract in one call and
@@ -626,6 +627,7 @@ func (c *Client) BinanceAllTickers() ([]MarketTicker, error) {
 		LastPrice          string `json:"lastPrice"`
 		PriceChangePercent string `json:"priceChangePercent"`
 		QuoteVolume        string `json:"quoteVolume"`
+		Count              int64  `json:"count"`
 	}
 	if err := c.get(url, &raw); err != nil {
 		return nil, err
@@ -640,6 +642,7 @@ func (c *Client) BinanceAllTickers() ([]MarketTicker, error) {
 			Price:    atof(t.LastPrice),
 			ChgPct:   atof(t.PriceChangePercent),
 			QuoteVol: atof(t.QuoteVolume),
+			Count:    t.Count,
 		})
 	}
 	return out, nil

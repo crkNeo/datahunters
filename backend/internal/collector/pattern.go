@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"time"
 )
 
 // pattern.go turns the two hand-read setups into live detectors, and — more
@@ -99,13 +98,8 @@ func (c *Collector) DetectPatterns(barTs int64) {
 	if len(syms) == 0 {
 		return
 	}
-	// 90 minutes covers the 60-bar volume z-score plus the longest setup window
-	from := barTs - 90*60_000
-	series, err := loadPatternSeries(c.db, from, barTs)
-	if err != nil {
-		log.Printf("patterns: load: %v", err)
-		return
-	}
+	// store-free:偵測資料來自記憶體滾動窗(每 tick 存入),不再讀 snap_1m。
+	series := c.patternSeries()
 	var hits []patternHit
 	for _, sym := range syms {
 		bs := series[sym]
@@ -342,86 +336,6 @@ func writePatternHits(db execer, hits []patternHit) error {
 			h.OIChg5m, h.VolZ, h.TakerPct, h.BasisBps, h.FundingBps,
 			h.SpotRatio, h.MktRet, h.RunBars, h.RunPct}
 	})
-}
-
-// BackfillPatternOutcomes fills in what happened after each recorded hit.
-//
-// Kept strictly separate from detection so an outcome can never influence
-// whether the signal was recorded — the hit row exists before the result does,
-// which is the only arrangement under which the measured hit rate means
-// anything.
-func BackfillPatternOutcomes(db *sql.DB) error {
-	cutoff := time.Now().Add(-20 * time.Minute).UnixMilli()
-	rows, err := db.Query(`SELECT day, ts, symbol, pattern, price FROM pattern_hits
-	                       WHERE outcome_done = 0 AND ts <= ? ORDER BY ts LIMIT 500`, cutoff)
-	if err != nil {
-		return err
-	}
-	type pend struct {
-		day          int
-		ts           int64
-		symbol, patt string
-		price        float64
-	}
-	var todo []pend
-	for rows.Next() {
-		var p pend
-		if err := rows.Scan(&p.day, &p.ts, &p.symbol, &p.patt, &p.price); err != nil {
-			rows.Close()
-			return err
-		}
-		todo = append(todo, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, p := range todo {
-		if p.price <= 0 {
-			continue
-		}
-		var mfe5, mae5, ret5, mfe15 sql.NullFloat64
-		err := db.QueryRow(`SELECT
-		    MAX(CASE WHEN ts <= ? THEN high END), MIN(CASE WHEN ts <= ? THEN low END),
-		    SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN ts <= ? THEN close END ORDER BY ts DESC), ',', 1),
-		    MAX(high)
-		  FROM snap_1m WHERE symbol = ? AND ts > ? AND ts <= ?`,
-			p.ts+5*60_000, p.ts+5*60_000, p.ts+5*60_000,
-			p.symbol, p.ts, p.ts+15*60_000).Scan(&mfe5, &mae5, &ret5, &mfe15)
-		if err != nil {
-			log.Printf("patterns: outcome %s %s: %v", p.symbol, p.patt, err)
-			continue
-		}
-		f := func(v sql.NullFloat64) float64 {
-			if !v.Valid || v.Float64 <= 0 {
-				return 0
-			}
-			return v.Float64/p.price - 1
-		}
-		if _, err := db.Exec(`UPDATE pattern_hits SET outcome_done = 1,
-		        mfe_5m = ?, mae_5m = ?, ret_5m = ?, mfe_15m = ?
-		      WHERE day = ? AND ts = ? AND symbol = ? AND pattern = ?`,
-			f(mfe5), f(mae5), f(ret5), f(mfe15),
-			p.day, p.ts, p.symbol, p.patt); err != nil {
-			log.Printf("patterns: outcome update: %v", err)
-		}
-	}
-	return nil
-}
-
-// RunPatternOutcomes backfills on an interval until stop is closed.
-func RunPatternOutcomes(db *sql.DB, every time.Duration, stop <-chan struct{}) {
-	for {
-		select {
-		case <-stop:
-			return
-		case <-time.After(every):
-			if err := BackfillPatternOutcomes(db); err != nil {
-				log.Printf("patterns: %v", err)
-			}
-		}
-	}
 }
 
 // LogPatternThresholds prints the conditions actually compiled into this

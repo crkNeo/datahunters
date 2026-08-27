@@ -454,6 +454,10 @@ func bookLabel(name string) string {
 		return "海王星"
 	case "ema2155", "ema2155_4h", "ema2155_1d":
 		return "2155多"
+	case "pulsar":
+		return "脈衝星"
+	case "pulsarv2":
+		return "脈衝星v2"
 	}
 	return "星軌"
 }
@@ -507,7 +511,7 @@ func bookTab(name string) string {
 	switch name {
 	case "bgv2dev", "bgv2boll":
 		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "bollema", "ema2155":
+	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2":
 		return name
 	case "ema2155_4h", "ema2155_1d": // 三週期共用一個分頁
 		return "ema2155"

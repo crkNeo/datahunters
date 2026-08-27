@@ -60,10 +60,15 @@ type Collector struct {
 	mu       sync.RWMutex
 	universe []string        // ranked, highest turnover first
 	spotOK   map[string]bool // symbol has a live spot pair
+
+	// 爆發型態改為完全不進 DB:每分鐘的快照存進這個記憶體滾動窗(每幣最近 ~90+ 根),
+	// 供 DetectPatterns 就地判讀,不再寫 snap_1m。訊號結果(pattern_hits)仍持久化。
+	pmu   sync.Mutex
+	pring map[string][]pbar
 }
 
 func New(ex *exchange.Client, db *sql.DB, cfg Config) *Collector {
-	return &Collector{ex: ex, db: db, cfg: cfg, spotOK: map[string]bool{}}
+	return &Collector{ex: ex, db: db, cfg: cfg, spotOK: map[string]bool{}, pring: map[string][]pbar{}}
 }
 
 // EnableUnlocks attaches a token-unlock schedule source. Optional: without it
@@ -261,18 +266,10 @@ func (c *Collector) tick(now time.Time) {
 	}
 	wg.Wait()
 
-	if err := writeSnaps(c.db, snaps); err != nil {
-		log.Printf("collector: %v", err)
-	}
-	if err := writeDepths(c.db, depths); err != nil {
-		log.Printf("collector: %v", err)
-	}
-	if err := writeSpots(c.db, spots); err != nil {
-		log.Printf("collector: %v", err)
-	}
-	if err := writeRegime(c.db, buildRegime(barTs, snaps)); err != nil {
-		log.Printf("collector: %v", err)
-	}
+	// 爆發型態(store-free):不再寫 snap_1m/depth_1m/spot_1m/regime_1m。改把這一分鐘的
+	// 快照存進記憶體滾動窗供偵測;市場中位報酬(mktRet)仍由 buildRegime 就地算出,只是不落表。
+	reg := buildRegime(barTs, snaps)
+	c.appendPatternRing(snaps, reg.MedianRet*100, barTs)
 
 	took := time.Since(started)
 	// Pattern detection runs here rather than on its own timer so it can only
@@ -412,19 +409,7 @@ func (c *Collector) refreshUniverse() error {
 		spot = map[string]bool{}
 	}
 
-	day := dayKey(time.Now())
-	rows := make([]universeRow, 0, len(cands))
-	for i, cd := range cands {
-		si := info[cd.sym]
-		rows = append(rows, universeRow{
-			Day: day, Symbol: cd.sym, Status: si.Status, OnboardTs: si.OnboardTs,
-			QuoteVol24h: cd.vol, RankVol: i + 1, Selected: inUniverse[cd.sym],
-		})
-	}
-	if err := writeUniverse(c.db, rows); err != nil {
-		log.Printf("collector: %v", err)
-	}
-
+	// (store-free) 不再記錄 universe_1d —— 追蹤名單只需在記憶體選出,不落表。
 	c.mu.Lock()
 	c.universe = picked
 	c.spotOK = spot

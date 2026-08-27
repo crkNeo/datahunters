@@ -22,7 +22,17 @@ type bitunixAccount struct {
 	books  map[string]bool // book names to mirror; "all" → every book
 }
 
-func (a *bitunixAccount) wants(book string) bool { return a.books["all"] || a.books[book] }
+// observeOnlyBooks are observation strategies that must NOT be swept in by the
+// "all" wildcard — they only go live if named explicitly in BITUNIX_BOOKS. Keeps
+// a strategy we're still validating (脈衝星) from placing real orders by accident.
+var observeOnlyBooks = map[string]bool{"pulsar": true}
+
+func (a *bitunixAccount) wants(book string) bool {
+	if a.books[book] { // 明確點名 → 一律生效(含 observe-only)
+		return true
+	}
+	return a.books["all"] && !observeOnlyBooks[book]
+}
 
 // bitunixTrader fans a strategy open out to one or more accounts.
 type bitunixTrader struct{ accts []*bitunixAccount }

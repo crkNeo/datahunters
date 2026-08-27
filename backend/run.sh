@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 #
-# run.sh — 一條指令同時啟動儀表板 server 與資料採集器 collector。
+# run.sh — 一條指令同時啟動儀表板 server 與 collector(精簡為「爆發型態」專用)。
+#
+# collector 已縮到只餵「爆發型態」分頁的最小管線(snap_1m → pattern_hits),
+# 其餘採集(深度/現貨/解鎖/labels)預設關閉。詳見下方 patterns_only 旗標。
 #
 #   ./run.sh                    兩個都跑
-#   ./run.sh -universe 50       多餘參數會轉給 collector
+#   ./run.sh -universe 50       多餘參數會轉給 collector(可覆蓋預設旗標)
 #   ./run.sh --only server      只跑其中一個
 #   ./run.sh --only collector
 #
@@ -84,9 +87,14 @@ if [[ $want_server == 1 ]]; then
   echo "run.sh: server pid=$srv_pid"
 fi
 if [[ $want_collector == 1 ]]; then
-  ./bin/collector "${args[@]+"${args[@]}"}" > >(sed -u 's/^/[collector] /') 2>&1 &
+  # store-free 模式:collector 已不寫任何逐分鐘快照到 DB —— 偵測吃記憶體滾動窗、
+  # 結果回填抓即時 K 線,只有 pattern_hits(訊號+結果)持久化供「爆發型態」分頁。
+  # 這些旗標省掉深度/現貨的無謂抓取,並確保 labeler/unlock 不去寫已移除的表。
+  # 放在使用者 args 之前,你仍可覆蓋。
+  patterns_only=(-depth-every 0 -spot-every 0 -no-unlocks -no-labeler)
+  ./bin/collector "${patterns_only[@]}" "${args[@]+"${args[@]}"}" > >(sed -u 's/^/[collector] /') 2>&1 &
   col_pid=$!
-  echo "run.sh: collector pid=$col_pid ${args[*]+${args[*]}}"
+  echo "run.sh: collector pid=$col_pid (patterns-only) ${args[*]+${args[*]}}"
 fi
 
 if [[ -z "$srv_pid$col_pid" ]]; then

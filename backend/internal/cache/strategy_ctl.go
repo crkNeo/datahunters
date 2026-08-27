@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -81,6 +81,11 @@ var stratDefaults = map[string]StratCfg{
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
 	// 2155多:TP3=1:4(4R),分批位 50%/75% → TP1=2R(1:2)、TP2=3R(1:3),比例 40/30/30。
 	"ema2155": {Tags: []string{"順勢", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
+	// 脈衝星:建在爆量熱名單上的觀察策略。TP3=1:4、分批 50/75 → 1:2/1:3。預設靜默觀察
+	// (通知全關),確認品質後再開通知/接實盤。
+	"pulsar": {Tags: []string{"爆量", "埋伏", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
+	// 脈衝星v2:脈衝星 + OI/CVD 品質閘門(只放行 OI 擴張 + 買盤主導的爆量)。同為靜默觀察。
+	"pulsarv2": {Tags: []string{"爆量", "埋伏", "多單", "OI/CVD"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -455,6 +460,14 @@ func (s *Store) ManualExit(book, id string) bool {
 				break
 			}
 		}
+	case "pulsar":
+		s.pulsarBook.mu.Lock()
+		done = closeIn(s.pulsarBook.trades)
+		s.pulsarBook.mu.Unlock()
+	case "pulsarv2":
+		s.pulsarV2Book.mu.Lock()
+		done = closeIn(s.pulsarV2Book.trades)
+		s.pulsarV2Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)

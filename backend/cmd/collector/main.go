@@ -155,7 +155,7 @@ func main() {
 	if !*labelOnly {
 		// Outcomes are backfilled on their own clock, well after detection, so a
 		// result can never feed back into whether the signal was recorded.
-		go collector.RunPatternOutcomes(db, 5*time.Minute, stop)
+		go c.RunPatternOutcomes(5*time.Minute, stop)
 	}
 	if !*noLabel {
 		log.Printf("labeler: event threshold %.1f%% within 5m", lcfg.EventPct*100)

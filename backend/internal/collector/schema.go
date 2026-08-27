@@ -39,127 +39,16 @@ import (
 // It also lets queries prune partitions with a plain `WHERE day = ?`.
 
 // partitionedTables are rebuilt daily and pruned by retention.
-var partitionedTables = []string{"snap_1m", "depth_1m", "spot_1m", "regime_1m", "labels_1m"}
+//
+// store-free「爆發型態」:偵測改吃記憶體滾動窗、結果回填改抓即時 K 線,collector 已不再
+// 寫任何逐分鐘快照,所以沒有分區表了。唯一持久化的是 pattern_hits(訊號+結果)。
+// depth_1m / spot_1m / labels_1m / regime_1m / snap_1m / universe_1d / unlock_* 皆已移除;
+// 若日後要恢復完整採集,需還原 pattern.go/collector.go/schema.go 與 run.sh。
+var partitionedTables = []string{}
 
-// tableDDL maps table name -> CREATE statement WITHOUT the partition clause.
-// ensureSchema appends the clause, and falls back to the bare statement if the
-// server refuses (partitioning can be disabled in a managed MySQL).
-var tableDDL = map[string]string{
-
-	// snap_1m is the core table: one row per symbol per closed 1-minute bar.
-	"snap_1m": `CREATE TABLE IF NOT EXISTS snap_1m (
-  day             INT    NOT NULL,
-  ts              BIGINT NOT NULL,
-  symbol          VARCHAR(32) NOT NULL,
-  open            DOUBLE NOT NULL DEFAULT 0,
-  high            DOUBLE NOT NULL DEFAULT 0,
-  low             DOUBLE NOT NULL DEFAULT 0,
-  close           DOUBLE NOT NULL DEFAULT 0,
-  vol_quote       DOUBLE NOT NULL DEFAULT 0,
-  trades          DOUBLE NOT NULL DEFAULT 0,
-  taker_buy_quote DOUBLE NOT NULL DEFAULT 0,
-  oi_contracts    DOUBLE NOT NULL DEFAULT 0,
-  oi_usd          DOUBLE NOT NULL DEFAULT 0,
-  funding         DOUBLE NOT NULL DEFAULT 0,
-  next_funding_ts BIGINT NOT NULL DEFAULT 0,
-  mark            DOUBLE NOT NULL DEFAULT 0,
-  index_px        DOUBLE NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, ts, symbol),
-  KEY idx_snap_sym_ts (symbol, ts)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	// depth_1m is sampled on a slower cadence than snap_1m: the depth endpoint
-	// costs far more request weight than a kline, and book shape does not
-	// change on a 60-second timescale the way trade flow does.
-	// truncated=1 means the returned book ended before ±2%, so the outer bands
-	// are lower bounds — the analysis must not treat them as measurements.
-	"depth_1m": `CREATE TABLE IF NOT EXISTS depth_1m (
-  day        INT    NOT NULL,
-  ts         BIGINT NOT NULL,
-  symbol     VARCHAR(32) NOT NULL,
-  bid1       DOUBLE NOT NULL DEFAULT 0,
-  ask1       DOUBLE NOT NULL DEFAULT 0,
-  spread_bps DOUBLE NOT NULL DEFAULT 0,
-  bid_usd_05 DOUBLE NOT NULL DEFAULT 0,
-  bid_usd_1  DOUBLE NOT NULL DEFAULT 0,
-  bid_usd_2  DOUBLE NOT NULL DEFAULT 0,
-  ask_usd_05 DOUBLE NOT NULL DEFAULT 0,
-  ask_usd_1  DOUBLE NOT NULL DEFAULT 0,
-  ask_usd_2  DOUBLE NOT NULL DEFAULT 0,
-  truncated  TINYINT NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, ts, symbol)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	// spot_1m exists for exactly one ratio: spot volume vs perp volume.
-	// A move carried by perp volume with spot flat is leverage with nothing
-	// underneath it and tends to retrace as fast as it went; a move where spot
-	// leads and perp OI follows has real buyers and holds. On a few-minutes
-	// holding period that distinction decides whether to chase or to leave.
-	"spot_1m": `CREATE TABLE IF NOT EXISTS spot_1m (
-  day             INT    NOT NULL,
-  ts              BIGINT NOT NULL,
-  symbol          VARCHAR(32) NOT NULL,
-  close           DOUBLE NOT NULL DEFAULT 0,
-  vol_quote       DOUBLE NOT NULL DEFAULT 0,
-  taker_buy_quote DOUBLE NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, ts, symbol)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	// regime_1m is the market-state row: one per minute, not per symbol.
-	// median_ret and disp are the cheap half of the regime gate — median_ret is
-	// the baseline for residual (market-neutral) return, and disp says whether
-	// money is picking coins or just moving the whole board. A screener that
-	// fires the same way in both states is mostly trading beta.
-	"regime_1m": `CREATE TABLE IF NOT EXISTS regime_1m (
-  day          INT    NOT NULL,
-  ts           BIGINT NOT NULL,
-  btc_px       DOUBLE NOT NULL DEFAULT 0,
-  btc_oi_usd   DOUBLE NOT NULL DEFAULT 0,
-  eth_px       DOUBLE NOT NULL DEFAULT 0,
-  eth_oi_usd   DOUBLE NOT NULL DEFAULT 0,
-  total_oi_usd DOUBLE NOT NULL DEFAULT 0,
-  adv_count    INT    NOT NULL DEFAULT 0,
-  dec_count    INT    NOT NULL DEFAULT 0,
-  median_ret   DOUBLE NOT NULL DEFAULT 0,
-  disp         DOUBLE NOT NULL DEFAULT 0,
-  universe     INT    NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, ts)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	// labels_1m is the outcome side, backfilled once each bar's forward window
-	// has elapsed. Kept in its own table so the labeler never contends with the
-	// collector's write path, and so labels can be recomputed from scratch
-	// (different event thresholds, different horizons) without touching inputs.
-	//
-	// secs_to_peak_15m answers the question that decides the whole architecture:
-	// if the median burst tops out in well under a minute, no human is clicking
-	// fast enough and the only options are automation or trading the second leg.
-	"labels_1m": `CREATE TABLE IF NOT EXISTS labels_1m (
-  day              INT    NOT NULL,
-  ts               BIGINT NOT NULL,
-  symbol           VARCHAR(32) NOT NULL,
-  base_close       DOUBLE NOT NULL DEFAULT 0,
-  ret_5m           DOUBLE NOT NULL DEFAULT 0,
-  ret_15m          DOUBLE NOT NULL DEFAULT 0,
-  ret_30m          DOUBLE NOT NULL DEFAULT 0,
-  ret_60m          DOUBLE NOT NULL DEFAULT 0,
-  mfe_5m           DOUBLE NOT NULL DEFAULT 0,
-  mae_5m           DOUBLE NOT NULL DEFAULT 0,
-  mfe_15m          DOUBLE NOT NULL DEFAULT 0,
-  mae_15m          DOUBLE NOT NULL DEFAULT 0,
-  mfe_30m          DOUBLE NOT NULL DEFAULT 0,
-  mae_30m          DOUBLE NOT NULL DEFAULT 0,
-  mfe_60m          DOUBLE NOT NULL DEFAULT 0,
-  mae_60m          DOUBLE NOT NULL DEFAULT 0,
-  secs_to_peak_15m INT    NOT NULL DEFAULT 0,
-  bars_5m          INT    NOT NULL DEFAULT 0,
-  bars_60m         INT    NOT NULL DEFAULT 0,
-  is_event         TINYINT NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, ts, symbol),
-  KEY idx_lab_event (is_event, ts),
-  KEY idx_lab_sym (symbol, ts)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-}
+// tableDDL previously held the per-minute snapshot tables; store-free left it empty.
+// ensureSchema still ranges it (a no-op now) so restoring a table is a one-line add.
+var tableDDL = map[string]string{}
 
 // collector_state is a tiny key/value table for progress markers.
 //
@@ -187,50 +76,6 @@ const universeDDL = `CREATE TABLE IF NOT EXISTS universe_1d (
   rank_vol      INT    NOT NULL DEFAULT 0,
   selected      TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (day, symbol)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-
-// unlock_events is the dated unlock schedule AS SEEN ON asof_day.
-//
-// The whole table is re-recorded daily rather than kept as one current view,
-// because unlock schedules get REVISED — projects delay or accelerate, and the
-// upstream dataset gets corrected. Joining today's schedule onto a snapshot
-// from three months ago would use knowledge that did not exist at the time,
-// which is lookahead of the most convincing kind: it makes the feature look
-// prescient precisely because it was written after the fact.
-const unlockEventsDDL = `CREATE TABLE IF NOT EXISTS unlock_events (
-  asof_day  INT    NOT NULL,
-  coin      VARCHAR(32) NOT NULL,
-  unlock_ts BIGINT NOT NULL,
-  category  VARCHAR(64) NOT NULL,
-  amount    DOUBLE NOT NULL DEFAULT 0,
-  PRIMARY KEY (asof_day, coin, unlock_ts, category),
-  KEY idx_ue_coin_ts (coin, unlock_ts)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-
-// unlock_snapshot_1d records, per coin per day, what was known about its
-// unlocks — including the two negative cases that make the control group valid:
-//
-//	covered=0                 → the unlock source does not track this coin at
-//	                            all. UNKNOWN. Must never be read as "no unlock".
-//	covered=1, has_upcoming=0 → genuinely nothing scheduled in the horizon.
-//
-// price/circ/max_supply are the as-of values, stored raw so that magnitude
-// measures (unlock USD against daily turnover, unlock as a share of float) stay
-// reproducible offline instead of being frozen here.
-const unlockSnapshotDDL = `CREATE TABLE IF NOT EXISTS unlock_snapshot_1d (
-  day             INT    NOT NULL,
-  coin            VARCHAR(32) NOT NULL,
-  in_universe     TINYINT NOT NULL DEFAULT 0,
-  covered         TINYINT NOT NULL DEFAULT 0,
-  has_upcoming    TINYINT NOT NULL DEFAULT 0,
-  next_unlock_ts  BIGINT NOT NULL DEFAULT 0,
-  next_unlock_amt DOUBLE NOT NULL DEFAULT 0,
-  horizon_amt     DOUBLE NOT NULL DEFAULT 0,
-  events_n        INT    NOT NULL DEFAULT 0,
-  price           DOUBLE NOT NULL DEFAULT 0,
-  circ            DOUBLE NOT NULL DEFAULT 0,
-  max_supply      DOUBLE NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, coin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 
 // addedColumns lists columns introduced after a table first shipped.
@@ -301,17 +146,8 @@ func ensureSchema(db *sql.DB, retentionDays int) error {
 			}
 		}
 	}
-	if _, err := db.Exec(universeDDL); err != nil {
-		return fmt.Errorf("create universe_1d: %w", err)
-	}
 	if _, err := db.Exec(stateDDL); err != nil {
 		return fmt.Errorf("create collector_state: %w", err)
-	}
-	if _, err := db.Exec(unlockEventsDDL); err != nil {
-		return fmt.Errorf("create unlock_events: %w", err)
-	}
-	if _, err := db.Exec(unlockSnapshotDDL); err != nil {
-		return fmt.Errorf("create unlock_snapshot_1d: %w", err)
 	}
 	if err := ensurePatternSchema(db); err != nil {
 		return err

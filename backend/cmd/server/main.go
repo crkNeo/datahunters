@@ -222,6 +222,8 @@ func main() {
 			store.BGV2MarkTick()
 			store.BollEMAMarkTick()
 			store.EMA2155MarkTick()
+			store.PulsarMarkTick()
+			store.PulsarV2MarkTick()
 		}
 	}()
 
@@ -268,6 +270,16 @@ func main() {
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.EMA2155Tick()
+		}
+	}()
+	// 脈衝星 / 脈衝星v2:爆量熱名單上的觀察策略(15m 動能確認進場);v2 多一道 OI/CVD 閘門。
+	go func() {
+		store.PulsarTick()
+		store.PulsarV2Tick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.PulsarTick()
+			store.PulsarV2Tick()
 		}
 	}()
 

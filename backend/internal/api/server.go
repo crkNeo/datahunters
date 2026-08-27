@@ -149,6 +149,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))    // 冥王星 (動態ATR均線收斂 4H)
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF)) // 多週期支壓 (1H+4H 提示)
 	mux.HandleFunc("/api/ema2155", s.gateTab("ema2155", s.handleEMA2155)) // 2155多 (EMA21/55 金叉)
+	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge)) // 爆量脈搏面板
+	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))       // 脈衝星策略
+	mux.HandleFunc("/api/pulsarv2", s.gateTab("pulsarv2", s.handlePulsarV2)) // 脈衝星v2 (含 OI/CVD 閘門)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bgv2", s.gateTab("bgv2", s.handleBGV2))
@@ -722,6 +725,21 @@ func (s *Server) handleBollEMA(w http.ResponseWriter, r *http.Request) {
 // handleEMA2155 serves the 2155多 (EMA21/55 金叉 只做多) tracker.
 func (s *Server) handleEMA2155(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMA2155State())
+}
+
+// handleSurge serves the 爆量脈搏 board (全市場相對爆量斥候, admin-only).
+func (s *Server) handleSurge(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SurgeBoard())
+}
+
+// handlePulsar serves the 脈衝星 (爆量埋伏觀察策略) tracker.
+func (s *Server) handlePulsar(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarState())
+}
+
+// handlePulsarV2 serves the 脈衝星v2 (脈衝星 + OI/CVD 品質閘門) tracker.
+func (s *Server) handlePulsarV2(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV2State())
 }
 
 
