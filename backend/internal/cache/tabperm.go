@@ -64,7 +64,6 @@ var tabMeta = []struct {
 	{"surge", "爆量脈搏", "admin", false},
 	{"pulsar", "脈衝星", "admin", false},
 	{"pulsarv2", "脈衝星v2", "admin", false},
-	{"patterns", "爆發型態", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -79,7 +78,7 @@ var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
-	"srmtf": "signal", "patterns": "signal", "ema2155": "signal",
+	"srmtf": "signal", "ema2155": "signal",
 	"surge": "signal", "pulsar": "signal", "pulsarv2": "signal",
 }
 

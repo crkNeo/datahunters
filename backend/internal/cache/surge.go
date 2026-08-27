@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -27,7 +28,7 @@ import (
 const (
 	surgeRing     = 240             // 每檔保留的快照數(2min×240 ≈ 8h 基線)
 	surgeWin      = 15              // 脈搏窗:15 個 cycle ≈ 30min 的近窗成交量
-	surgeMinHist  = 60             // 至少 60 個 cycle(~2h)才開始評分,基線才穩
+	surgeMinHist  = 30             // 至少 30 個 cycle(~1h)才開始評分;啟動時由 K 線暖機直接補滿
 	surgeVolFloor = 1_000_000.0     // 24h 成交額地板:低於此不評分(擋殭屍幣一筆單假爆量)
 	surgePulseMin = 150_000.0       // 近窗脈搏絕對地板(USDT):過小的脈搏不算數
 	surgeHotRatio = 3.0             // 進「熱名單」(供脈衝星策略)的爆量倍數門檻
@@ -225,6 +226,106 @@ func (s *Store) oiCvdGate(coin string, cs []exchange.Candle) bool {
 		return false // 沒 OI 憑證 → 擋
 	}
 	return indicator.PctChange(oiHist[0].SumOIValue, oiHist[len(oiHist)-1].SumOIValue) > pulsarOIMin
+}
+
+// ---- 啟動暖機:用歷史 1m K 線重建基線,讓面板一開機就有資料 ----
+
+// mergeSeed injects reconstructed historical snapshots as the base of a coin's
+// ring, keeping any live snapshots already appended that are newer than the seed.
+// Held briefly per-coin so warmup fetches never block the live scan.
+func (e *surgeEngine) mergeSeed(coin string, seed []surgeSnap) {
+	if len(seed) == 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	lastSeedTs := seed[len(seed)-1].ts
+	merged := seed
+	for _, s := range e.hist[coin] { // 保留暖機期間已進來的即時點(較新的)
+		if s.ts > lastSeedTs {
+			merged = append(merged, s)
+		}
+	}
+	if len(merged) > surgeRing {
+		merged = merged[len(merged)-surgeRing:]
+	}
+	e.hist[coin] = merged
+}
+
+// reconstructSurgeSeed rebuilds ~surgeMinHist snapshots at 2-min spacing from 1m
+// klines. Each snapshot's qv is the 24h-rolling quote volume ending at that bar —
+// exactly what all-tickers reports live, so the seam with live scans is smooth.
+func reconstructSurgeSeed(ks []exchange.Candle, points int) []surgeSnap {
+	const day = 1440 // 1m bars in 24h
+	const step = 2   // 2min ring cadence (Refresh 週期)
+	n := len(ks)
+	if n < day+(points-1)*step+1 {
+		return nil // 不夠 24h + ring,交給即時暖機
+	}
+	pqv := make([]float64, n+1)
+	pcnt := make([]float64, n+1)
+	for i, k := range ks {
+		pqv[i+1] = pqv[i] + k.QuoteVol
+		pcnt[i+1] = pcnt[i] + k.Trades
+	}
+	out := make([]surgeSnap, 0, points)
+	for p := 0; p < points; p++ {
+		j := n - 1 - p*step
+		lo := j + 1 - day
+		if lo < 0 {
+			break
+		}
+		out = append(out, surgeSnap{
+			ts: ks[j].Ts, price: ks[j].Close,
+			qv: pqv[j+1] - pqv[lo], cnt: int64(pcnt[j+1] - pcnt[lo]),
+		})
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 { // 反轉成 ts 升冪
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// WarmSurge seeds every candidate coin's baseline from 1m klines so the 爆量脈搏
+// board works within minutes of startup instead of waiting ~1h. Fetches concurrently
+// (bounded), merges per-coin without blocking the live scan. Safe to run once at boot.
+func (s *Store) WarmSurge() {
+	tickers, err := s.ex.BinanceAllTickers()
+	if err != nil {
+		log.Printf("surge: 暖機取得 tickers 失敗: %v", err)
+		return
+	}
+	t0 := time.Now()
+	sem := make(chan struct{}, 10)
+	var wg sync.WaitGroup
+	var seeded int64
+	var mu sync.Mutex
+	for _, t := range tickers {
+		coin := coinOf(t.Symbol)
+		if stableLike[coin] || t.QuoteVol < surgeVolFloor {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(coin string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ks, err := s.ex.BinanceKlines(coin+"USDT", "1m", 1500)
+			if err != nil {
+				return
+			}
+			seed := reconstructSurgeSeed(ks, surgeMinHist)
+			if len(seed) < surgeMinHist {
+				return
+			}
+			s.surge.mergeSeed(coin, seed)
+			mu.Lock()
+			seeded++
+			mu.Unlock()
+		}(coin)
+	}
+	wg.Wait()
+	log.Printf("surge: 暖機完成,%d 檔已建基線,耗時 %s", seeded, time.Since(t0).Round(time.Second))
 }
 
 // surgeHotCoins is the strategy universe (爆量熱名單) — coins currently above the

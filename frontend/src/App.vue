@@ -5,7 +5,6 @@ import TabPermissions from './components/admin/TabPermissions.vue'
 import StrategySettings from './components/admin/StrategySettings.vue'
 import LoginNotice from './components/admin/LoginNotice.vue'
 import PushBroadcast from './components/admin/PushBroadcast.vue'
-import PatternBoard from './components/PatternBoard.vue'
 import SiteSettings from './components/admin/SiteSettings.vue'
 import UserManagement from './components/admin/UserManagement.vue'
 import ReferralRules from './components/admin/ReferralRules.vue'
@@ -1446,7 +1445,6 @@ const TAB_MIN_ROLE_FALLBACK = {
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
   bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', ema2155: 'admin', surge: 'admin', pulsar: 'admin', pulsarv2: 'admin', srmtf: 'admin',
-  patterns: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1489,7 +1487,6 @@ const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
   bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', ema2155: 'signal', surge: 'signal', pulsar: 'signal', pulsarv2: 'signal', srmtf: 'signal',
-  patterns: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1497,7 +1494,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'patterns', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'srmtf',
+  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -1998,7 +1995,6 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('referral', grp[0])" :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
             推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
           </button>
-          <button v-if="inGroup('patterns', grp[0])" :class="{ active: mainTab === 'patterns' }" @click="mainTab = 'patterns'">爆發型態</button>
           <button v-if="inGroup('bollfade', grp[0])" :class="{ active: mainTab === 'bollfade' }" @click="mainTab = 'bollfade'; loadBollfade()">
             布林重回<em v-if="bollfade && bollfade.open.length" class="navbadge">{{ bollfade.open.length }}</em>
           </button>
@@ -2315,11 +2311,6 @@ watch([role, tabPerms, authReady], () => {
       <PushBroadcast v-else-if="adminTab === 'push'" :articles="articles"
         @toast="(t, k) => showToast(t, k)" />
 
-    </section>
-
-    <!-- 爆發型態:A/B 偵測紀錄與命中率(元件自己載資料、自己每分鐘刷新) -->
-    <section v-else-if="mainTab === 'patterns' && canTab('patterns')">
-      <PatternBoard />
     </section>
 
     <!-- 合約市場 (幣種一覽) -->

@@ -93,6 +93,9 @@ func main() {
 		log.Printf("JWT_SECRET not set — using a random one (logins reset on restart; set JWT_SECRET in .env)")
 	}
 
+	// 爆量脈搏:啟動時用歷史 K 線重建基線,面板幾分鐘內就有資料(不必等 ~1h 累積)。
+	go store.WarmSurge()
+
 	// initial fill, then refresh on a ticker
 	go func() {
 		log.Printf("priming cache for %d coins...", len(coins))
