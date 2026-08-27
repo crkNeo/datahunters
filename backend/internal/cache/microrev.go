@@ -466,7 +466,8 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		if !exit && b.exitSignal != nil && b.exitSignal(cs) { // 訊號出場(2155多 死叉)→ 收盤平倉
 			exit, outcome, px = true, "reversed", last.Close
 		}
-		if !exit && b.expiry > 0 && (last.Ts-open.OpenTime.UnixMilli())/barMs >= int64(b.expiry) {
+		// OpenTime 現在存的是進場 K 棒的收盤時刻(比開盤晚一根),故 +barMs 補回,持有根數與原本一致。
+		if !exit && b.expiry > 0 && (last.Ts-open.OpenTime.UnixMilli()+barMs)/barMs >= int64(b.expiry) {
 			exit, outcome, px = true, "expired", last.Close
 		}
 		if exit {
@@ -492,7 +493,9 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				TP:       tp,
 				Cur:      entry,
 				Status:   "open",
-				OpenTime: time.UnixMilli(last.Ts).UTC(),
+				// 進場時間記「該根 K 棒的收盤時刻」(= 開盤 + 一根),因為進場是在收盤才確認/成交。
+				// 例:15m 的 13:45 K 棒在 14:00 收盤確認進場 → 顯示 14:00,而不是 13:45。
+				OpenTime: time.UnixMilli(last.Ts + barMs).UTC(),
 			}
 			plan, _ := s.tpFor(b.strat(), b.plan)
 			setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
