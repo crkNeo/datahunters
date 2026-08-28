@@ -468,10 +468,26 @@ func (s *Store) microTick(b *microBook) {
 		return
 	}
 	now := time.Now().UTC()
-	coins := s.emaCoins()
+	base := s.emaCoins()
 	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)
-		coins = b.universe()
+		base = b.universe()
 	}
+	coins := append([]string(nil), base...) // 複製,下面要 append 不能動到共用切片
+	// 關鍵:一定要處理「有未平倉部位的幣」,即使它已掉出宇宙/熱名單 —— 否則逾時、
+	// 訊號出場(死叉)、收盤 TP/SL 這些只在 microRun(收 K)跑的邏輯永遠不會觸發,
+	// 部位會卡著出不掉(脈衝星的熱名單流動快,最容易踩到)。
+	b.mu.Lock()
+	seen := make(map[string]bool, len(coins))
+	for _, c := range coins {
+		seen[c] = true
+	}
+	for _, tr := range b.trades {
+		if tr.Status == "open" && !seen[tr.Coin] {
+			seen[tr.Coin] = true
+			coins = append(coins, tr.Coin)
+		}
+	}
+	b.mu.Unlock()
 	for _, coin := range coins {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil || len(cs) < 2 {
