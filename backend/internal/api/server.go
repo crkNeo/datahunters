@@ -151,6 +151,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge)) // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))       // 脈衝星策略
 	mux.HandleFunc("/api/pulsarv2", s.gateTab("pulsarv2", s.handlePulsarV2)) // 脈衝星v2 (含 OI/CVD 閘門)
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3)) // 脈衝星v3 (ATR + runner)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bgv2", s.gateTab("bgv2", s.handleBGV2))
@@ -739,6 +740,11 @@ func (s *Server) handlePulsar(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV2 serves the 脈衝星v2 (脈衝星 + OI/CVD 品質閘門) tracker.
 func (s *Server) handlePulsarV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV2State())
+}
+
+// handlePulsarV3 serves the 脈衝星v3 (ATR 自適應 + 追尾 runner) tracker.
+func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV3State())
 }
 
 

@@ -18,6 +18,12 @@ type tpPlan struct {
 	w1, w2, w3  float64 // fraction of the position closed at TP1 / TP2 / TP3 (sum = 1)
 	beBuf       float64 // break-even buffer after TP1: SL → entry × (1 ± beBuf)
 	minSplitPct float64 // fraction mode: skip splitting when |TP3−entry|/entry is below this
+	// trailAfterTP2 (脈衝星v3): after TP2 the LAST leg (w3) rides a trailing stop
+	// instead of a fixed TP3 — peak − trailR × R (R = TP1−entry), floored at TP1.
+	// No fixed TP3 close: the runner exits only on the trailed stop (or the book's
+	// runnerExpiry). Lets the small runner test the extended move past the 4h core cap.
+	trailAfterTP2 bool
+	trailR        float64
 }
 
 // Presets from the design discussion.
@@ -34,6 +40,9 @@ var (
 	// momentum / disciplined (also 超新星): TP1/TP2 at 40%/70% of the entry→TP3
 	// distance, size 40/30/30. Fraction placement adapts to each book's target.
 	tpMomentum = &tpPlan{a: 0.40, b: 0.70, w1: 0.40, w2: 0.30, w3: 0.30, beBuf: 0.0005, minSplitPct: 0.008}
+	// 脈衝星v3:R 倍數 TP1=1R / TP2=2R,最後一段(w3)追尾。結構在此,比例(w1/w2/w3)
+	// 與保本緩衝由 strat 設定驅動(tpFor)。trailR=1.5 → runner 停損 = 峰值 − 1.5R,鎖 ≥1R。
+	tpPulsarV3 = &tpPlan{rMult: true, a: 1, b: 2, w1: 0.50, w2: 0.25, w3: 0.25, beBuf: 0.0005, trailAfterTP2: true, trailR: 1.5}
 )
 
 // setupTP computes TP1/TP2 for a freshly opened trade from its entry + final TP
@@ -106,7 +115,24 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 			tr.SL = tr.TP1 // TP2 → lock the stop at TP1
 		}
 	}
-	if reached(tr.TP) { // final target → close the remainder at TP3
+	if p != nil && p.trailAfterTP2 { // 脈衝星v3:runner 追尾,沒有固定 TP3
+		if tr.Legs >= 2 { // TP2 後最後一段跟著峰值走,停損只上不下、不低於 TP1
+			if tr.Peak == 0 || (long && price > tr.Peak) || (!long && price < tr.Peak) {
+				tr.Peak = price
+			}
+			if rRisk := tr.TP1 - tr.Entry; rRisk != 0 && p.trailR > 0 {
+				if long {
+					if t := tr.Peak - p.trailR*rRisk; t > tr.SL {
+						tr.SL = roundPx(t)
+					}
+				} else {
+					if t := tr.Peak - p.trailR*rRisk; t < tr.SL {
+						tr.SL = roundPx(t)
+					}
+				}
+			}
+		}
+	} else if reached(tr.TP) { // final target → close the remainder at TP3
 		tr.Legs = 3
 		closeTrade(tr, tr.TP, "tp3", now)
 		return true

@@ -227,6 +227,7 @@ func main() {
 			store.EMA2155MarkTick()
 			store.PulsarMarkTick()
 			store.PulsarV2MarkTick()
+			store.PulsarV3MarkTick()
 		}
 	}()
 
@@ -279,10 +280,12 @@ func main() {
 	go func() {
 		store.PulsarTick()
 		store.PulsarV2Tick()
+		store.PulsarV3Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV2Tick()
+			store.PulsarV3Tick()
 		}
 	}()
 

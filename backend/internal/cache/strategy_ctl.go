@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -88,6 +88,9 @@ var stratDefaults = map[string]StratCfg{
 	"pulsar": {Tags: []string{"爆量", "埋伏", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 	// 脈衝星v2:脈衝星 + OI/CVD 品質閘門(只放行 OI 擴張 + 買盤主導的爆量)。同為靜默觀察。
 	"pulsarv2": {Tags: []string{"爆量", "埋伏", "多單", "OI/CVD"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
+	// 脈衝星v3:ATR 自適應 + 追尾 runner。ExitMode 須為 split 才會觸發 tpFor;結構(TP1=1R/
+	// TP2=2R/追尾)來自 tpPulsarV3,SplitA/B 對 rMult 無效;比例 50/25/25 由此驅動。
+	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -308,6 +311,13 @@ func (s *Store) tpFor(name string, base *tpPlan) (*tpPlan, bool) {
 	if sum := w1 + w2 + w3; sum > 0 && (sum < 0.999 || sum > 1.001) {
 		w1, w2, w3 = w1/sum, w2/sum, w3/sum // 比例沒加到 100% 就正規化,免得倉位算錯
 	}
+	if base != nil && base.rMult {
+		// R 倍數 / 追尾結構(脈衝星v3)來自 book 的 base plan;比例與保本緩衝仍可由後台調。
+		p := *base
+		p.w1, p.w2, p.w3 = w1, w2, w3
+		p.beBuf = c.BeBufPct / 100
+		return &p, true
+	}
 	return &tpPlan{
 		a: c.SplitA / 100, b: c.SplitB / 100,
 		w1: w1, w2: w2, w3: w3,
@@ -470,6 +480,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV2Book.mu.Lock()
 		done = closeIn(s.pulsarV2Book.trades)
 		s.pulsarV2Book.mu.Unlock()
+	case "pulsarv3":
+		s.pulsarV3Book.mu.Lock()
+		done = closeIn(s.pulsarV3Book.trades)
+		s.pulsarV3Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)

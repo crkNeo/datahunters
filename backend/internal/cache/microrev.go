@@ -30,6 +30,10 @@ type microBook struct {
 	klimit   int
 	minBars  int
 	expiry   int     // max hold in bars → market exit ("expired")
+	// runnerExpiry (脈衝星v3): once the runner is active (Legs≥2, TP2 已鎖利),the core
+	// 4h `expiry` no longer applies; this longer cap (e.g. 24h) lets the runner test the
+	// extended move, then still closes it if it just grinds. 0 = runner uses `expiry` too.
+	runnerExpiry int
 	cooldown int     // bars to wait after a close before re-entering the same coin
 	keep     int     // closed-trade cap
 	plan     *tpPlan // 分批止盈 config (nil = single TP)
@@ -454,6 +458,162 @@ func surgeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bo
 	return "long", roundPx(price), roundPx(low10), roundPx(price + 4*risk), true // TP3 = 1:4
 }
 
+// robustATR = mean of the last `period` true ranges after dropping the `trimTop`
+// largest — so a single monster breakout candle can't blow the ATR up (and the
+// stop with it), while it still reflects the current elevated regime.
+func robustATR(cs []exchange.Candle, period, trimTop int) float64 {
+	n := len(cs)
+	if n < period+1 {
+		return 0
+	}
+	trs := make([]float64, 0, period)
+	for i := n - period; i < n; i++ {
+		if i < 1 {
+			continue
+		}
+		h, l, pc := cs[i].High, cs[i].Low, cs[i-1].Close
+		tr := h - l
+		if d := math.Abs(h - pc); d > tr {
+			tr = d
+		}
+		if d := math.Abs(l - pc); d > tr {
+			tr = d
+		}
+		trs = append(trs, tr)
+	}
+	if len(trs) == 0 {
+		return 0
+	}
+	sort.Float64s(trs)
+	keep := trs
+	if trimTop > 0 && len(trs) > trimTop {
+		keep = trs[:len(trs)-trimTop]
+	}
+	var sum float64
+	for _, t := range keep {
+		sum += t
+	}
+	return sum / float64(len(keep))
+}
+
+// trimmedBaseVol = mean volume of bars [n-30, n-10) (the quiet window before the
+// recent surge) after dropping the 2 highest — a spike-robust baseline so both the
+// entry-volume and freshness checks measure against the真正 quiet level.
+func trimmedBaseVol(cs []exchange.Candle) float64 {
+	n := len(cs)
+	vols := make([]float64, 0, 20)
+	for i := n - 30; i < n-10; i++ {
+		if i >= 0 {
+			vols = append(vols, cs[i].Volume)
+		}
+	}
+	if len(vols) == 0 {
+		return 0
+	}
+	sort.Float64s(vols)
+	keep := vols
+	if len(vols) > 2 {
+		keep = vols[:len(vols)-2]
+	}
+	var s float64
+	for _, v := range keep {
+		s += v
+	}
+	return s / float64(len(keep))
+}
+
+// surgeV3Signal — 脈衝星v3 進場規則(ATR 自適應)。宇宙已是爆量熱名單。只做多。
+//
+//   ① EMA5>EMA20 且 本根向上 ｜ 反插針(收陽、實體≥50%全距、上影≤實體)
+//   拋物線護欄:單根全距 ≤ 3×ATR ｜ 量能:進場根 ≥ 1.2× 截尾基線
+//   新鮮度:近6根有一根 ≥ 2.5× 基線 ｜ 不追高:距20根低點 ≤ 8×ATR
+//   止損可行性:(close−近10根低) 需 ≤ 3×ATR(否則不進場),< 0.8×ATR 則推寬到 0.8×ATR
+//   回傳 tp = 進場 + 5R 佔位(runner 追尾,setupTP rMult 需要 TP3 在 2R 之外)
+func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	const (
+		pinBodyMin   = 0.5
+		pinWickMax   = 1.0
+		entryVolMult = 1.2
+		freshVolMult = 2.5
+		freshWithin  = 6
+		kExt         = 8.0 // 不追高:距20根低點 ≤ kExt×ATR
+		slMinATR     = 0.8
+		slMaxATR     = 3.0
+		barMaxATR    = 3.0
+	)
+	n := len(cs)
+	if n < 40 {
+		return
+	}
+	price := cs[n-1].Close
+	last := cs[n-1]
+	atr := robustATR(cs, 14, 2)
+	if atr <= 0 {
+		return
+	}
+	// ① 動能狀態
+	e5 := emaSeries(cs, 5)
+	e20 := emaSeries(cs, 20)
+	if !(e5[n-1] > e20[n-1] && price > cs[n-2].Close) {
+		return
+	}
+	// 反插針
+	rng := last.High - last.Low
+	body := last.Close - last.Open
+	if rng <= 0 || body <= 0 || body < pinBodyMin*rng || (last.High-last.Close) > pinWickMax*body {
+		return
+	}
+	// 拋物線護欄:單根 K 太誇張 = 買在垂直頂
+	if rng > barMaxATR*atr {
+		return
+	}
+	base := trimmedBaseVol(cs)
+	// ② 量能確認
+	if base > 0 && last.Volume < entryVolMult*base {
+		return
+	}
+	// ③ 新鮮度
+	fresh := false
+	for i := n - freshWithin; i < n; i++ {
+		if i >= 0 && base > 0 && cs[i].Volume >= freshVolMult*base {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		return
+	}
+	// 不追高:距近20根低點 ≤ kExt×ATR
+	low20 := cs[n-1].Low
+	for i := n - 20; i < n; i++ {
+		if i >= 0 && cs[i].Low < low20 {
+			low20 = cs[i].Low
+		}
+	}
+	if (price - low20) > kExt*atr {
+		return
+	}
+	// 止損:近10根 swing low + 可行性閘門
+	low10 := cs[n-1].Low
+	for i := n - 10; i < n; i++ {
+		if i >= 0 && cs[i].Low < low10 {
+			low10 = cs[i].Low
+		}
+	}
+	stopDist := price - low10
+	if stopDist > slMaxATR*atr { // 止損太寬 → 不進場(不夾進結構)
+		return
+	}
+	if stopDist < slMinATR*atr { // 太緊 → 往外推,放在雜訊之外
+		stopDist = slMinATR * atr
+	}
+	if stopDist <= 0 {
+		return
+	}
+	// tp = 5R 佔位;實際 runner 靠 trailAfterTP2 追尾,不會真的收在這
+	return "long", roundPx(price), roundPx(price - stopDist), roundPx(price + 5*stopDist), true
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -539,7 +699,12 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			exit, outcome, px = true, "reversed", last.Close
 		}
 		// OpenTime 現在存的是進場 K 棒的收盤時刻(比開盤晚一根),故 +barMs 補回,持有根數與原本一致。
-		if !exit && b.expiry > 0 && (last.Ts-open.OpenTime.UnixMilli()+barMs)/barMs >= int64(b.expiry) {
+		// 分段逾時(脈衝星v3):主倉用 expiry(4h);一旦剩 runner(Legs≥2、已鎖利)改用 runnerExpiry(24h)。
+		exp := b.expiry
+		if b.runnerExpiry > 0 && open.Legs >= 2 {
+			exp = b.runnerExpiry
+		}
+		if !exit && exp > 0 && (last.Ts-open.OpenTime.UnixMilli()+barMs)/barMs >= int64(exp) {
 			exit, outcome, px = true, "expired", last.Close
 		}
 		if exit {
@@ -817,6 +982,8 @@ func (s *Store) PulsarTick()       { s.microTick(s.pulsarBook) }
 func (s *Store) PulsarMarkTick()   { s.microMarkTick(s.pulsarBook) }
 func (s *Store) PulsarV2Tick()     { s.microTick(s.pulsarV2Book) }
 func (s *Store) PulsarV2MarkTick() { s.microMarkTick(s.pulsarV2Book) }
+func (s *Store) PulsarV3Tick()     { s.microTick(s.pulsarV3Book) }
+func (s *Store) PulsarV3MarkTick() { s.microMarkTick(s.pulsarV3Book) }
 
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
@@ -881,6 +1048,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV2Book.mu.Lock()
 		s.pulsarV2Book.trades = keepIf(s.pulsarV2Book.trades, closedOnly)
 		s.pulsarV2Book.mu.Unlock()
+	case "pulsarv3":
+		s.pulsarV3Book.mu.Lock()
+		s.pulsarV3Book.trades = keepIf(s.pulsarV3Book.trades, closedOnly)
+		s.pulsarV3Book.mu.Unlock()
 	case "bgv2": // 家族:一個開關清兩腿
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
@@ -973,3 +1144,4 @@ func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) 
 func (s *Store) EMA2155State() PaperState  { return s.microState(s.ema2155Books...) }
 func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV2State() PaperState  { return s.microState(s.pulsarV2Book) }
+func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }

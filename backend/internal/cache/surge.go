@@ -328,6 +328,25 @@ func (s *Store) WarmSurge() {
 	log.Printf("surge: 暖機完成,%d 檔已建基線,耗時 %s", seeded, time.Since(t0).Round(time.Second))
 }
 
+// btcRegimeGate blocks new longs during a market-wide flush: if BTC's last 1h
+// return is worse than −2%, alt longs have poor odds + correlated crash risk.
+// Cached ~5min so it's one cheap fetch regardless of how many coins fire. Lenient
+// by design — only vetoes an obvious dump, not ordinary chop. Used as 脈衝星v3 gate.
+func (s *Store) btcRegimeGate(coin string, cs []exchange.Candle) bool {
+	v, err := s.oiCache.get("btc1hret", func() (any, error) {
+		kl, e := s.ex.BinanceKlines("BTCUSDT", "1h", 2)
+		if e != nil || len(kl) < 2 || kl[len(kl)-2].Close <= 0 {
+			return 0.0, e
+		}
+		return kl[len(kl)-1].Close/kl[len(kl)-2].Close - 1, nil
+	})
+	if err != nil {
+		return true // 取不到 BTC 資料 → 不擋(避免因外部故障整個停擺)
+	}
+	ret, _ := v.(float64)
+	return ret > -0.02
+}
+
 // surgeHotCoins is the strategy universe (爆量熱名單) — coins currently above the
 // hot threshold, for the 脈衝星 book to evaluate. Falls back to empty (not top-80),
 // so the strategy is silent until real surges appear.
