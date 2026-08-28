@@ -64,6 +64,7 @@ type PaperTrade struct {
 	CloseTime  *time.Time `json:"close_time,omitempty"`
 	R          float64    `json:"r,omitempty"`        // swing range (for trailing books)
 	Peak       float64    `json:"peak,omitempty"`     // best price since entry (trailing books)
+	MaxGain    float64    `json:"max_gain,omitempty"` // 最大漲幅%:進場後最高有利波動(峰值價 vs 進場),微策略持續追蹤並持久化
 	OI         float64    `json:"oi"`                 // OI % change at entry (radar)
 	CVD        float64    `json:"cvd"`                // taker-buy CVD % at entry (radar)
 	Funding    float64    `json:"funding"`            // funding rate at entry (persisted)

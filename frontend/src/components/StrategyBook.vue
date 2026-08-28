@@ -79,7 +79,7 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 
     <h3 class="psub" v-if="state && state.open.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
     <table v-if="state && state.open.length" class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th class="r">最大漲幅</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -90,6 +90,7 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
           <td class="r" :class="t.status === 'pending' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
             <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
+          <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
           <td class="tsmall">
             <template v-if="t.status === 'pending'">
               <span class="tsmall">等回踩至 {{ fmtPrice(t.entry) }} 才進場 · 目標 {{ fmtPrice(t.tp) }}</span>
@@ -114,7 +115,7 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 
     <h3 class="psub" v-if="state && state.closed.length">已結束 ({{ state.closed.length }})</h3>
     <table v-if="state && state.closed.length" class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in state.closed" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -126,6 +127,7 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
           <td class="r" :class="t.outcome === 'cancel' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
             <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
+          <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
           <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
         </tr>
       </tbody>

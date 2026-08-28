@@ -72,6 +72,10 @@ func setupTP(tr *PaperTrade, p *tpPlan) {
 // be=false keeps the original stop after TP1 (admin turned 保本 off); the TP2→鎖TP1
 // ratchet is 鎖利, not 保本, so it always applies.
 func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bool {
+	// 最大漲幅:進場後最高有利波動%(峰值,含這次要平倉的價)。所有走 stepTP 的策略共用。
+	if g := pnl(tr.Dir, tr.Entry, price); g > tr.MaxGain {
+		tr.MaxGain = round2(g)
+	}
 	long := tr.Dir == "long"
 	reached := func(level float64) bool {
 		if level == 0 {

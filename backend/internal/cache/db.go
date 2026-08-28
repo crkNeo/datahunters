@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   tp1 DOUBLE NOT NULL DEFAULT 0, tp2 DOUBLE NOT NULL DEFAULT 0,
   legs TINYINT NOT NULL DEFAULT 0, filled DOUBLE NOT NULL DEFAULT 0, realized DOUBLE NOT NULL DEFAULT 0,
   be_hit TINYINT NOT NULL DEFAULT 0, be_price DOUBLE NOT NULL DEFAULT 0,
+  max_gain DOUBLE NOT NULL DEFAULT 0,
   KEY idx_pt_open (open_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -196,6 +197,7 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"realized": "ADD COLUMN realized DOUBLE NOT NULL DEFAULT 0",
 		"be_hit":   "ADD COLUMN be_hit TINYINT NOT NULL DEFAULT 0",
 		"be_price": "ADD COLUMN be_price DOUBLE NOT NULL DEFAULT 0",
+		"max_gain": "ADD COLUMN max_gain DOUBLE NOT NULL DEFAULT 0",
 	} {
 		var has int
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)
@@ -394,17 +396,17 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		ct = t.CloseTime.UnixMilli()
 	}
 	db.sql.Exec(`INSERT INTO paper_trades
-	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized,be_hit,be_price)
-	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized,be_hit,be_price,max_gain)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	  ON DUPLICATE KEY UPDATE
 	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
 	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl),
 	    tp1=VALUES(tp1), tp2=VALUES(tp2),
 	    legs=VALUES(legs), filled=VALUES(filled), realized=VALUES(realized),
-	    be_hit=VALUES(be_hit), be_price=VALUES(be_price)`,
+	    be_hit=VALUES(be_hit), be_price=VALUES(be_price), max_gain=VALUES(max_gain)`,
 		t.ID, book, t.Coin, t.Dir, t.Score, t.Entry, t.TP, t.SL, t.Cur, t.PnLPct,
 		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding,
-		t.TP1, t.TP2, t.Legs, t.Filled, t.Realized, t.BEHit, t.BEPrice)
+		t.TP1, t.TP2, t.Legs, t.Filled, t.Realized, t.BEHit, t.BEPrice, t.MaxGain)
 }
 
 func (db *DB) insertLiquidation(r LiqRow) {
@@ -421,7 +423,7 @@ func (db *DB) clearClosedTrades(book string) {
 }
 
 func (db *DB) loadTrades(book string) []*PaperTrade {
-	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized,be_hit,be_price
+	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,legs,filled,realized,be_hit,be_price,max_gain
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -433,7 +435,7 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 		var ot, ct int64
 		if err := rows.Scan(&t.ID, &t.Coin, &t.Dir, &t.Score, &t.Entry, &t.TP, &t.SL,
 			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
-			&t.TP1, &t.TP2, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice); err != nil {
+			&t.TP1, &t.TP2, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain); err != nil {
 			continue
 		}
 		t.OpenTime = time.UnixMilli(ot).UTC()
