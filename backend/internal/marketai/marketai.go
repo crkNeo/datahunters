@@ -114,13 +114,28 @@ func (c *Client) Analyze(system, user string) (string, error) {
 
 // ---- Groq (OpenAI-compatible chat completions) ----
 
-// groq tries the configured model, then a smaller fallback on a model error
-// (404/400 = decommissioned/unknown model). Stops early on an auth error
-// (401/403 = key problem). Remembers the first model that works.
+// groq tries the configured/known models; if they've all been decommissioned
+// (Groq churns its catalog), it asks the API which models the account can
+// actually use and retries with those. Self-heals against stale model IDs.
 func (c *Client) groq(system, user string) (string, error) {
+	text, err := c.groqTry(c.groqCandidates(), system, user)
+	if err == nil {
+		return text, nil
+	}
+	if live := c.groqModels(); len(live) > 0 { // 硬編 ID 全失效 → 用帳號當下可用的清單重試
+		if t2, e2 := c.groqTry(live, system, user); e2 == nil {
+			return t2, nil
+		}
+	}
+	return "", err
+}
+
+// groqTry runs the models in order, returns the first success, remembers it.
+// Stops early on an auth error (401/403 = key problem, no model helps).
+func (c *Client) groqTry(models []string, system, user string) (string, error) {
 	tried := map[string]bool{}
 	var lastErr error
-	for _, m := range c.groqCandidates() {
+	for _, m := range models {
 		if m == "" || tried[m] {
 			continue
 		}
@@ -134,7 +149,7 @@ func (c *Client) groq(system, user string) (string, error) {
 		}
 		lastErr = err
 		if status == 401 || status == 403 {
-			break // key/permission — no other model will help
+			break
 		}
 	}
 	return "", lastErr
@@ -144,8 +159,62 @@ func (c *Client) groqCandidates() []string {
 	c.mu.RLock()
 	current := c.groqModel
 	c.mu.RUnlock()
-	// Unknown/decommissioned ids just error and fall through to the next.
-	return []string{current, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"}
+	// Known-good ids as a fast path; if stale they just error and groq() discovers live ones.
+	return []string{current, "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b", "llama-3.1-8b-instant"}
+}
+
+// groqModels asks the API which models the account can use right now, filtered
+// to text chat models and ordered so the more capable general models come first.
+func (c *Client) groqModels() []string {
+	req, err := http.NewRequest("GET", "https://api.groq.com/openai/v1/models", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+c.groqKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &out) != nil {
+		return nil
+	}
+	var ids []string
+	for _, m := range out.Data {
+		l := strings.ToLower(m.ID)
+		if strings.Contains(l, "whisper") || strings.Contains(l, "guard") ||
+			strings.Contains(l, "tts") || strings.Contains(l, "embed") || strings.Contains(l, "prompt") {
+			continue // not a text chat model
+		}
+		ids = append(ids, m.ID)
+	}
+	// Prefer capable general chat models; keep the rest as further fallbacks.
+	pref := []string{"llama-3.3-70b", "qwen3", "qwen", "gpt-oss-120", "gpt-oss", "kimi", "deepseek", "llama-4", "70b", "gemma2"}
+	seen := map[string]bool{}
+	var head, tail []string
+	for _, want := range pref {
+		for _, id := range ids {
+			if !seen[id] && strings.Contains(strings.ToLower(id), want) {
+				seen[id] = true
+				head = append(head, id)
+			}
+		}
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			tail = append(tail, id)
+		}
+	}
+	return append(head, tail...)
 }
 
 func (c *Client) groqOnce(model, system, user string) (string, int, error) {
