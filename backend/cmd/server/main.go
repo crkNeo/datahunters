@@ -316,7 +316,7 @@ func main() {
 
 	// 大盤 AI 分析:每整點用 AI 產一段大盤動態評論。MarketAITick 內部自我閘門到每
 	// 小時一次;60s 輪詢確保整點後一分鐘內觸發。
-	log.Printf("market-AI provider: %s (set GEMINI_API_KEY in .env to use Gemini)", store.MarketAIProvider())
+	log.Printf("market-AI provider: %s (set GROQ_API_KEY in .env; Groq works from a VPS)", store.MarketAIProvider())
 	go func() {
 		store.SectorTick() // seed 板塊強弱 immediately (has market-ticker data on boot)
 		// run the AI once shortly after boot — waiting for prices/feed/SR to prime so

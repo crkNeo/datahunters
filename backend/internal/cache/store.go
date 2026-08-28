@@ -162,7 +162,7 @@ type Store struct {
 	rhNew   map[string]int64 // code → first-seen ms (recent-listing badge)
 	rhTime  time.Time
 
-	maiW       *marketai.Client // 大盤 AI 分析 (free keyless Pollinations)
+	maiW       *marketai.Client // 大盤 AI 分析 (Groq;免費、可從 VPS 用)
 	maiMu      sync.RWMutex     // guards the market-AI commentary
 	maiText    string           // latest full zh-TW analysis
 	maiSummary string           // first line (push title / one-liner)

@@ -58,18 +58,25 @@ func TestProviderReflectsActiveBackend(t *testing.T) {
 		t.Errorf("Provider() = %q, want Gemini", got)
 	}
 	c.markGeoBlocked()
-	if got := c.Provider(); got != "Pollinations" {
-		t.Errorf("after geo block Provider() = %q, want Pollinations", got)
+	if got := c.Provider(); got != "none" {
+		t.Errorf("after geo block (no Groq key) Provider() = %q, want none", got)
 	}
 	if !c.geoBlocked() {
 		t.Error("geoBlocked() = false right after markGeoBlocked()")
 	}
 }
 
-func TestNoKeyAlwaysReportsFallback(t *testing.T) {
+func TestGroqPreferredWhenKeySet(t *testing.T) {
+	c := &Client{groqKey: "k", geminiKey: "g"}
+	if got := c.Provider(); got != "Groq" {
+		t.Errorf("Provider() with Groq key = %q, want Groq", got)
+	}
+}
+
+func TestNoKeyReportsNone(t *testing.T) {
 	c := &Client{}
-	if got := c.Provider(); got != "Pollinations" {
-		t.Errorf("Provider() with no key = %q, want Pollinations", got)
+	if got := c.Provider(); got != "none" {
+		t.Errorf("Provider() with no key = %q, want none", got)
 	}
 }
 
