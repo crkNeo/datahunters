@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -91,6 +91,11 @@ var stratDefaults = map[string]StratCfg{
 	// 脈衝星v3:ATR 自適應 + 追尾 runner。ExitMode 須為 split 才會觸發 tpFor;結構(TP1=1R/
 	// TP2=2R/追尾)來自 tpPulsarV3,SplitA/B 對 rMult 無效;比例 50/25/25 由此驅動。
 	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
+	// 脈衝星v4:= v1,唯一差別是關閉 4h 逾時(expiry=0,在 store.go),讓贏單無時間限制地跑。
+	"pulsarv4": {Tags: []string{"爆量", "埋伏", "多單", "無逾時"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
+	// 脈衝星v5:= v1(含 4h 逾時),止盈改固定百分比 +5%/+10%/+15%(pulsarPctTPLevels 覆蓋位置);
+	// SplitA/B 對它無效,比例 40/30/30 仍由此驅動。
+	"pulsarv5": {Tags: []string{"爆量", "埋伏", "多單", "固定%"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -484,6 +489,14 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV3Book.mu.Lock()
 		done = closeIn(s.pulsarV3Book.trades)
 		s.pulsarV3Book.mu.Unlock()
+	case "pulsarv4":
+		s.pulsarV4Book.mu.Lock()
+		done = closeIn(s.pulsarV4Book.trades)
+		s.pulsarV4Book.mu.Unlock()
+	case "pulsarv5":
+		s.pulsarV5Book.mu.Lock()
+		done = closeIn(s.pulsarV5Book.trades)
+		s.pulsarV5Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)

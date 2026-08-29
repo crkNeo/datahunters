@@ -143,6 +143,8 @@ type Store struct {
 	pulsarBook   *microBook   // 脈衝星:建在爆量熱名單上的觀察策略 (microrev.go)
 	pulsarV2Book *microBook   // 脈衝星v2:脈衝星 + OI/CVD 品質閘門 (microrev.go)
 	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner + 大盤閘門 (microrev.go)
+	pulsarV4Book *microBook   // 脈衝星v4:= v1,但關閉 4h 逾時 (microrev.go)
+	pulsarV5Book *microBook   // 脈衝星v5:= v1,但固定百分比止盈 5%/10%/15% (microrev.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -268,7 +270,12 @@ func NewStore(coins []string) *Store {
 	s.pulsarV2Book = &microBook{name: "pulsarv2", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, gate: s.oiCvdGate}
 	// 脈衝星v3:ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
 	// runnerExpiry 96 根 = 24h,突破 4h 讓小倉測後續跑動。plan=tpPulsarV3(1R/2R + 追尾)。
-	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 4, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal, gate: s.btcRegimeGate}
+	// gate 先關掉(不加 BTC 大盤閘門);要再開回來就把 gate: s.btcRegimeGate 加回去。
+	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 4, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
+	// 脈衝星v4:與 v1 完全相同,唯一差別 expiry=0 → 關閉 4h 逾時(只靠 TP/SL 出場)。
+	s.pulsarV4Book = &microBook{name: "pulsarv4", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
+	// 脈衝星v5:= v1(含 4h 逾時),但止盈改成固定百分比 TP1=+5%/TP2=+10%/最終=+15%(tpLevels 覆蓋)。
+	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
 	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
 	// 照回測規格原樣上線 — 單段止盈(plan nil)、無 maxSLPct 濾網(SL 本就刻意放寬到 4 ATR)、逾時 64 根。
 	bgv2Mu := &sync.Mutex{} // 家族共用鎖:序列化兩腿的進場判斷
@@ -304,6 +311,8 @@ func NewStore(coins []string) *Store {
 		s.pulsarBook.trades = db.loadTrades("pulsar")
 		s.pulsarV2Book.trades = db.loadTrades("pulsarv2")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
+		s.pulsarV4Book.trades = db.loadTrades("pulsarv4")
+		s.pulsarV5Book.trades = db.loadTrades("pulsarv5")
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}

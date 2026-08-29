@@ -355,6 +355,12 @@ func ema2155Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return "long", roundPx(price), roundPx(low), roundPx(price + 2*risk), true // 最終止盈 = 1:2(實際三價位由 ema2155TPLevels 決定)
 }
 
+// pulsarPctTPLevels 是 脈衝星v5 的固定百分比止盈:TP1=+5%、TP2=+10%、最終=+15%
+// (只做多)。與盈虧比無關,純看價格漲幅。sl 不影響(仍作停損)。
+func pulsarPctTPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
+	return roundPx(entry * 1.05), roundPx(entry * 1.10), roundPx(entry * 1.15)
+}
+
 // ema2155TPLevels 是 2155多 的三價位止盈:TP1=固定 +5%、TP2=1:1(1R)、最終=1:2(2R)。
 // 三者排序後由小到大 = TP1/TP2/最終,所以「1:1 < 5%」時 TP1/TP2 自然對調,且順序永遠合法。
 func ema2155TPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
@@ -538,7 +544,7 @@ func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 		freshWithin  = 6
 		kExt         = 8.0 // 不追高:距20根低點 ≤ kExt×ATR
 		slMinATR     = 0.8
-		slMaxATR     = 3.0
+		slMaxATR     = 4.0 // 止損可行性上限放寬(原 3.0):容許更寬的 swing-low 止損
 		barMaxATR    = 3.0
 	)
 	n := len(cs)
@@ -984,6 +990,10 @@ func (s *Store) PulsarV2Tick()     { s.microTick(s.pulsarV2Book) }
 func (s *Store) PulsarV2MarkTick() { s.microMarkTick(s.pulsarV2Book) }
 func (s *Store) PulsarV3Tick()     { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick() { s.microMarkTick(s.pulsarV3Book) }
+func (s *Store) PulsarV4Tick()     { s.microTick(s.pulsarV4Book) }
+func (s *Store) PulsarV4MarkTick() { s.microMarkTick(s.pulsarV4Book) }
+func (s *Store) PulsarV5Tick()     { s.microTick(s.pulsarV5Book) }
+func (s *Store) PulsarV5MarkTick() { s.microMarkTick(s.pulsarV5Book) }
 
 func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
@@ -1052,6 +1062,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV3Book.mu.Lock()
 		s.pulsarV3Book.trades = keepIf(s.pulsarV3Book.trades, closedOnly)
 		s.pulsarV3Book.mu.Unlock()
+	case "pulsarv4":
+		s.pulsarV4Book.mu.Lock()
+		s.pulsarV4Book.trades = keepIf(s.pulsarV4Book.trades, closedOnly)
+		s.pulsarV4Book.mu.Unlock()
+	case "pulsarv5":
+		s.pulsarV5Book.mu.Lock()
+		s.pulsarV5Book.trades = keepIf(s.pulsarV5Book.trades, closedOnly)
+		s.pulsarV5Book.mu.Unlock()
 	case "bgv2": // 家族:一個開關清兩腿
 		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
@@ -1145,3 +1163,5 @@ func (s *Store) EMA2155State() PaperState  { return s.microState(s.ema2155Books.
 func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV2State() PaperState  { return s.microState(s.pulsarV2Book) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
+func (s *Store) PulsarV4State() PaperState  { return s.microState(s.pulsarV4Book) }
+func (s *Store) PulsarV5State() PaperState  { return s.microState(s.pulsarV5Book) }

@@ -65,6 +65,8 @@ var tabMeta = []struct {
 	{"pulsar", "脈衝星", "admin", false},
 	{"pulsarv2", "脈衝星v2", "admin", false},
 	{"pulsarv3", "脈衝星v3", "admin", false},
+	{"pulsarv4", "脈衝星v4", "admin", false},
+	{"pulsarv5", "脈衝星v5", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -80,7 +82,7 @@ var tabDefaultKind = map[string]string{
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
 	"srmtf": "signal", "ema2155": "signal",
-	"surge": "signal", "pulsar": "signal", "pulsarv2": "signal", "pulsarv3": "signal",
+	"surge": "signal", "pulsar": "signal", "pulsarv2": "signal", "pulsarv3": "signal", "pulsarv4": "signal", "pulsarv5": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -250,7 +252,7 @@ var tabOfRoute = map[string]string{
 	"/api/admin/bollfade": "bollfade",
 	"/api/admin/meanrev": "meanrev", "/api/admin/bgv2": "bgv2", "/api/admin/bollema": "bollema",
 	"/api/srmtf": "srmtf", "/api/ema2155": "ema2155",
-	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv2": "pulsarv2", "/api/pulsarv3": "pulsarv3",
+	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv2": "pulsarv2", "/api/pulsarv3": "pulsarv3", "/api/pulsarv4": "pulsarv4", "/api/pulsarv5": "pulsarv5",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

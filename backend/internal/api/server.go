@@ -152,6 +152,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))       // 脈衝星策略
 	mux.HandleFunc("/api/pulsarv2", s.gateTab("pulsarv2", s.handlePulsarV2)) // 脈衝星v2 (含 OI/CVD 閘門)
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3)) // 脈衝星v3 (ATR + runner)
+	mux.HandleFunc("/api/pulsarv4", s.gateTab("pulsarv4", s.handlePulsarV4)) // 脈衝星v4 (= v1, 無逾時)
+	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5)) // 脈衝星v5 (= v1, 固定% TP)
 	mux.HandleFunc("/api/admin/bollfade", s.gateTab("bollfade", s.handleBollFade))
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bgv2", s.gateTab("bgv2", s.handleBGV2))
@@ -745,6 +747,16 @@ func (s *Server) handlePulsarV2(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV3 serves the 脈衝星v3 (ATR 自適應 + 追尾 runner) tracker.
 func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV3State())
+}
+
+// handlePulsarV4 serves the 脈衝星v4 (= v1, 4h 逾時關閉) tracker.
+func (s *Server) handlePulsarV4(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV4State())
+}
+
+// handlePulsarV5 serves the 脈衝星v5 (= v1, 固定百分比止盈 5/10/15%) tracker.
+func (s *Server) handlePulsarV5(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV5State())
 }
 
 
