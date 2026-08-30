@@ -220,9 +220,7 @@ func main() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
-			store.BollFadeMarkTick()
 			store.MeanRevMarkTick()
-			store.BGV2MarkTick()
 			store.BollEMAMarkTick()
 			store.EMA2155MarkTick()
 			store.PulsarMarkTick()
@@ -230,36 +228,15 @@ func main() {
 			store.PulsarV3MarkTick()
 			store.PulsarV4MarkTick()
 			store.PulsarV5MarkTick()
+			store.SMCMarkTick()
 		}
 	}()
 
-	go func() {
-		store.BollFadeTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.BollFadeTick()
-		}
-	}()
 	go func() {
 		store.MeanRevTick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.MeanRevTick()
-		}
-	}()
-	// 布乖v2:兩腿各自照自己的週期評估(1h / 4h),同幣互斥由 famMu 保證。
-	go func() {
-		store.BGV2DevTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.BGV2DevTick()
-		}
-	}()
-	go func() {
-		store.BGV2BollTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.BGV2BollTick()
 		}
 	}()
 	// 布林EMA:4H 突破蓄勢(多空)。
@@ -292,6 +269,14 @@ func main() {
 			store.PulsarV3Tick()
 			store.PulsarV4Tick()
 			store.PulsarV5Tick()
+		}
+	}()
+	// 訂單塊 SMC:LuxAlgo 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h。
+	go func() {
+		store.SMCTick()
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.SMCTick()
 		}
 	}()
 

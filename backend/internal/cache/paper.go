@@ -80,6 +80,7 @@ type PaperTrade struct {
 	// Realized = locked-in PnL% from the filled tranches. Zero for single-TP trades.
 	TP1      float64 `json:"tp1,omitempty"`
 	TP2      float64 `json:"tp2,omitempty"`
+	TP3      float64 `json:"tp3,omitempty"` // 第三段分批止盈(僅四段策略如訂單塊 SMC 用;0=三段書不受影響)
 	Legs     int     `json:"legs"`
 	Filled   float64 `json:"filled,omitempty"`
 	Realized float64 `json:"realized,omitempty"`
@@ -445,12 +446,8 @@ func bookLabel(name string) string {
 		return "移動止損"
 	case "conv":
 		return "冥王星"
-	case "bollfade":
-		return "布林重回"
 	case "meanrev":
 		return "火星"
-	case "bgv2dev", "bgv2boll", "bgv2": // 兩腿的 DB book 名 + 家族開關 key
-		return "布乖v2" // 兩腿共用一個對外名稱
 	case "bollema":
 		return "海王星"
 	case "ema2155", "ema2155_4h", "ema2155_1d":
@@ -465,6 +462,8 @@ func bookLabel(name string) string {
 		return "脈衝星v4"
 	case "pulsarv5":
 		return "脈衝星v5"
+	case "orderblock", "orderblock_1h", "orderblock_4h":
+		return "訂單塊"
 	}
 	return "星軌"
 }
@@ -482,6 +481,8 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 		lvl, stop = tr.TP1, " · 止損移保本"
 	case 2:
 		lvl, stop = tr.TP2, " · 止損移 TP1"
+	case 3:
+		lvl, stop = tr.TP3, " · 止損移 TP2" // 四段策略(訂單塊)的第三段
 	}
 	title := fmt.Sprintf("🎯 %s TP%d 達成", bookLabel(name), leg)
 	body := fmt.Sprintf("%s %s @ $%s · 已平 %.0f%%%s", tr.Coin, dirCN(tr.Dir), fmtPx(lvl), tr.Filled*100, stop)
@@ -516,12 +517,12 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "bgv2dev", "bgv2boll":
-		return "bgv2" // 布乖v2 兩腿共用一個分頁
-	case "gamble", "emaonly", "conv", "bollfade", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5":
+	case "gamble", "emaonly", "conv", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5", "orderblock":
 		return name
 	case "ema2155_4h", "ema2155_1d": // 三週期共用一個分頁
 		return "ema2155"
+	case "orderblock_1h", "orderblock_4h": // 三週期共用一個分頁
+		return "orderblock"
 	}
 	return "paper" // main
 }
@@ -641,8 +642,8 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 }
 
 // notifyOpenBook is the 開倉 counterpart of notifyCloseBook, keyed by BOOK NAME
-// so strategies WITHOUT a paperBook — 冥王星(conv)與微策略(bollfade/meanrev/
-// bgv2/bollema)— can also fire an open notification. 這些策略原本只發 TP/保本,
+// so strategies WITHOUT a paperBook — 冥王星(conv)與微策略(火星/海王星/2155多/
+// 脈衝星…)— can also fire an open notification. 這些策略原本只發 TP/保本,
 // 開倉與平倉完全不通知,後台把開關打開也沒反應。routing 與 notifyCloseBook 一致:
 // 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。

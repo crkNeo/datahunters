@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollfade", "meanrev", "bgv2", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5", "orderblock"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -72,11 +72,8 @@ var stratDefaults = map[string]StratCfg{
 	// 超新星v2:與 gamble 相同設定,差別只在引擎層的逾時 6h(store.go)。admin 觀察書。
 	"emaonly": {Tags: []string{"高頻", "短線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"conv":    {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
-	// bollfade/meanrev 用 tpMeanRevFront(45/60、60/25/15)—— K棒重播調校後的值
-	"bollfade": {Tags: []string{"高頻", "短線"}, MaxSLPct: 10, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15, BeBufPct: 0.05, NotifyTP: true},
-	"meanrev":  {Tags: []string{"高頻", "短線"}, MaxSLPct: 10, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15, BeBufPct: 0.05, NotifyTP: true},
-	// 單段止盈組:照回測規格原樣上線,不分批
-	"bgv2": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single"},
+	// 火星(meanrev)用 tpMeanRevFront(45/60、60/25/15)—— K棒重播調校後的值
+	"meanrev": {Tags: []string{"高頻", "短線"}, MaxSLPct: 10, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15, BeBufPct: 0.05, NotifyTP: true},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
 	// 2155多:三價位止盈由 ema2155TPLevels 決定 —— TP1=固定+5%、TP2=1:1、最終=1:2,
@@ -96,6 +93,9 @@ var stratDefaults = map[string]StratCfg{
 	// 脈衝星v5:= v1(含 4h 逾時),止盈改固定百分比 +5%/+10%/+15%(pulsarPctTPLevels 覆蓋位置);
 	// SplitA/B 對它無效,比例 40/30/30 仍由此驅動。
 	"pulsarv5": {Tags: []string{"爆量", "埋伏", "多單", "固定%"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
+	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
+	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
+	"orderblock": {Tags: []string{"SMC", "訂單塊", "斐波", "多空"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 25, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -353,10 +353,10 @@ func (s *Store) beCueFor(name string, bookDefault float64) float64 {
 // share one key, so notifications and config resolve to the same strategy.
 func stratKeyOf(book string) string {
 	switch book {
-	case "bgv2dev", "bgv2boll":
-		return "bgv2"
 	case "ema2155_4h", "ema2155_1d": // 2155多 的 4h/1d 週期併回主 key
 		return "ema2155"
+	case "orderblock_1h", "orderblock_4h": // 訂單塊 的 1h/4h 週期併回主 key
+		return "orderblock"
 	}
 	return book
 }
@@ -443,10 +443,6 @@ func (s *Store) ManualExit(book, id string) bool {
 		}
 		done = closeIn(b.trades)
 		s.paperMu.Unlock()
-	case "bollfade":
-		s.bollFadeBook.mu.Lock()
-		done = closeIn(s.bollFadeBook.trades)
-		s.bollFadeBook.mu.Unlock()
 	case "meanrev":
 		s.meanRevBook.mu.Lock()
 		done = closeIn(s.meanRevBook.trades)
@@ -457,17 +453,6 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.bollEMABook.mu.Unlock()
 	case "ema2155": // 三週期都找,記下命中的那個以便寫回正確的 DB book
 		for _, b := range s.ema2155Books {
-			b.mu.Lock()
-			if tr := closeIn(b.trades); tr != nil {
-				done, dbBook = tr, b.name
-			}
-			b.mu.Unlock()
-			if done != nil {
-				break
-			}
-		}
-	case "bgv2": // 家族:兩腿都找,並記下命中的那一腿以便寫回正確的 DB book
-		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
 			b.mu.Lock()
 			if tr := closeIn(b.trades); tr != nil {
 				done, dbBook = tr, b.name
@@ -497,6 +482,17 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV5Book.mu.Lock()
 		done = closeIn(s.pulsarV5Book.trades)
 		s.pulsarV5Book.mu.Unlock()
+	case "orderblock": // 三週期都找(15m/1h/4h)
+		for _, b := range s.smcBooks {
+			b.mu.Lock()
+			if tr := closeIn(b.trades); tr != nil {
+				done, dbBook = tr, b.name
+			}
+			b.mu.Unlock()
+			if done != nil {
+				break
+			}
+		}
 	case "conv":
 		s.convMu.Lock()
 		done = closeIn(s.convTrades)

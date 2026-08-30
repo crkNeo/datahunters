@@ -36,14 +36,14 @@ func TestNotifyBookRespectsToggle(t *testing.T) {
 		t.Error("force=true 應繞過平倉開關")
 	}
 
-	// bgv2 家族:傳 bgv2dev/bgv2boll,開關讀的是合併後的 bgv2
+	// 2155多 多週期:傳 ema2155_4h/ema2155_1d,開關讀的是合併後的 ema2155
 	fam := &Store{stratCfg: map[string]StratCfg{
-		"bgv2": {NotifyOpen: true, NotifyClose: true},
+		"ema2155": {NotifyOpen: true, NotifyClose: true},
 	}}
-	if !fam.notifyOpenBook("bgv2dev", tr) {
-		t.Error("bgv2dev 的開關應併回 bgv2 讀取")
+	if !fam.notifyOpenBook("ema2155_4h", tr) {
+		t.Error("ema2155_4h 的開關應併回 ema2155 讀取")
 	}
-	if !fam.notifyCloseBook("bgv2boll", tr, time.Now(), false) {
-		t.Error("bgv2boll 的開關應併回 bgv2 讀取")
+	if !fam.notifyCloseBook("ema2155_1d", tr, time.Now(), false) {
+		t.Error("ema2155_1d 的開關應併回 ema2155 讀取")
 	}
 }

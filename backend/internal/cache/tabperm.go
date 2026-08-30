@@ -55,9 +55,7 @@ var tabMeta = []struct {
 	{"conv", "冥王星", "vip", false},
 	{"sr", "支撐壓力", "vip", false},
 	// 策略觀察書(預設管理員,可視需要開放給 VIP)
-	{"bollfade", "布林重回", "admin", false},
 	{"meanrev", "火星", "admin", false},
-	{"bgv2", "布乖v2", "admin", false},
 	{"bollema", "海王星", "admin", false},
 	{"srmtf", "錘頭/射擊星", "admin", false},
 	{"ema2155", "2155多", "admin", false},
@@ -67,6 +65,7 @@ var tabMeta = []struct {
 	{"pulsarv3", "脈衝星v3", "admin", false},
 	{"pulsarv4", "脈衝星v4", "admin", false},
 	{"pulsarv5", "脈衝星v5", "admin", false},
+	{"orderblock", "訂單塊", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -80,9 +79,10 @@ var validRoles = map[string]bool{"public": true, "member": true, "vip": true, "a
 var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
-	"bollfade": "signal", "meanrev": "signal", "bgv2": "signal", "bollema": "signal",
+	"meanrev": "signal", "bollema": "signal",
 	"srmtf": "signal", "ema2155": "signal",
 	"surge": "signal", "pulsar": "signal", "pulsarv2": "signal", "pulsarv3": "signal", "pulsarv4": "signal", "pulsarv5": "signal",
+	"orderblock": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -249,10 +249,10 @@ var tabOfRoute = map[string]string{
 	"/api/scorelog": "scorelog", "/api/klines": "oi",
 	"/api/paper": "paper", "/api/gamble": "gamble", "/api/ema-only": "emaonly",
 	"/api/conv": "conv", "/api/sr": "sr",
-	"/api/admin/bollfade": "bollfade",
-	"/api/admin/meanrev": "meanrev", "/api/admin/bgv2": "bgv2", "/api/admin/bollema": "bollema",
+	"/api/admin/meanrev": "meanrev", "/api/admin/bollema": "bollema",
 	"/api/srmtf": "srmtf", "/api/ema2155": "ema2155",
 	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv2": "pulsarv2", "/api/pulsarv3": "pulsarv3", "/api/pulsarv4": "pulsarv4", "/api/pulsarv5": "pulsarv5",
+	"/api/orderblock": "orderblock",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

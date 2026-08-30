@@ -133,10 +133,7 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	bollFadeBook *microBook // 布林重回 1h (admin, microrev.go)
-	meanRevBook  *microBook // 乖離回歸 1h (admin, microrev.go)
-	bgv2Dev      *microBook // 布乖v2 腿1:乖離回歸 1h 只做空 (admin, microrev.go)
-	bgv2Boll     *microBook // 布乖v2 腿2:布林重回 4h 只做空 (admin, microrev.go)
+	meanRevBook  *microBook // 火星:乖離回歸 1h (admin, microrev.go)
 	bollEMABook  *microBook // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
 	ema2155Books []*microBook // 2155多:EMA21/55 金叉 只做多,死叉即時止損;1h/4h/1d 三週期同頁 (microrev.go)
 	surge        *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
@@ -145,6 +142,7 @@ type Store struct {
 	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner + 大盤閘門 (microrev.go)
 	pulsarV4Book *microBook   // 脈衝星v4:= v1,但關閉 4h 逾時 (microrev.go)
 	pulsarV5Book *microBook   // 脈衝星v5:= v1,但固定百分比止盈 5%/10%/15% (microrev.go)
+	smcBooks     []*microBook // 訂單塊:LuxAlgo SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h 三週期同頁 (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -250,8 +248,7 @@ func NewStore(coins []string) *Store {
 	s.paperEMA.plan = tpMomentum
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
 	// candidate fix so it can be compared against the base 超新星.
-	// admin mean-reversion strategies (microrev.go)
-	s.bollFadeBook = &microBook{name: "bollfade", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: bollFadeSignal}
+	// 火星:乖離回歸 1h (microrev.go)
 	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
 	// 2155多:EMA21/55 金叉進場(只做多)、SL=近20根低點、TP 1:2/1:3/1:4 分批、死叉即時出場。
 	// expiry=0 → 無時間出場;分批位置(50%/75% → 2R/3R)與比例由 strat 設定驅動。
@@ -276,16 +273,15 @@ func NewStore(coins []string) *Store {
 	s.pulsarV4Book = &microBook{name: "pulsarv4", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
 	// 脈衝星v5:= v1(含 4h 逾時),但止盈改成固定百分比 TP1=+5%/TP2=+10%/最終=+15%(tpLevels 覆蓋)。
 	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
-	// 布乖v2:兩腿家族,一個分頁、一個開關、同幣互斥(誰先觸發誰佔位)。
-	// 照回測規格原樣上線 — 單段止盈(plan nil)、無 maxSLPct 濾網(SL 本就刻意放寬到 4 ATR)、逾時 64 根。
-	bgv2Mu := &sync.Mutex{} // 家族共用鎖:序列化兩腿的進場判斷
-	s.bgv2Dev = &microBook{name: "bgv2dev", stratKey: "bgv2", famMu: bgv2Mu, tf: "1h", barSec: 3600, klimit: 300, minBars: 260, expiry: 64, cooldown: 4, keep: 500, signal: bgv2DevSignal}
-	s.bgv2Boll = &microBook{name: "bgv2boll", stratKey: "bgv2", famMu: bgv2Mu, tf: "4h", barSec: 14400, klimit: 300, minBars: 260, expiry: 64, cooldown: 4, keep: 500, signal: bgv2BollSignal}
-	s.bgv2Dev.family = []*microBook{s.bgv2Dev, s.bgv2Boll}
-	s.bgv2Boll.family = s.bgv2Dev.family
-
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
+
+	// 訂單塊 SMC:15m/1h/4h 三週期同頁。無逾時(expiry:0)—— 掛單型,位置到 + 型態成立才進場。
+	s.smcBooks = []*microBook{
+		{name: "orderblock", tf: "15m", barSec: 900, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
+		{name: "orderblock_1h", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
+		{name: "orderblock_4h", tf: "4h", barSec: 14400, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
+	}
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
 		go s.notifier.Send("✅ <b>datahunter 已啟動</b> · Telegram 通知已連線")
@@ -300,10 +296,7 @@ func NewStore(coins []string) *Store {
 		s.paperGamble.trades = db.loadTrades("gamble")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.convTrades = db.loadTrades("conv")
-		s.bollFadeBook.trades = db.loadTrades("bollfade")
 		s.meanRevBook.trades = db.loadTrades("meanrev")
-		s.bgv2Dev.trades = db.loadTrades("bgv2dev")
-		s.bgv2Boll.trades = db.loadTrades("bgv2boll")
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		for _, b := range s.ema2155Books {
 			b.trades = db.loadTrades(b.name)
@@ -313,6 +306,9 @@ func NewStore(coins []string) *Store {
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV4Book.trades = db.loadTrades("pulsarv4")
 		s.pulsarV5Book.trades = db.loadTrades("pulsarv5")
+		for _, b := range s.smcBooks {
+			b.trades = db.loadTrades(b.name)
+		}
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}

@@ -23,10 +23,8 @@ func TestStratDefaultsMirrorCode(t *testing.T) {
 		{"gamble", 12, "split", 40, 70, 40},   // FILTER@12% + tpMomentum
 		{"main", 0, "split", 40, 70, 40},      // tpMomentum
 		{"conv", 0, "split", 40, 70, 40},      // tpMomentum(原本寫死在 convergence.go)
-		{"meanrev", 10, "split", 45, 60, 60},  // tpMeanRevFront(K棒重播調校)
-		{"bollfade", 10, "split", 45, 60, 60}, // tpMeanRevFront
-		{"bgv2", 0, "single", 0, 0, 0},        // 單段止盈、無濾網
-		{"bollema", 0, "single", 0, 0, 0},     // 單段 + 保本位提示
+		{"meanrev", 10, "split", 45, 60, 60}, // tpMeanRevFront(K棒重播調校)
+		{"bollema", 0, "single", 0, 0, 0},    // 單段 + 保本位提示
 	} {
 		got := s.StratConfigOf(tc.name)
 		if got.MaxSLPct != tc.maxSL {
@@ -142,8 +140,8 @@ func TestNotifyToggles(t *testing.T) {
 	if !s.notifyOn("gamble", "open") || !s.notifyOn("gamble", "tp") {
 		t.Error("gamble 預設應開啟開倉/止盈通知")
 	}
-	if s.notifyOn("bollfade", "open") {
-		t.Error("bollfade 預設不該發開倉通知(管理員觀察書)")
+	if s.notifyOn("meanrev", "open") {
+		t.Error("meanrev 預設不該發開倉通知(管理員觀察書)")
 	}
 	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "single", NotifyClose: true})
 	if s.notifyOn("gamble", "open") || !s.notifyOn("gamble", "close") {
@@ -242,19 +240,19 @@ func TestManualExitAlwaysNotifies(t *testing.T) {
 	s := &Store{stratCfg: map[string]StratCfg{}, tabPerms: map[string]string{}, notifier: nil}
 	tr := &PaperTrade{Coin: "BTC", Dir: "long", Entry: 100, Cur: 101, PnLPct: 1, Outcome: "momdead", OpenTime: time.Now()}
 
-	// bollfade 預設 NotifyClose=false → 自動平倉不通知
-	if s.notifyOn("bollfade", "close") {
-		t.Fatal("前提錯了:bollfade 預設應該是不發平倉通知")
+	// meanrev 預設 NotifyClose=false → 自動平倉不通知
+	if s.notifyOn("meanrev", "close") {
+		t.Fatal("前提錯了:meanrev 預設應該是不發平倉通知")
 	}
-	if s.notifyCloseBook("bollfade", tr, time.Now(), false) {
+	if s.notifyCloseBook("meanrev", tr, time.Now(), false) {
 		t.Error("自動平倉不該通知(開關是關的)")
 	}
 	// 手動出場 force=true → 一律通知
-	if !s.notifyCloseBook("bollfade", tr, time.Now(), true) {
+	if !s.notifyCloseBook("meanrev", tr, time.Now(), true) {
 		t.Error("手動出場沒有發通知")
 	}
-	// 家族分腿(bgv2dev)要能解析回家族 key,不能因為查不到設定而漏發
-	if !s.notifyCloseBook("bgv2dev", tr, time.Now(), true) {
-		t.Error("布乖v2 分腿的手動出場沒有發通知")
+	// 多週期分腿(ema2155_4h)要能解析回主 key,不能因為查不到設定而漏發
+	if !s.notifyCloseBook("ema2155_4h", tr, time.Now(), true) {
+		t.Error("2155多 分週期的手動出場沒有發通知")
 	}
 }

@@ -56,6 +56,10 @@ type microBook struct {
 	// tpLevels (optional): explicit TP1/TP2/final prices, overriding the plan's a/b
 	// placement (but keeping its 分批比例/保本). 2155多 uses it for 固定5% + 1:1 + 1:2.
 	tpLevels func(entry, sl float64) (tp1, tp2, tp3 float64)
+	// tpLevels4 (optional): explicit TP1/TP2/TP3 partial prices for FOUR-stage books
+	// (訂單塊 SMC). tr.TP stays the signal's final target. Gets the final so it can
+	// recover the fib grid. nil = not a 4-stage book.
+	tpLevels4 func(entry, sl, finalTP float64) (tp1, tp2, tp3 float64)
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -116,44 +120,6 @@ func stdevSeries(cs []exchange.Candle, p int) []float64 {
 }
 
 // ---- strategy signals ----
-
-// bollFadeSignal: 1h both — prior bar closed OUTSIDE the Bollinger band and this
-// bar closed back INSIDE (failed over-extension), aligned with the EMA200 side.
-// Target = middle band; SL = 2.5 ATR; keep only RR in [0.4, 3.0].
-func bollFadeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	n := len(cs)
-	sma := smaSeries(cs, 20)
-	std := stdevSeries(cs, 20)
-	ema200 := emaSeries(cs, 200)[n-1]
-	atr := atrSeries(cs, 14)[n-1]
-	if atr <= 0 || ema200 <= 0 || std[n-1] <= 0 || std[n-2] <= 0 {
-		return
-	}
-	price, prev, mid := cs[n-1].Close, cs[n-2].Close, sma[n-1]
-	upPrev, loPrev := sma[n-2]+2*std[n-2], sma[n-2]-2*std[n-2]
-	upNow, loNow := sma[n-1]+2*std[n-1], sma[n-1]-2*std[n-1]
-	switch {
-	case prev > upPrev && price <= upNow && price < ema200: // poked above, back in, downtrend → short
-		if mid >= price {
-			return
-		}
-		s := price + 2.5*atr
-		if rr := (price - mid) / (s - price); rr < 0.4 || rr > 3.0 {
-			return
-		}
-		return "short", roundPx(price), roundPx(s), roundPx(mid), true
-	case prev < loPrev && price >= loNow && price > ema200: // poked below, back in, uptrend → long
-		if mid <= price {
-			return
-		}
-		s := price - 2.5*atr
-		if rr := (mid - price) / (price - s); rr < 0.4 || rr > 3.0 {
-			return
-		}
-		return "long", roundPx(price), roundPx(s), roundPx(mid), true
-	}
-	return
-}
 
 // meanRevSignal: 1h both — close deviates > 2 ATR from EMA20, trend-aligned with
 // EMA200 (above → long only, below → short only). Target = EMA20; SL = 3 ATR.
@@ -237,91 +203,6 @@ func bollEMASignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 		return "short", e, s, roundPx(e - 3*(s-e)), true
 	}
 	return
-}
-
-// ---- 布乖v2 (bgv2): a two-leg SHORT-only family, one tab, 同幣互斥 ----
-//
-// Both legs share the same skeleton — short only, close < that timeframe's own
-// EMA200, SL = entry + 4.0 ATR, target = the mean itself, 64-bar timeout, RR gate
-// 0.4–3.0, 4-bar cooldown — and differ only in what counts as "over-extended":
-//
-//	腿1 bgv2Dev  (1h): 收盤高出 EMA50 逾 2 ATR            → 目標 EMA50
-//	腿2 bgv2Boll (4h): 衝出布林(50,2σ)上軌後收回、仍在中軌上 → 目標 中軌(SMA50)
-//
-// bgv2BollSignal: 4h SHORT-only — a failed breakout above the upper Bollinger band
-// inside a downtrend. Unlike bollFadeSignal (1h, 20-period, both directions) this
-// leg uses a 50-period band on 4h, is short-only, and additionally requires the bar
-// to close back inside the band but still ABOVE the mid — i.e. it pulled back, but
-// hasn't already fallen through the target.
-func bgv2BollSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	n := len(cs)
-	sma := smaSeries(cs, 50)
-	std := stdevSeries(cs, 50)
-	ema200 := emaSeries(cs, 200)[n-1]
-	atr := atrSeries(cs, 14)[n-1]
-	if atr <= 0 || ema200 <= 0 || sma[n-1] <= 0 || std[n-1] <= 0 || std[n-2] <= 0 {
-		return
-	}
-	price, prev, mid := cs[n-1].Close, cs[n-2].Close, sma[n-1]
-	if price >= ema200 { // 1. 空頭環境
-		return
-	}
-	if prev <= sma[n-2]+2*std[n-2] { // 2. 前一根要衝出上軌
-		return
-	}
-	if price > sma[n-1]+2*std[n-1] { // 3a. 本根要收回通道內
-		return
-	}
-	if price <= mid { // 3b. 但仍需在中軌上方(收回,但沒跌過頭 → 目標還在下方)
-		return
-	}
-	s := price + 4.0*atr
-	// 4. RR 閘門。這裡下限是實質有效的(不像腿1):要求 收盤−中軌 > 1.6 ATR。
-	if rr := (price - mid) / (s - price); rr < 0.4 || rr > 3.0 {
-		return
-	}
-	return "short", roundPx(price), roundPx(s), roundPx(mid), true
-}
-
-// bgv2DevSignal: 1h SHORT-only — fade an over-extended bounce inside a downtrend.
-// A ground-up redesign of meanRevSignal, every axis backed by ablation on the full
-// dataset (see STRATEGIES.md):
-//
-//	mean = EMA50, not EMA20  — the fast MA only catches hours-long noise that nets
-//	                           to zero after fees; EMA50's bounces are big enough to pay.
-//	SL = 4.0 ATR, not 3.0    — 2.0→4.0 improved monotonically; tight stops die to wicks.
-//	hold = 64 bars, not 24   — 4→48 improved monotonically, 48→96 flat.
-//	target = the EMA itself  — beat a fixed 2 ATR target and a pure time exit.
-//	EMA200 filter is load-bearing — removing it flipped alt shorts +0.043 → −0.023.
-//	SHORT only               — the long mirror (buying a dip below EMA50) had no edge.
-//
-// No confirmation bar: waiting for a close-back-down only bought +5pp win rate with
-// no expectancy gain, so we fade the bounce top directly.
-func bgv2DevSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	n := len(cs)
-	ema50 := emaSeries(cs, 50)[n-1]
-	ema200 := emaSeries(cs, 200)[n-1]
-	atr := atrSeries(cs, 14)[n-1]
-	if atr <= 0 || ema50 <= 0 || ema200 <= 0 {
-		return
-	}
-	price := cs[n-1].Close
-	if price >= ema200 { // 1. 必須處於空頭環境
-		return
-	}
-	if (price-ema50)/atr <= 2.0 { // 2. 反彈過度:高出 EMA50 逾 2 ATR
-		return
-	}
-	if ema50 >= price { // 目標必須在進場價下方(乖離為正時恆成立,防呆)
-		return
-	}
-	s := price + 4.0*atr
-	// 3. 盈虧比閘門。注意:條件 2 已保證乖離 > 2 ATR,故 RR = 乖離/(4 ATR) > 0.5,
-	// 下限 0.4 實際上永遠不會觸發;真正生效的是上限(擋掉乖離 > 12 ATR 的極端值)。
-	if rr := (price - ema50) / (s - price); rr < 0.4 || rr > 3.0 {
-		return
-	}
-	return "short", roundPx(price), roundPx(s), roundPx(ema50), true
 }
 
 // ema2155Signal (2155多): 只做多。EMA21 上穿 EMA55(金叉)→ 進場。止損=最近 20 根的
@@ -747,6 +628,11 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 				// 但仍沿用 plan 的分批比例(w1/w2/w3)與保本緩衝。
 				tr.TP1, tr.TP2, tr.TP = b.tpLevels(tr.Entry, tr.SL)
 			}
+			if b.tpLevels4 != nil && plan != nil {
+				// 四段斐波止盈(訂單塊 SMC):TP1/TP2/TP3 三個分批位,tr.TP 維持訊號給的
+				// 最終目標(fib2.0)。從 SL(fib-0.13)與 tr.TP(fib2.0)還原斐波格再算三段。
+				tr.TP1, tr.TP2, tr.TP3 = b.tpLevels4(tr.Entry, tr.SL, tr.TP)
+			}
 			b.trades = append(b.trades, tr)
 			dirty = tr
 			opened = true
@@ -974,10 +860,7 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) BollFadeTick() { s.microTick(s.bollFadeBook) }
 func (s *Store) MeanRevTick()  { s.microTick(s.meanRevBook) }
-func (s *Store) BGV2DevTick()  { s.microTick(s.bgv2Dev) }
-func (s *Store) BGV2BollTick() { s.microTick(s.bgv2Boll) }
 func (s *Store) BollEMATick()  { s.microTick(s.bollEMABook) }
 func (s *Store) EMA2155Tick() {
 	for _, b := range s.ema2155Books {
@@ -994,10 +877,18 @@ func (s *Store) PulsarV4Tick()     { s.microTick(s.pulsarV4Book) }
 func (s *Store) PulsarV4MarkTick() { s.microMarkTick(s.pulsarV4Book) }
 func (s *Store) PulsarV5Tick()     { s.microTick(s.pulsarV5Book) }
 func (s *Store) PulsarV5MarkTick() { s.microMarkTick(s.pulsarV5Book) }
+func (s *Store) SMCTick() {
+	for _, b := range s.smcBooks {
+		s.microTick(b)
+	}
+}
+func (s *Store) SMCMarkTick() {
+	for _, b := range s.smcBooks {
+		s.microMarkTick(b)
+	}
+}
 
-func (s *Store) BollFadeMarkTick() { s.microMarkTick(s.bollFadeBook) }
 func (s *Store) MeanRevMarkTick()  { s.microMarkTick(s.meanRevBook) }
-func (s *Store) BGV2MarkTick()     { s.microMarkTick(s.bgv2Dev); s.microMarkTick(s.bgv2Boll) }
 func (s *Store) BollEMAMarkTick()  { s.microMarkTick(s.bollEMABook) }
 func (s *Store) EMA2155MarkTick() {
 	for _, b := range s.ema2155Books {
@@ -1024,10 +915,6 @@ func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
 // unknown book.
 func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 	switch book {
-	case "bollfade":
-		s.bollFadeBook.mu.Lock()
-		s.bollFadeBook.trades = keepIf(s.bollFadeBook.trades, closedOnly)
-		s.bollFadeBook.mu.Unlock()
 	case "meanrev":
 		s.meanRevBook.mu.Lock()
 		s.meanRevBook.trades = keepIf(s.meanRevBook.trades, closedOnly)
@@ -1038,6 +925,20 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Unlock()
 	case "ema2155": // 一個開關清三個週期(1h/4h/1d)
 		for _, b := range s.ema2155Books {
+			b.mu.Lock()
+			b.trades = keepIf(b.trades, closedOnly)
+			b.mu.Unlock()
+			if s.db != nil {
+				if closedOnly {
+					s.db.clearClosedTrades(b.name)
+				} else {
+					s.db.clearTrades(b.name)
+				}
+			}
+		}
+		return true // DB 已在上面各週期處理
+	case "orderblock": // 一個開關清三個週期(15m/1h/4h)
+		for _, b := range s.smcBooks {
 			b.mu.Lock()
 			b.trades = keepIf(b.trades, closedOnly)
 			b.mu.Unlock()
@@ -1070,20 +971,6 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV5Book.mu.Lock()
 		s.pulsarV5Book.trades = keepIf(s.pulsarV5Book.trades, closedOnly)
 		s.pulsarV5Book.mu.Unlock()
-	case "bgv2": // 家族:一個開關清兩腿
-		for _, b := range []*microBook{s.bgv2Dev, s.bgv2Boll} {
-			b.mu.Lock()
-			b.trades = keepIf(b.trades, closedOnly)
-			b.mu.Unlock()
-			if s.db != nil {
-				if closedOnly {
-					s.db.clearClosedTrades(b.name)
-				} else {
-					s.db.clearTrades(b.name)
-				}
-			}
-		}
-		return true // DB 已在上面各腿處理
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1132,9 +1019,6 @@ func (s *Store) retrofitMultiTP() {
 			}
 		}
 	}
-	s.bollFadeBook.mu.Lock()
-	fill("bollfade", s.bollFadeBook.plan, s.bollFadeBook.trades)
-	s.bollFadeBook.mu.Unlock()
 	s.meanRevBook.mu.Lock()
 	fill("meanrev", s.meanRevBook.plan, s.meanRevBook.trades)
 	s.meanRevBook.mu.Unlock()
@@ -1153,11 +1037,7 @@ func (s *Store) retrofitMultiTP() {
 	}
 }
 
-func (s *Store) BollFadeState() PaperState { return s.microState(s.bollFadeBook) }
 func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) }
-
-// BGV2State merges both legs into ONE tab payload (布乖v2 是一個策略,不是兩個)。
-func (s *Store) BGV2State() PaperState    { return s.microState(s.bgv2Dev, s.bgv2Boll) }
 func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) }
 func (s *Store) EMA2155State() PaperState  { return s.microState(s.ema2155Books...) }
 func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
@@ -1165,3 +1045,4 @@ func (s *Store) PulsarV2State() PaperState  { return s.microState(s.pulsarV2Book
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV4State() PaperState  { return s.microState(s.pulsarV4Book) }
 func (s *Store) PulsarV5State() PaperState  { return s.microState(s.pulsarV5Book) }
+func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }

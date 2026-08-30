@@ -12,7 +12,7 @@ func TestTabDefaultsMatchOldHardcodedRoles(t *testing.T) {
 		"ranking": "public", "funding": "public", "sectors": "public",
 		"oi": "member", "signals": "member", "radar": "member", "scorelog": "member",
 		"paper": "vip", "gamble": "vip", "emaonly": "vip", "conv": "vip", "sr": "vip",
-		"bollfade": "admin", "bollema": "admin", "bgv2": "admin",
+		"bollema": "admin", "meanrev": "admin",
 		"admin": "admin", "referral": "admin",
 	} {
 		if got := s.TabRole(tab); got != want {

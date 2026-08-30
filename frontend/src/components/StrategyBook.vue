@@ -95,6 +95,9 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
             <template v-if="t.status === 'pending'">
               <span class="tsmall">等回踩至 {{ fmtPrice(t.entry) }} 才進場 · 目標 {{ fmtPrice(t.tp) }}</span>
             </template>
+            <template v-else-if="t.tp1 && t.tp2 && t.tp3">
+              <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp3) }} <i class="tppct">{{ lvlPct(t, t.tp3) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 4 }">TP4 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
+            </template>
             <template v-else-if="t.tp1 && t.tp2">
               <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
             </template>

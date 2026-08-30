@@ -650,36 +650,18 @@ async function loadStratMeta() {
 }
 function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
 function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
-// 分頁 → 策略 key。微策略分頁名本身就是 key(bollfade/meanrev/bgv2…),
+// 分頁 → 策略 key。微策略分頁名本身就是 key(meanrev/bollema/ema2155/pulsar…),
 // 只有雷達三本的分頁名與 book 名不同。
 const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
 const curStrat = computed(() => STRAT_KEY_BY_TAB[mainTab.value] || mainTab.value)
 
-// ---- admin: mean-reversion strategies (布林重回 / 乖離回歸 / 布乖v2 / 布林EMA) ----
-const bollfade = ref(null)
+// ---- admin: 火星(乖離回歸)/ 海王星(布林EMA)----
 const meanrev = ref(null)
-const bgv2 = ref(null)
 const bollema = ref(null)
-async function loadBollfade() {
-  try {
-    const res = await authFetch('/api/admin/bollfade')
-    if (res.ok) bollfade.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 async function loadMeanrev() {
   try {
     const res = await authFetch('/api/admin/meanrev')
     if (res.ok) meanrev.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-async function loadBgv2() {
-  try {
-    const res = await authFetch('/api/admin/bgv2')
-    if (res.ok) bgv2.value = await res.json()
   } catch (e) {
     /* secondary */
   }
@@ -746,6 +728,15 @@ async function loadPulsarV5() {
     /* secondary */
   }
 }
+const orderblock = ref(null)
+async function loadOrderBlock() {
+  try {
+    const res = await authFetch('/api/orderblock')
+    if (res.ok) orderblock.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // 爆量脈搏面板(全市場相對爆量斥候,純觀察)
 const surge = ref(null)
 const surgeSort = ref('surge_x')
@@ -786,17 +777,9 @@ async function clearStrat(book, loader, closedOnly) {
 const curPaperBook = computed(() => ({ paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }[mainTab.value]))
 // the three mean-reversion tabs share one layout; meta drives the unified section.
 const microMeta = {
-  bollfade: {
-    title: '布林重回 · 1h', load: loadBollfade, get: () => bollfade.value,
-    help: '<b>進場</b>:前一根收盤在布林(20, 2σ)<b>外</b>、本根收<b>回</b>通道內,且方向與 EMA200 同側 → 朝中軌交易。<br><b>止損</b> 2.5×ATR,<b>最終止盈 TP3</b>=中軌(SMA20),盈虧比需 0.4–3.0。<br>多空雙向、最多 24 根、冷卻 4 根;進場以 1h 收盤判定。<br><b>分批止盈</b>(即時價執行):TP1/TP2 位在進場→TP3 的 <b>30% / 60%</b>;TP1 平 <b>50%</b>→止損移保本(進場+0.05%)、TP2 平 <b>30%</b>→止損移 TP1、TP3 平剩餘 <b>20%</b>。目標太近時自動不分批。<br><br>管理員專屬模擬單,⚠️ 非投資建議。',
-  },
   bollema: {
     title: '海王星', load: loadBollema, get: () => bollema.value,
     help: "‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」",
-  },
-  bgv2: {
-    title: '布乖v2 · 1h乖離 + 4h布林 · 只做空', load: loadBgv2, get: () => bgv2.value,
-    help: "<b>只做空的雙腿策略</b>——1h「乖離腿」與 4h「布林腿」共用一個分頁、一個開關。<br><br><b>【通用設定】</b><br>・<b>市場過濾</b>:收盤 &lt; EMA200(各腿用自己週期的 EMA200)<br>・<b>止損</b>:進場 + <b>4.0×ATR(14)</b>(寬止損,扛插針)<br>・<b>時間出場</b>:持滿 <b>64 根</b>收盤平倉<br>・<b>盈虧比閘門</b>:RR 落在 0.4–3.0 才進場<br>・<b>冷卻</b>:訊號後 4 根內不重複進場<br>・<b>同幣互斥</b>:同一幣種同時只允許本家族<b>一個</b>倉位(兩腿誰先觸發誰佔位,另一腿跳過)<br>・所有條件以 <b>K 棒收盤</b>判斷,收盤市價進場;同根同觸止損與目標 → 一律算<b>止損</b>(保守)<br><br><b>【腿 1:乖離回歸 v2 · 1h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② <b>(收盤 − EMA50) / ATR &gt; +2.0</b>(反彈高出 EMA50 兩個 ATR)③ 以「目標 EMA50、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的 <b>EMA50</b> 值 ｜ <b>時間</b>:64 根 ≈ <b>2.7 天</b><br><br><b>【腿 2:布林重回 v2 · 4h】</b><br><b>進場</b>(同時成立):① 收盤 &lt; EMA200 ② 前一根收盤 <b>&gt; 布林(50, 2σ) 上軌</b>(衝出通道)③ 本根收盤<b>跌回上軌內、且仍在中軌(SMA50)上方</b>(收回但未跌過頭)④ 以「目標中軌、止損 4 ATR」算的 RR 在 0.4–3.0<br><b>止盈</b>:進場時的<b>中軌(SMA50)</b>值 ｜ <b>時間</b>:64 根 ≈ <b>10.7 天</b><br><br><b>【倉位】</b>每筆風險 ≤ <b>0.5%</b> 資金(歷史 maxDD 約 20–35R)。<br><br><b>單段止盈,不分批</b> — 照回測規格原樣上線。<br><br>管理員專屬模擬單,⚠️ 非投資建議。",
   },
   ema2155: {
     title: '2155多 · 1h / 4h / 日線', load: loadEMA2155, get: () => ema2155.value,
@@ -825,6 +808,10 @@ const microMeta = {
   meanrev: {
     title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
     help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
+  },
+  orderblock: {
+    title: '訂單塊 · SMC 斐波四段 · 15m / 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
+    help: '<b>SMC 訂單塊 + 斐波回撤策略 · 多空都做</b>。用 LuxAlgo「Smart Money Concepts」的<b>訂單塊</b>(內部 5 根 + swing 50 根)當供需區,從波段極值拉斐波,埋伏回撤到訂單塊的低吸/高空。<br><b>三個週期同頁</b>:<b>15m / 4H / 1H</b>各自獨立掃描持倉,列表以「<b>週期</b>」欄分類。<br><br><b>【斐波幾何】</b>做多:<b>fib0 = 訂單塊下緣</b>、<b>fib1 = 訂單塊之後的最高高點</b>(自動 re-anchor:出新高就把 fib1 移過去,fib0 不動)。做空對稱(fib0 = 訂單塊上緣、fib1 = 之後最低低點)。<br><b>【進場】</b>價格回撤進 <b>0.142–0.382</b> 區間(靠近訂單塊)+ 收出<b>頭槌</b>(多)/<b>射擊之星</b>(空)→ 收盤進場。像掛單:每根收盤重算斐波、位置到 + 型態成立才進。<b>暫無逾時</b>。<br><b>【止損】</b>fib <b>−0.13</b>(訂單塊外側緩衝)。<br><b>【止盈:四段沿路套保】</b><b>TP1 = fib1.0</b>(平 25%→止損移保本)、<b>TP2 = fib1.382</b>(平 25%→移 TP1)、<b>TP3 = fib1.618</b>(平 25%→移 TP2)、<b>最終 = fib2.0</b>(平剩 25%)。冷卻 4 根。<br><br>⚠️ 觀察用書,預設靜默、不接實盤。管理員專屬模擬單,非投資建議。',
   },
 }
 const micro = computed(() => microMeta[mainTab.value] || null)
@@ -1265,9 +1252,7 @@ function loadAll() {
   if (canTab('sr')) loadSR()
   if (canTab('conv')) loadConv()
   // 這四個的端點路徑是 /api/admin/* (歷史名稱),但權限同樣由 gateTab 決定
-  if (canTab('bollfade')) loadBollfade()
   if (canTab('meanrev')) loadMeanrev()
-  if (canTab('bgv2')) loadBgv2()
   if (canTab('bollema')) loadBollema()
   if (canTab('ema2155')) loadEMA2155()
   if (canTab('pulsar')) loadPulsar()
@@ -1275,6 +1260,7 @@ function loadAll() {
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv4')) loadPulsarV4()
   if (canTab('pulsarv5')) loadPulsarV5()
+  if (canTab('orderblock')) loadOrderBlock()
   if (canTab('surge')) loadSurge()
   if (canTab('srmtf')) loadSRMTF()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
@@ -1348,7 +1334,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'pulsarv3', 'pulsarv4', 'pulsarv5', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'meanrev', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'pulsarv3', 'pulsarv4', 'pulsarv5', 'orderblock', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1486,7 +1472,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  bollfade: 'admin', meanrev: 'admin', bgv2: 'admin', bollema: 'admin', ema2155: 'admin', surge: 'admin', pulsar: 'admin', pulsarv2: 'admin', pulsarv3: 'admin', pulsarv4: 'admin', pulsarv5: 'admin', srmtf: 'admin',
+  meanrev: 'admin', bollema: 'admin', ema2155: 'admin', surge: 'admin', pulsar: 'admin', pulsarv2: 'admin', pulsarv3: 'admin', pulsarv4: 'admin', pulsarv5: 'admin', orderblock: 'admin', srmtf: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1528,7 +1514,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollfade: 'signal', meanrev: 'signal', bgv2: 'signal', bollema: 'signal', ema2155: 'signal', surge: 'signal', pulsar: 'signal', pulsarv2: 'signal', pulsarv3: 'signal', pulsarv4: 'signal', pulsarv5: 'signal', srmtf: 'signal',
+  meanrev: 'signal', bollema: 'signal', ema2155: 'signal', surge: 'signal', pulsar: 'signal', pulsarv2: 'signal', pulsarv3: 'signal', pulsarv4: 'signal', pulsarv5: 'signal', orderblock: 'signal', srmtf: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1536,7 +1522,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'bollfade', 'meanrev', 'bgv2', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'pulsarv3', 'pulsarv4', 'pulsarv5', 'srmtf',
+  'admin', 'referral', 'meanrev', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'pulsarv3', 'pulsarv4', 'pulsarv5', 'orderblock', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -2037,14 +2023,8 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('referral', grp[0])" :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
             推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
           </button>
-          <button v-if="inGroup('bollfade', grp[0])" :class="{ active: mainTab === 'bollfade' }" @click="mainTab = 'bollfade'; loadBollfade()">
-            布林重回<em v-if="bollfade && bollfade.open.length" class="navbadge">{{ bollfade.open.length }}</em>
-          </button>
           <button v-if="inGroup('meanrev', grp[0])" :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
             火星<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
-          </button>
-          <button v-if="inGroup('bgv2', grp[0])" :class="{ active: mainTab === 'bgv2' }" @click="mainTab = 'bgv2'; loadBgv2()">
-            布乖v2<em v-if="bgv2 && bgv2.open.length" class="navbadge">{{ bgv2.open.length }}</em>
           </button>
           <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
             海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
@@ -2069,6 +2049,9 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('pulsarv5', grp[0])" :class="{ active: mainTab === 'pulsarv5' }" @click="mainTab = 'pulsarv5'; loadPulsarV5()">
             脈衝星v5<em v-if="pulsarv5 && pulsarv5.open.length" class="navbadge">{{ pulsarv5.open.length }}</em>
+          </button>
+          <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock' }" @click="mainTab = 'orderblock'; loadOrderBlock()">
+            訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em>
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘頭/射擊星</button>
         </div>
@@ -2216,7 +2199,7 @@ watch([role, tabPerms, authReady], () => {
       />
     </section>
 
-    <!-- 均值回歸策略(逆勢超買空 / 布林重回 / 乖離回歸)· 分批止盈 · admin only -->
+    <!-- 微策略共用區(火星 / 海王星 / 2155多 / 脈衝星家族)· admin only -->
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>

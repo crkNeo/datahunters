@@ -43,6 +43,11 @@ var (
 	// 脈衝星v3:R 倍數 TP1=1R / TP2=2R,最後一段(w3)追尾。結構在此,比例(w1/w2/w3)
 	// 與保本緩衝由 strat 設定驅動(tpFor)。trailR=1.5 → runner 停損 = 峰值 − 1.5R,鎖 ≥1R。
 	tpPulsarV3 = &tpPlan{rMult: true, a: 1, b: 2, w1: 0.50, w2: 0.25, w3: 0.25, beBuf: 0.0005, trailAfterTP2: true, trailR: 1.5}
+
+	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段平剩下 25%。
+	// a/b 只是佔位 —— 實際 TP1/TP2/TP3 由 smcFibTPLevels 依斐波格覆蓋。沿路套保:TP1→保本、
+	// TP2→TP1、TP3→TP2(見 stepTP)。
+	tpSMCFib = &tpPlan{a: 0.40, b: 0.70, w1: 0.25, w2: 0.25, w3: 0.25, beBuf: 0.0005, minSplitPct: 0.008}
 )
 
 // setupTP computes TP1/TP2 for a freshly opened trade from its entry + final TP
@@ -114,6 +119,12 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 			tr.Legs = 2
 			tr.SL = tr.TP1 // TP2 → lock the stop at TP1
 		}
+		if tr.TP3 > 0 && tr.Legs < 3 && reached(tr.TP3) { // 四段策略的第三段(訂單塊 SMC);三段書 TP3=0 不進來
+			tr.Realized += p.w3 * pnl(tr.Dir, tr.Entry, tr.TP3)
+			tr.Filled += p.w3
+			tr.Legs = 3
+			tr.SL = tr.TP2 // TP3 → 止損移到 TP2(沿路套保)
+		}
 	}
 	if p != nil && p.trailAfterTP2 { // 脈衝星v3:runner 追尾,沒有固定 TP3
 		if tr.Legs >= 2 { // TP2 後最後一段跟著峰值走,停損只上不下、不低於 TP1
@@ -132,8 +143,12 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 				}
 			}
 		}
-	} else if reached(tr.TP) { // final target → close the remainder at TP3
-		tr.Legs = 3
+	} else if reached(tr.TP) { // final target → close the remainder
+		if tr.TP3 > 0 {
+			tr.Legs = 4 // 四段策略:最終段
+		} else {
+			tr.Legs = 3
+		}
 		closeTrade(tr, tr.TP, "tp3", now)
 		return true
 	}
