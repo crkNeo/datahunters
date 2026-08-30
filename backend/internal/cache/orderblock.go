@@ -215,19 +215,22 @@ func extractOB(cs []exchange.Candle, parsedHigh, parsedLow []float64, from, to, 
 // ── 訂單塊斐波策略:進場訊號 ──────────────────────────────────────────────
 //
 // 邏輯(使用者定義):用 LuxAlgo 訂單塊拉斐波,回撤 0.142–0.382 區間 + 頭槌/射擊之星進場。
-//   多:fib0 = 訂單塊下緣、fib1 = 訂單塊之後的最高高點(自動 re-anchor:新高就把 fib1 移過去,
-//        fib0 不動)。進場區 = [fib0+0.142r, fib0+0.382r](靠近訂單塊)。最後一根是「頭槌」且
-//        其低點落在區間 → 收盤進場。止損 = fib-0.13(fib0-0.13r);最終 TP = fib2.0。
-//   空:對稱 —— fib0 = 訂單塊上緣、fib1 = 之後的最低低點;射擊之星;止損 = fib0+0.13r;TP = fib0-2r。
+//
+//	多:fib0 = 訂單塊下緣、fib1 = 訂單塊之後的最高高點(自動 re-anchor:新高就把 fib1 移過去,
+//	     fib0 不動)。進場區 = [fib0+0.142r, fib0+0.382r](靠近訂單塊)。最後一根是「頭槌」且
+//	     其低點落在區間 → 收盤進場。止損 = fib-0.13(fib0-0.13r);最終 TP = fib2.0。
+//	空:對稱 —— fib0 = 訂單塊上緣、fib1 = 之後的最低低點;射擊之星;止損 = fib0+0.13r;TP = fib0-2r。
+//
 // 內部(size5)與 swing(size50)訂單塊都用;同時挑「方向相符、最近(BarIndex 最大)」的那個。
 //
 // 這是無狀態訊號:每根收盤都從 K 線重算 fib(含 re-anchor),接 microrev 掛單框架 —— 位置到 +
 // 型態成立就進場。分批四段止盈交給 smcFibTPLevels + stepTP。
 const (
-	smcFibEntryLo = 0.142 // 進場區下界(靠訂單塊那側)
-	smcFibEntryHi = 0.382 // 進場區上界
-	smcFibSL      = 0.13  // 止損:fib-0.13
-	smcFibFinalTP = 2.0   // 最終目標:fib2.0
+	smcFibEntryLo     = 0.142 // 進場區下界(靠訂單塊那側)
+	smcFibEntryHi     = 0.382 // 進場區上界
+	smcFibSL          = 0.13  // 止損:fib-0.13
+	smcFibFinalTP     = 2.0   // 最終目標:fib2.0
+	smcFibMaxRangePct = 10.0  // 斐波 0→1 距離(r/fib0)上限%;超過代表波段過大、目標過度延伸 → 不進場
 )
 
 func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
@@ -274,6 +277,9 @@ func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok b
 		if r <= 0 {
 			return
 		}
+		if r/fib0*100 > smcFibMaxRangePct { // 斐波 0→1 距離 >10% → 波段過大,不進場
+			return
+		}
 		zoneLo := fib0 + smcFibEntryLo*r
 		zoneHi := fib0 + smcFibEntryHi*r
 		if last.Low < zoneLo || last.Low > zoneHi { // 頭槌低點要落在回撤區
@@ -298,6 +304,9 @@ func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok b
 	}
 	r := fib0 - fib1
 	if r <= 0 {
+		return
+	}
+	if r/fib0*100 > smcFibMaxRangePct { // 斐波 0→1 距離 >10% → 波段過大,不進場
 		return
 	}
 	zoneHi := fib0 - smcFibEntryLo*r
