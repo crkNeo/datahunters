@@ -79,7 +79,7 @@ var stratDefaults = map[string]StratCfg{
 	// 2155多:三價位止盈由 ema2155TPLevels 決定 —— TP1=固定+5%、TP2=1:1、最終=1:2,
 	// 「1:1 < 5%」時 TP1/TP2 自動對調。SplitA/SplitB(位置)對本策略無效(被明確價位覆蓋);
 	// 仍沿用分批比例 40/30/30 與保本緩衝。
-	"ema2155": {Tags: []string{"順勢", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
+	"ema2155": {Tags: []string{"順勢", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 40, SplitW3: 10, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// 脈衝星:建在爆量熱名單上的觀察策略。TP3=1:4、分批 50/75 → 1:2/1:3。預設靜默觀察
 	// (通知全關),確認品質後再開通知/接實盤。
 	"pulsar": {Tags: []string{"爆量", "埋伏", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},

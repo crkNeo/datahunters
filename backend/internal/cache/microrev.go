@@ -245,10 +245,10 @@ func pulsarPctTPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
 // ema2155TPLevels 是 2155多 的三價位止盈:TP1=固定 +5%、TP2=1:1(1R)、最終=1:2(2R)。
 // 三者排序後由小到大 = TP1/TP2/最終,所以「1:1 < 5%」時 TP1/TP2 自然對調,且順序永遠合法。
 func ema2155TPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
-	r := entry - sl
-	lv := []float64{entry * 1.05, entry + r, entry + 2*r} // +5% / 1:1 / 1:2
-	sort.Float64s(lv)
-	return roundPx(lv[0]), roundPx(lv[1]), roundPx(lv[2])
+	// 2155多 v2:固定百分比階梯。TP1=+5%(平50%→保本)、TP2=+10%(平40%→鎖TP1)、
+	// 剩10%追尾(plan.trailAfterTP2,不看 tp3 這個 final)。tp3 僅供顯示的 runner 目標。
+	_ = sl // 止損由訊號給的 swing low 決定,TP 位改用固定百分比,不再依 R
+	return roundPx(entry * 1.05), roundPx(entry * 1.10), roundPx(entry * 1.15)
 }
 
 // ema2155DeathCross: EMA21 下穿 EMA55(死叉)→ 收盤即時平倉(2155多 的訊號出場)。

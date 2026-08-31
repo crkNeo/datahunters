@@ -255,9 +255,9 @@ func NewStore(coins []string) *Store {
 	// 三個週期(1h/4h/1d)同頁呈現、共用一個開關與設定(stratKey=ema2155),各自獨立持倉、
 	// 不做同幣互斥(同一幣可同時在 1h 與 4h 各開一單,以 TF 欄位分類)。
 	s.ema2155Books = []*microBook{
-		{name: "ema2155", tf: "1h", barSec: 3600, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels},
-		{name: "ema2155_4h", tf: "4h", barSec: 14400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels},
-		{name: "ema2155_1d", tf: "1d", barSec: 86400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels},
+		{name: "ema2155", tf: "1h", barSec: 3600, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
+		{name: "ema2155_4h", tf: "4h", barSec: 14400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
+		{name: "ema2155_1d", tf: "1d", barSec: 86400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
 	}
 	// 脈衝星:建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
 	// 15m 動能確認進場、近10根 swing-low 止損、1:4 分批(50/75 → 1:2/1:3)、12h 逾時。
