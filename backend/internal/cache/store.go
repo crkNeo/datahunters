@@ -261,18 +261,18 @@ func NewStore(coins []string) *Store {
 	}
 	// 脈衝星:建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
 	// 15m 動能確認進場、近10根 swing-low 止損、1:4 分批(50/75 → 1:2/1:3)、12h 逾時。
-	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
+	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
 	// 脈衝星v2:與脈衝星完全相同,但多一道 OI/CVD 品質閘門(只放行 OI 擴張 + 買盤主導的爆量)。
 	// 兩本並存是為了 A/B 對照:閘門有沒有把品質拉起來。
-	s.pulsarV2Book = &microBook{name: "pulsarv2", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, gate: s.oiCvdGate}
+	s.pulsarV2Book = &microBook{name: "pulsarv2", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, gate: s.oiCvdGate}
 	// 脈衝星v3:ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
 	// runnerExpiry 96 根 = 24h,突破 4h 讓小倉測後續跑動。plan=tpPulsarV3(1R/2R + 追尾)。
 	// gate 先關掉(不加 BTC 大盤閘門);要再開回來就把 gate: s.btcRegimeGate 加回去。
-	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 4, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
+	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
 	// 脈衝星v4:與 v1 完全相同,唯一差別 expiry=0 → 關閉 4h 逾時(只靠 TP/SL 出場)。
-	s.pulsarV4Book = &microBook{name: "pulsarv4", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 0, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
+	s.pulsarV4Book = &microBook{name: "pulsarv4", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 0, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
 	// 脈衝星v5:= v1(含 4h 逾時),但止盈改成固定百分比 TP1=+5%/TP2=+10%/最終=+15%(tpLevels 覆蓋)。
-	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 4, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
+	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
