@@ -1698,14 +1698,15 @@ watch([role, tabPerms, authReady], () => {
       <button v-if="refRules.text" class="rulesbtn" @click="refRulesShow = true">
         📜 推廣規則與獎勵制度<span class="rulesgo">查看 ›</span>
       </button>
-      <!-- 申請 VIP:只有會員看得到(VIP/管理員不需要)。已申請則顯示審核中/已通過 -->
+      <!-- 申請 VIP:會員可申請;已是 VIP 顯示停用的「您已是VIP會員!」。已申請則顯示審核中/已通過 -->
       <template v-if="role === 'member'">
         <div v-if="vipStatus && vipStatus.status === 'pending'" class="vipnote pending">⭐ VIP 申請審核中…</div>
         <div v-else-if="vipStatus && vipStatus.status === 'approved'" class="vipnote ok">✅ VIP 申請已通過</div>
         <button v-else class="vipbtn" @click="vipShow = true">
-          ⭐ 申請 VIP<span class="rulesgo">{{ vipStatus && vipStatus.status === 'rejected' ? '(上次未通過,可重新申請)›' : '›' }}</span>
+          ⭐ 我已入金 300U,申請VIP<span class="rulesgo">{{ vipStatus && vipStatus.status === 'rejected' ? '(上次未通過,可重新申請)›' : '›' }}</span>
         </button>
       </template>
+      <button v-else-if="role === 'vip'" class="vipbtn" disabled>✅ 您已是VIP會員!</button>
       <template v-if="refData">
         <!-- 1. 推薦碼 + 2. 網址 -->
         <div class="refcode">
@@ -1809,7 +1810,7 @@ watch([role, tabPerms, authReady], () => {
       <h3>📌 使用須知</h3>
 
       <div class="wc-sec">
-        <div class="wc-title">👉 續用資格</div>
+        <div class="wc-title">👉 VIP會員續用資格</div>
         <p>根據申請進入的日期按月計算</p>
         <p>🌟 第一個月無限制使用</p>
         <p>🌟 第二個月開始享有三個月的交易額優惠</p>
@@ -2871,7 +2872,8 @@ body::before {
   background: linear-gradient(90deg, #2a1a3a, #1c1428);
   border: 1px solid #4a2f6a; border-radius: 10px; color: #d3b3ff; font-size: 13px; font-weight: 600;
 }
-.vipbtn:hover { background: linear-gradient(90deg, #3a2450, #2a1c38); border-color: #6a45a0; }
+.vipbtn:not(:disabled):hover { background: linear-gradient(90deg, #3a2450, #2a1c38); border-color: #6a45a0; }
+.vipbtn:disabled { cursor: default; justify-content: center; background: linear-gradient(90deg, #1f3324, #16241a); border-color: #3f6a45; color: #8fe0a0; }
 .vipnote { width: 100%; margin: 0 0 14px; padding: 11px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; text-align: center; }
 .vipnote.pending { background: #2a2410; color: #f4d774; border: 1px solid #4a3f18; }
 .vipnote.ok { background: #103a24; color: #2ec26b; border: 1px solid #1f5a34; }
