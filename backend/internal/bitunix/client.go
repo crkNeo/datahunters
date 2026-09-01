@@ -484,40 +484,47 @@ type Position struct {
 // 之後分批平倉 / 移動止損 / 整倉平 都鎖這個 id —— 即使帳號是分倉/避險(同幣同向可能有多
 // 筆獨立倉),也不會誤動到別筆。
 func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
-	raw, err := c.do(http.MethodGet, "/api/v1/futures/position/get_pending_positions",
-		map[string]string{"symbol": venueSymbol}, nil, true)
-	if err != nil {
-		return "", err
-	}
-	var r struct {
-		codeMsg
-		Data []Position `json:"data"`
-	}
-	json.Unmarshal(raw, &r)
-	if !r.ok() {
-		return "", fmt.Errorf("get_pending_positions code=%s msg=%s", r.Code, r.Msg)
-	}
 	want := "LONG"
 	if dir == "short" {
 		want = "SHORT"
 	}
-	best, bestC := "", int64(-1)
-	for _, p := range r.Data {
-		if !strings.EqualFold(p.Side, want) {
+	var lastErr error
+	// 市價成交後持倉不會「同一瞬間」就出現在查詢裡 → 重試幾次(~3s)。全撈不帶 symbol 過濾
+	// (避免查詢參數被忽略/回空),自己比對 symbol + 方向,取最新建立那一筆(= 我剛開的)。
+	for attempt := 0; attempt < 6; attempt++ {
+		if attempt > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
+		raw, err := c.do(http.MethodGet, "/api/v1/futures/position/get_pending_positions", nil, nil, true)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-		ct, _ := p.Ctime.Int64()
-		if ct >= bestC { // 取最新建立的那一筆(= 我剛開的)
-			best, bestC = p.PositionID, ct
+		var r struct {
+			codeMsg
+			Data []Position `json:"data"`
 		}
+		json.Unmarshal(raw, &r)
+		if !r.ok() {
+			lastErr = fmt.Errorf("get_pending_positions code=%s msg=%s", r.Code, r.Msg)
+			continue
+		}
+		best, bestC := "", int64(-1)
+		for _, p := range r.Data {
+			if !strings.EqualFold(p.Symbol, venueSymbol) || !strings.EqualFold(p.Side, want) {
+				continue
+			}
+			ct, _ := p.Ctime.Int64()
+			if ct >= bestC {
+				best, bestC = p.PositionID, ct
+			}
+		}
+		if best != "" {
+			return best, nil
+		}
+		lastErr = fmt.Errorf("找不到 %s %s 的持倉(第 %d 次)", venueSymbol, dir, attempt+1)
 	}
-	if best == "" && len(r.Data) == 1 { // 保底:只有一倉(且方向欄未回)就用它
-		best = r.Data[0].PositionID
-	}
-	if best == "" {
-		return "", fmt.Errorf("找不到 %s %s 的持倉", venueSymbol, dir)
-	}
-	return best, nil
+	return "", lastErr
 }
 
 // CloseQtyMarket 送一張 reduce-only 市價單平掉某「持倉」的 qty(dir 是持倉方向,平倉單走
