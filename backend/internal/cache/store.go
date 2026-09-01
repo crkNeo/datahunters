@@ -317,6 +317,18 @@ func NewStore(coins []string) *Store {
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
 			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
 	}
+	// Bitunix 完全跟隨:有 follow 帳號才注入 DB + 掛鉤,並把上次未平的追蹤表載回續管。
+	if s.trader != nil && s.trader.hasFollow() {
+		s.trader.db = s.db
+		if s.db != nil {
+			for _, fp := range s.db.loadFollows() {
+				s.trader.follows[fkey(fp.TradeID, fp.Acct)] = fp
+			}
+			log.Printf("bitunix follow: 載回 %d 筆進行中的跟隨單(重啟續管)", len(s.trader.follows))
+		}
+		exitMirrorLeg = s.trader.onLeg
+		exitMirrorClose = s.trader.onClose
+	}
 	s.retrofitMultiTP() // backfill 分批止盈 levels onto open trades that predate multi-TP
 	s.loadStratOff()    // restore per-strategy on/off switches
 	s.loadStratCfg()    // restore per-strategy admin config (類型/風控/止損上限/保本/分批)

@@ -237,6 +237,13 @@ type OpenResult struct {
 	Price            float64
 	Lev              int // leverage actually used (after max-resolve / clamp)
 	Raw              json.RawMessage
+	// follow-mode (完全跟隨) needs these to drive partial closes + SL ratchets later,
+	// without re-resolving the contract each time:
+	Factor    float64 // 策略價 × Factor = 交易所價(1000PEPE 等綑綁合約用)
+	QtyF      float64 // 成交數量(交易所 base 單位,float)
+	BasePrec  int     // 數量精度(平倉格式化用)
+	QuotePrec int     // 價格精度(改止損格式化用)
+	PosMode   string  // ONE_WAY | HEDGE(平倉是否要帶 tradeSide=CLOSE)
 }
 
 // Open places a MARKET entry sized by margin, notional = margin×lev, qty =
@@ -345,6 +352,7 @@ func (c *Client) Open(symbol, dir string, pct float64, lev int, entry, tp, sl fl
 	return &OpenResult{
 		Symbol: symbol, Dir: dir, Qty: body["qty"].(string),
 		Margin: margin, Notional: notional, Price: mark, Lev: lev, Raw: raw,
+		Factor: scale, QtyF: qty, BasePrec: pair.BasePrecision, QuotePrec: pair.QuotePrecision, PosMode: posMode,
 	}, nil
 }
 
@@ -458,4 +466,132 @@ func (c *Client) OpenSMC(symbol, dir string, entry, sl, tp1, tp2, tp1Pct float64
 		}
 	}
 	return res, tp1Fail, nil
+}
+
+// ── 完全跟隨(follow)模式的實盤操作原語 ─────────────────────────────────────
+// 開倉只掛初始 SL 當安全網;分批止盈 + 沿路套保由上層依紙上策略事件驅動,呼叫下列方法。
+
+// Position 是一筆持倉(get_pending_positions 的一列,只留需要的欄位)。
+type Position struct {
+	PositionID string      `json:"positionId"`
+	Symbol     string      `json:"symbol"`
+	Side       string      `json:"side"` // LONG | SHORT
+	Qty        string      `json:"qty"`
+	Ctime      json.Number `json:"ctime"` // 建倉時戳(ms);分倉/避險下用來認「剛開的那一筆」
+}
+
+// PositionID 回傳某合約 + 方向、且「最新建立」那一筆持倉的 id。開倉後立刻呼叫存起來,
+// 之後分批平倉 / 移動止損 / 整倉平 都鎖這個 id —— 即使帳號是分倉/避險(同幣同向可能有多
+// 筆獨立倉),也不會誤動到別筆。
+func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
+	raw, err := c.do(http.MethodGet, "/api/v1/futures/position/get_pending_positions",
+		map[string]string{"symbol": venueSymbol}, nil, true)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		codeMsg
+		Data []Position `json:"data"`
+	}
+	json.Unmarshal(raw, &r)
+	if !r.ok() {
+		return "", fmt.Errorf("get_pending_positions code=%s msg=%s", r.Code, r.Msg)
+	}
+	want := "LONG"
+	if dir == "short" {
+		want = "SHORT"
+	}
+	best, bestC := "", int64(-1)
+	for _, p := range r.Data {
+		if !strings.EqualFold(p.Side, want) {
+			continue
+		}
+		ct, _ := p.Ctime.Int64()
+		if ct >= bestC { // 取最新建立的那一筆(= 我剛開的)
+			best, bestC = p.PositionID, ct
+		}
+	}
+	if best == "" && len(r.Data) == 1 { // 保底:只有一倉(且方向欄未回)就用它
+		best = r.Data[0].PositionID
+	}
+	if best == "" {
+		return "", fmt.Errorf("找不到 %s %s 的持倉", venueSymbol, dir)
+	}
+	return best, nil
+}
+
+// CloseQtyMarket 送一張 reduce-only 市價單平掉某「持倉」的 qty(dir 是持倉方向,平倉單走
+// 反向)。用於分批止盈的每一段。帶 positionId → 只動這一倉(分倉/避險安全);避險模式再帶
+// tradeSide=CLOSE。qty 已是交易所 base 單位。
+func (c *Client) CloseQtyMarket(venueSymbol, dir string, qty float64, basePrec int, hedge bool, positionId string) error {
+	if qty <= 0 {
+		return nil
+	}
+	side := "SELL"
+	if dir == "short" {
+		side = "BUY"
+	}
+	body := map[string]any{
+		"symbol": venueSymbol, "side": side, "orderType": "MARKET",
+		"qty":        strconv.FormatFloat(qty, 'f', basePrec, 64),
+		"reduceOnly": true,
+	}
+	if positionId != "" {
+		body["positionId"] = positionId
+	}
+	if hedge {
+		body["tradeSide"] = "CLOSE" // 避險模式必填;此時 positionId 亦為必填(上面已帶)
+	}
+	raw, err := c.do(http.MethodPost, "/api/v1/futures/trade/place_order", nil, body, true)
+	if err != nil {
+		return err
+	}
+	var r codeMsg
+	json.Unmarshal(raw, &r)
+	if !r.ok() {
+		return fmt.Errorf("close code=%s msg=%s", r.Code, r.Msg)
+	}
+	return nil
+}
+
+// FlashClose 依 positionId 市價整倉平掉(最終平倉用)。只動這一倉,分倉/避險安全。
+func (c *Client) FlashClose(positionId string) error {
+	if positionId == "" {
+		return fmt.Errorf("flash close: 缺 positionId")
+	}
+	raw, err := c.do(http.MethodPost, "/api/v1/futures/trade/flash_close_position", nil,
+		map[string]any{"positionId": positionId}, true)
+	if err != nil {
+		return err
+	}
+	var r codeMsg
+	json.Unmarshal(raw, &r)
+	if !r.ok() {
+		return fmt.Errorf("flash_close code=%s msg=%s", r.Code, r.Msg)
+	}
+	return nil
+}
+
+// SetPositionSL 設定/取代持倉的止損(每倉僅一張 Position TP/SL Order,再打即取代 → 沿路套保
+// 靠它上移)。slVenue 已是交易所價。
+func (c *Client) SetPositionSL(venueSymbol, positionId string, slVenue float64, quotePrec int) error {
+	if slVenue <= 0 || positionId == "" {
+		return nil
+	}
+	body := map[string]any{
+		"symbol":     venueSymbol,
+		"positionId": positionId,
+		"slPrice":    strconv.FormatFloat(slVenue, 'f', quotePrec, 64),
+		"slStopType": "LAST_PRICE",
+	}
+	raw, err := c.do(http.MethodPost, "/api/v1/futures/tpsl/position/place_order", nil, body, true)
+	if err != nil {
+		return err
+	}
+	var r codeMsg
+	json.Unmarshal(raw, &r)
+	if !r.ok() {
+		return fmt.Errorf("set SL code=%s msg=%s", r.Code, r.Msg)
+	}
+	return nil
 }

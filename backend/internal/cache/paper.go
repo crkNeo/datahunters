@@ -579,7 +579,7 @@ func abs2(f float64) float64 {
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
-		s.trader.mirrorOpen(b.name, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
+		s.trader.mirrorOpen(b.name, tr)
 	}
 	if b.adminOnly || !s.notifyOn(b.name, "open") { // 後台的「開倉通知」開關
 		return // admin A/B book: silent on open (mirrors 超新星's signals; only its 套保 alerts fire)
@@ -651,7 +651,7 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
 func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
 	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
-		s.trader.mirrorOpen(book, tr.Coin, tr.Dir, tr.Entry, tr.TP, tr.SL)
+		s.trader.mirrorOpen(book, tr)
 	}
 	strat := stratKeyOf(book)
 	if !s.notifyOn(strat, "open") { // 後台的「開倉通知」開關
@@ -726,6 +726,7 @@ func closeTrade(tr *PaperTrade, exit float64, outcome string, now time.Time) {
 	tr.PnLPct = round2(settledPnL(tr, exit))
 	t := now
 	tr.CloseTime = &t
+	mirrorClose(tr) // Bitunix 完全跟隨:平掉剩餘(任何平倉原因都跟)
 }
 
 func (b *paperBook) trim() {

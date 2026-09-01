@@ -135,6 +135,20 @@ CREATE TABLE IF NOT EXISTS vip_applications (
   UNIQUE KEY uk_vip_user (username),
   KEY idx_vip_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS bitunix_follows (
+  trade_id   VARCHAR(191) NOT NULL,        -- 紙上策略單 ID
+  acct       VARCHAR(32)  NOT NULL,        -- 帳號 label(帳1/帳2…)
+  symbol     VARCHAR(32)  NOT NULL,        -- 交易所合約
+  pos_id     VARCHAR(64)  NOT NULL DEFAULT '',
+  dir        VARCHAR(8)   NOT NULL,        -- long | short
+  factor     DOUBLE       NOT NULL DEFAULT 1,
+  orig_qty   DOUBLE       NOT NULL DEFAULT 0,
+  base_prec  INT          NOT NULL DEFAULT 0,
+  quote_prec INT          NOT NULL DEFAULT 0,
+  hedge      TINYINT      NOT NULL DEFAULT 0,
+  filled     DOUBLE       NOT NULL DEFAULT 0,
+  PRIMARY KEY (trade_id, acct)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
 // DB wraps the SQL handle for persistence.
@@ -451,6 +465,62 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 			t.PnLPct = round2(settledPnL(t, t.Cur))
 		}
 		out = append(out, t)
+	}
+	return out
+}
+
+// ── 完全跟隨(follow)追蹤表:重啟後續管 ─────────────────────────────────────
+
+func (db *DB) saveFollow(fp *followPos) {
+	if db.sql == nil {
+		return
+	}
+	h := 0
+	if fp.Hedge {
+		h = 1
+	}
+	db.sql.Exec(`INSERT INTO bitunix_follows
+	  (trade_id,acct,symbol,pos_id,dir,factor,orig_qty,base_prec,quote_prec,hedge,filled)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?)
+	  ON DUPLICATE KEY UPDATE symbol=VALUES(symbol), pos_id=VALUES(pos_id), dir=VALUES(dir),
+	    factor=VALUES(factor), orig_qty=VALUES(orig_qty), base_prec=VALUES(base_prec),
+	    quote_prec=VALUES(quote_prec), hedge=VALUES(hedge), filled=VALUES(filled)`,
+		fp.TradeID, fp.Acct, fp.Symbol, fp.PosID, fp.Dir, fp.Factor, fp.OrigQty,
+		fp.BasePrec, fp.QuotePrec, h, fp.Filled)
+}
+
+func (db *DB) updateFollowFilled(tradeID, acct string, addW float64) {
+	if db.sql == nil {
+		return
+	}
+	db.sql.Exec(`UPDATE bitunix_follows SET filled=filled+? WHERE trade_id=? AND acct=?`, addW, tradeID, acct)
+}
+
+func (db *DB) deleteFollow(tradeID, acct string) {
+	if db.sql == nil {
+		return
+	}
+	db.sql.Exec(`DELETE FROM bitunix_follows WHERE trade_id=? AND acct=?`, tradeID, acct)
+}
+
+func (db *DB) loadFollows() []*followPos {
+	if db.sql == nil {
+		return nil
+	}
+	rows, err := db.sql.Query(`SELECT trade_id,acct,symbol,pos_id,dir,factor,orig_qty,base_prec,quote_prec,hedge,filled FROM bitunix_follows`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []*followPos
+	for rows.Next() {
+		fp := &followPos{}
+		var h int
+		if rows.Scan(&fp.TradeID, &fp.Acct, &fp.Symbol, &fp.PosID, &fp.Dir, &fp.Factor,
+			&fp.OrigQty, &fp.BasePrec, &fp.QuotePrec, &h, &fp.Filled) == nil {
+			fp.Hedge = h == 1
+			out = append(out, fp)
+		}
 	}
 	return out
 }

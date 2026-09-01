@@ -118,18 +118,21 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 					tr.SL = roundPx(tr.Entry * (1 - p.beBuf))
 				}
 			}
+			mirrorLeg(tr, p.w1) // Bitunix 完全跟隨:平 w1 + 止損移保本
 		}
 		if tr.Legs < 2 && reached(tr.TP2) {
 			tr.Realized += p.w2 * pnl(tr.Dir, tr.Entry, tr.TP2)
 			tr.Filled += p.w2
 			tr.Legs = 2
 			tr.SL = tr.TP1 // TP2 → lock the stop at TP1
+			mirrorLeg(tr, p.w2)
 		}
 		if tr.TP3 > 0 && tr.Legs < 3 && reached(tr.TP3) { // 四段策略的第三段(訂單塊 SMC);三段書 TP3=0 不進來
 			tr.Realized += p.w3 * pnl(tr.Dir, tr.Entry, tr.TP3)
 			tr.Filled += p.w3
 			tr.Legs = 3
 			tr.SL = tr.TP2 // TP3 → 止損移到 TP2(沿路套保)
+			mirrorLeg(tr, p.w3)
 		}
 	}
 	if p != nil && p.trailAfterTP2 { // 脈衝星v3:runner 追尾,沒有固定 TP3
