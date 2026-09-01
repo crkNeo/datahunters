@@ -715,11 +715,13 @@ func closeTrade(tr *PaperTrade, exit float64, outcome string, now time.Time) {
 	tr.Status = "closed"
 	tr.Outcome = stopOutcome(tr, outcome, exit) // 停損價被保本上調過 → 標成 保本出場
 	tr.Cur = exit
-	// blend any already-realized tranches (分批止盈) with the remaining position closed
-	// at `exit`. For single-TP trades Filled=0/Realized=0, so this is just pnl(entry,exit).
+	// Realized/Filled 仍記錄各批的實際加權結算(內部帳、DB 留存),但「顯示的損益」改採
+	// 『已達到的最高 TP 階梯』口徑(settledPnL):已達 TP2 就顯示 TP2、達 TP3 顯示 TP3
+	// (不降一階),TP1 後保本被打顯示 TP1,吃到最終 TP 顯示最終那階。單段書 Legs=0 →
+	// 就是 pnl(entry,exit)。
 	tr.Realized += (1 - tr.Filled) * pnl(tr.Dir, tr.Entry, exit)
 	tr.Filled = 1
-	tr.PnLPct = round2(tr.Realized)
+	tr.PnLPct = round2(settledPnL(tr, exit))
 	t := now
 	tr.CloseTime = &t
 }

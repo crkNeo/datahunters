@@ -471,9 +471,8 @@ func markLiveOpen(open []*PaperTrade, px map[string]float64) {
 			continue
 		}
 		tr.Cur = roundPx(p)
-		// blend already-realized tranches (分批止盈) with the open remainder marked to
-		// live. Filled=0/Realized=0 for single-TP trades → plain pnl(entry, price).
-		tr.PnLPct = round2(tr.Realized + (1-tr.Filled)*pnl(tr.Dir, tr.Entry, p))
+		// 即時損益顯示採『鎖住的獲利階梯』口徑(settledPnL);各批實際結算仍記在 Realized。
+		tr.PnLPct = round2(settledPnL(tr, p))
 	}
 }
 

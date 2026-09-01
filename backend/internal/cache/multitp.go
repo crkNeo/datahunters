@@ -167,8 +167,48 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 		return true
 	}
 	tr.Cur = roundPx(price)
-	tr.PnLPct = round2(tr.Realized + (1-tr.Filled)*pnl(tr.Dir, tr.Entry, price))
+	tr.PnLPct = round2(settledPnL(tr, price))
 	return false
+}
+
+// settledPnL 回傳「以 price(出場價或現價)結算時要顯示的損益%」——採『已達到的最高
+// TP 階梯』口徑,取代舊的加權混合值(顯示 + 統計都用它):
+//   - 未達任何 TP(Legs==0):就是 price 相對進場的 %(含虧損原樣)。
+//   - 已達 TP:回傳 max(price 相對進場的 %, 已達最高 TP 的 %)。已達最高 TP = 第 Legs 段
+//     (TP1→TP1、TP2→TP2、TP3→TP3……不降一階);Legs==1 時保本被打也自然顯示 TP1。
+//
+// 於是:回踩打到保利停損出場 → 顯示「已達到的那一階」;往上吃到更高的價 → 顯示實際到價 %。
+// 各批的實際結算(Realized/Filled)仍照舊累計,只是不再拿來當顯示數字。
+func settledPnL(tr *PaperTrade, price float64) float64 {
+	base := pnl(tr.Dir, tr.Entry, price)
+	if tr.Legs <= 0 {
+		return base
+	}
+	floor := pnl(tr.Dir, tr.Entry, tpAtLeg(tr, tr.Legs)) // 已達到的最高 TP(第 Legs 段)
+	if base > floor {
+		return base
+	}
+	return floor
+}
+
+// tpAtLeg 回傳第 n 段的目標價(1→TP1、2→TP2、3→TP3)。未設(如三段書沒有 TP3)或 n≥4
+// → 回傳最終 TP。
+func tpAtLeg(tr *PaperTrade, n int) float64 {
+	switch n {
+	case 1:
+		if tr.TP1 > 0 {
+			return tr.TP1
+		}
+	case 2:
+		if tr.TP2 > 0 {
+			return tr.TP2
+		}
+	case 3:
+		if tr.TP3 > 0 {
+			return tr.TP3
+		}
+	}
+	return tr.TP
 }
 
 // applyBreakeven is the STANDALONE 保本 mode: once price has travelled `at` of the

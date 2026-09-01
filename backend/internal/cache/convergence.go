@@ -229,7 +229,7 @@ func (s *Store) runConv(coin string, cs []exchange.Candle, now time.Time) {
 			closed = true
 		} else {
 			open.Cur = roundPx(last.Close)
-			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
+			open.PnLPct = round2(settledPnL(open, last.Close))
 		}
 		dirty = open
 		// slWithinCap:後台「最大止損%」濾網。冥王星的 SL 本來就刻意放寬、預設不設限,

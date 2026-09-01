@@ -444,6 +444,12 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 			tt := time.UnixMilli(ct).UTC()
 			t.CloseTime = &tt
 		}
+		// 統一顯示/統計口徑:已平倉的損益一律用『鎖住的獲利階梯』(settledPnL)重算,
+		// 讓歷史(舊的加權混合值)也切換過來。冪等 —— t.Cur 已是出場價;單段書 Legs=0
+		// → 就是 pnl(entry, 出場價),不變。
+		if t.Status == "closed" {
+			t.PnLPct = round2(settledPnL(t, t.Cur))
+		}
 		out = append(out, t)
 	}
 	return out

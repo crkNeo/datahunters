@@ -602,7 +602,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			closed = true
 		} else {
 			open.Cur = roundPx(last.Close)
-			open.PnLPct = round2(open.Realized + (1-open.Filled)*pnl(open.Dir, open.Entry, last.Close))
+			open.PnLPct = round2(settledPnL(open, last.Close))
 		}
 		dirty = open
 	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
