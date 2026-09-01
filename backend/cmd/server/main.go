@@ -228,6 +228,7 @@ func main() {
 			store.PulsarV3MarkTick()
 			store.PulsarV4MarkTick()
 			store.PulsarV5MarkTick()
+			store.PulsarV3sMarkTick()
 			store.SMCMarkTick()
 		}
 	}()
@@ -262,6 +263,7 @@ func main() {
 		store.PulsarV3Tick()
 		store.PulsarV4Tick()
 		store.PulsarV5Tick()
+		store.PulsarV3sTick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
@@ -269,6 +271,7 @@ func main() {
 			store.PulsarV3Tick()
 			store.PulsarV4Tick()
 			store.PulsarV5Tick()
+			store.PulsarV3sTick()
 		}
 	}()
 	// 訂單塊 SMC:LuxAlgo 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h。

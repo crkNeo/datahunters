@@ -154,6 +154,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3)) // 脈衝星v3 (ATR + runner)
 	mux.HandleFunc("/api/pulsarv4", s.gateTab("pulsarv4", s.handlePulsarV4)) // 脈衝星v4 (= v1, 無逾時)
 	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5)) // 脈衝星v5 (= v1, 固定% TP)
+	mux.HandleFunc("/api/pulsarv3s", s.gateTab("pulsarv3s", s.handlePulsarV3s)) // 反脈衝星v3 (v3 做空鏡像)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock)) // 訂單塊 SMC (斐波四段, 15m/1h/4h)
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
@@ -746,6 +747,11 @@ func (s *Server) handlePulsarV4(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV5 serves the 脈衝星v5 (= v1, 固定百分比止盈 5/10/15%) tracker.
 func (s *Server) handlePulsarV5(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV5State())
+}
+
+// handlePulsarV3s serves the 反脈衝星v3 (v3 做空鏡像) tracker.
+func (s *Server) handlePulsarV3s(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV3sState())
 }
 
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.

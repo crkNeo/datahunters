@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5", "orderblock"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5", "pulsarv3s", "orderblock"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -93,6 +93,8 @@ var stratDefaults = map[string]StratCfg{
 	// 脈衝星v5:= v1(含 4h 逾時),止盈改固定百分比 +5%/+10%/+15%(pulsarPctTPLevels 覆蓋位置);
 	// SplitA/B 對它無效,比例 40/30/30 仍由此驅動。
 	"pulsarv5": {Tags: []string{"爆量", "埋伏", "多單", "固定%"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
+	// 反脈衝星v3:v3 做空鏡像,比例/追尾同 v3(50/25/25 + trailAfterTP2)。
+	"pulsarv3s": {Tags: []string{"爆量", "下殺", "空單", "追尾"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
 	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
 	"orderblock": {Tags: []string{"SMC", "訂單塊", "斐波", "多空"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 25, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
@@ -482,6 +484,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV5Book.mu.Lock()
 		done = closeIn(s.pulsarV5Book.trades)
 		s.pulsarV5Book.mu.Unlock()
+	case "pulsarv3s":
+		s.pulsarV3sBook.mu.Lock()
+		done = closeIn(s.pulsarV3sBook.trades)
+		s.pulsarV3sBook.mu.Unlock()
 	case "orderblock": // 三週期都找(15m/1h/4h)
 		for _, b := range s.smcBooks {
 			b.mu.Lock()

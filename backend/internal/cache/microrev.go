@@ -501,6 +501,92 @@ func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return "long", roundPx(price), roundPx(price - stopDist), roundPx(price + 5*stopDist), true
 }
 
+// antiSurgeV3Signal — 反脈衝星v3:脈衝星v3 的做空鏡像。宇宙同樣是爆量熱名單(爆量不分漲跌,
+// 崩跌也會爆量),抓「爆量下殺的初段」。所有 ATR 自適應濾網與 v3 對稱,只是方向相反。只做空。
+func antiSurgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	const (
+		pinBodyMin   = 0.5
+		pinWickMax   = 1.0
+		entryVolMult = 1.2
+		freshVolMult = 2.5
+		freshWithin  = 6
+		kExt         = 8.0 // 不追空:距20根高點 ≤ kExt×ATR(不殺在已崩很遠的低)
+		slMinATR     = 0.8
+		slMaxATR     = 4.0
+		barMaxATR    = 3.0
+	)
+	n := len(cs)
+	if n < 40 {
+		return
+	}
+	price := cs[n-1].Close
+	last := cs[n-1]
+	atr := robustATR(cs, 14, 2)
+	if atr <= 0 {
+		return
+	}
+	// ① 動能狀態:空頭排列 + 本根收更低
+	e5 := emaSeries(cs, 5)
+	e20 := emaSeries(cs, 20)
+	if !(e5[n-1] < e20[n-1] && price < cs[n-2].Close) {
+		return
+	}
+	// 反插針(乾淨的陰線:實體夠大、下影線短 → 收在低點附近,沒被拉回)
+	rng := last.High - last.Low
+	body := last.Open - last.Close
+	if rng <= 0 || body <= 0 || body < pinBodyMin*rng || (last.Close-last.Low) > pinWickMax*body {
+		return
+	}
+	// 拋物線護欄:單根太誇張 = 空在垂直底
+	if rng > barMaxATR*atr {
+		return
+	}
+	base := trimmedBaseVol(cs)
+	// ② 量能確認
+	if base > 0 && last.Volume < entryVolMult*base {
+		return
+	}
+	// ③ 新鮮度
+	fresh := false
+	for i := n - freshWithin; i < n; i++ {
+		if i >= 0 && base > 0 && cs[i].Volume >= freshVolMult*base {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		return
+	}
+	// 不追空:距近20根高點 ≤ kExt×ATR
+	high20 := cs[n-1].High
+	for i := n - 20; i < n; i++ {
+		if i >= 0 && cs[i].High > high20 {
+			high20 = cs[i].High
+		}
+	}
+	if (high20 - price) > kExt*atr {
+		return
+	}
+	// 止損:近10根 swing high + 可行性閘門
+	high10 := cs[n-1].High
+	for i := n - 10; i < n; i++ {
+		if i >= 0 && cs[i].High > high10 {
+			high10 = cs[i].High
+		}
+	}
+	stopDist := high10 - price
+	if stopDist > slMaxATR*atr { // 止損太寬 → 不進場
+		return
+	}
+	if stopDist < slMinATR*atr { // 太緊 → 往外推
+		stopDist = slMinATR * atr
+	}
+	if stopDist <= 0 {
+		return
+	}
+	return "short", roundPx(price), roundPx(price + stopDist), roundPx(price - 5*stopDist), true
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -877,6 +963,8 @@ func (s *Store) PulsarV4Tick()     { s.microTick(s.pulsarV4Book) }
 func (s *Store) PulsarV4MarkTick() { s.microMarkTick(s.pulsarV4Book) }
 func (s *Store) PulsarV5Tick()     { s.microTick(s.pulsarV5Book) }
 func (s *Store) PulsarV5MarkTick() { s.microMarkTick(s.pulsarV5Book) }
+func (s *Store) PulsarV3sTick()     { s.microTick(s.pulsarV3sBook) }
+func (s *Store) PulsarV3sMarkTick() { s.microMarkTick(s.pulsarV3sBook) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -971,6 +1059,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV5Book.mu.Lock()
 		s.pulsarV5Book.trades = keepIf(s.pulsarV5Book.trades, closedOnly)
 		s.pulsarV5Book.mu.Unlock()
+	case "pulsarv3s":
+		s.pulsarV3sBook.mu.Lock()
+		s.pulsarV3sBook.trades = keepIf(s.pulsarV3sBook.trades, closedOnly)
+		s.pulsarV3sBook.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1045,4 +1137,5 @@ func (s *Store) PulsarV2State() PaperState  { return s.microState(s.pulsarV2Book
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV4State() PaperState  { return s.microState(s.pulsarV4Book) }
 func (s *Store) PulsarV5State() PaperState  { return s.microState(s.pulsarV5Book) }
+func (s *Store) PulsarV3sState() PaperState { return s.microState(s.pulsarV3sBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
