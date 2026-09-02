@@ -650,8 +650,6 @@ async function loadStratMeta() {
 }
 function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
 function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
-function stratMktFilter(name) { const m = stratMeta.value[name]; return !!(m && m.mkt_filter) }
-function stratStockFilter(name) { const m = stratMeta.value[name]; return !!(m && m.stock_filter) }
 // 分頁 → 策略 key。微策略分頁名本身就是 key(meanrev/bollema/ema2155/pulsar…),
 // 只有雷達三本的分頁名與 book 名不同。
 const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
@@ -2227,8 +2225,6 @@ watch([role, tabPerms, authReady], () => {
       <StrategyBook
         :state="conv"
         :risky="stratRisky('conv')"
-        :mkt-filter="stratMktFilter('conv')"
-        :stock-filter="stratStockFilter('conv')"
         :tags="stratTagsOf('conv')"
         :stats-order="['type', 'win', 'avg', 'total']"
         :can-exit="can('admin')"
@@ -2248,8 +2244,6 @@ watch([role, tabPerms, authReady], () => {
       <StrategyBook
         :state="microState"
         :risky="stratRisky(curStrat)"
-        :mkt-filter="stratMktFilter(curStrat)"
-        :stock-filter="stratStockFilter(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
         :can-exit="can('admin')"
@@ -2571,8 +2565,6 @@ watch([role, tabPerms, authReady], () => {
         <span class="tf-note">統計依所選範圍重算</span>
       </div>
       <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
-      <p v-if="stratMktFilter(curPaperBook)" class="mktfilter-tag">🧭 大盤過濾:<b>開啟</b> —— 大盤明確(BTC+ETH 1h EMA 同向)時只順大盤方向進場,中性/分歧照策略自己</p>
-      <p v-if="stratStockFilter(curPaperBook)" class="mktfilter-tag">🚫 股票代幣過濾:<b>開啟</b> —— 不進代幣化股票/商品(NVDA/TSLA/XAG…),只做加密幣</p>
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bookF.stats.win_rate >= 50 ? 'long' : 'short'">{{ bookF.stats.win_rate }}%</div></div>
@@ -3240,7 +3232,6 @@ body::before {
 .tagchip.on { background: #2ea86a22; border-color: #2ea86a; color: #57d495; }
 .stat-tags { font-size: 12px !important; color: #cdd0d6 !important; line-height: 1.35; }
 .riskwarn { background: #4a2b1a; border: 1px solid #b4642a; color: #ffbf7d; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600; margin: 8px 0; line-height: 1.5; }
-.mktfilter-tag { background: #14261f; border: 1px solid #2f7a53; color: #6fe0a0; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; font-weight: 600; margin: 8px 0; line-height: 1.5; }
 .strat-row { display: flex; align-items: center; gap: 9px; }
 .strat-name { flex: 1; font-size: 13px; color: #cdd0d6; }
 .strat-status { font-size: 11px; width: 28px; }
