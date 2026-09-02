@@ -366,6 +366,12 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 				continue
 			}
 		}
+		if !s.marketAllows("emaonly", dir) { // 大盤過濾:大盤明確反向就不開
+			continue
+		}
+		if !s.stockAllowed("emaonly", coin) { // 股票代幣過濾
+			continue
+		}
 		tr := &PaperTrade{
 			ID:   fmt.Sprintf("emaonly|%s|%s|%d", coin, dir, now.UnixMilli()),
 			Coin: coin, Dir: dir, Entry: roundPx(p), TP: roundPx(tp), SL: roundPx(sl),

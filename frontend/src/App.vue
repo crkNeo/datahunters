@@ -650,6 +650,8 @@ async function loadStratMeta() {
 }
 function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
 function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
+function stratMktFilter(name) { const m = stratMeta.value[name]; return !!(m && m.mkt_filter) }
+function stratStockFilter(name) { const m = stratMeta.value[name]; return !!(m && m.stock_filter) }
 // 分頁 → 策略 key。微策略分頁名本身就是 key(meanrev/bollema/ema2155/pulsar…),
 // 只有雷達三本的分頁名與 book 名不同。
 const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
@@ -1079,6 +1081,9 @@ function regimeAllows(bias) {
   if (bias === 'short') return btcChg.value <= 0
   return true
 }
+// 大盤方向(BTC/ETH 1h EMA;兩者同向才明確)—— 首頁顯示 + 各策略「大盤過濾」同源
+const marketDir = computed(() => (home.value ? home.value.market_dir : null))
+const dirTxt = (d) => (d === 'long' ? '看漲 ▲' : d === 'short' ? '看跌 ▼' : '中性 —')
 // ---- OI-contraction quality gate (OOS-validated: signals fire best while OI
 // is contracting = exhaustion/unwind, not while new money is piling in) ----
 const qualityFilter = ref(localStorage.getItem('qualityFilter') !== '0')
@@ -1894,6 +1899,20 @@ watch([role, tabPerms, authReady], () => {
     <!-- 戰場: BTC 多空交戰(自給自足元件,自己連 WS、自己起停動畫) -->
     <BattleField />
 
+    <!-- 大盤方向:BTC/ETH 1h EMA;兩者同向才明確(策略可在後台開「大盤過濾」順此方向進場) -->
+    <div v-if="marketDir" class="mkt-bias mkt-home">
+      <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">BTC 與 ETH 的 <b>1 小時 EMA 趨勢</b>(EMA5/20/50)。<b>兩者同向</b>才算明確(看漲/看跌),否則視為中性。策略若在後台開啟「<b>大盤過濾</b>」,大盤明確時只允許順大盤方向進場;中性或分歧時照策略自己。</span></span></span>
+      <span class="mkt-chip mkt-main" :class="marketDir.dir === 'neutral' ? 'na' : marketDir.dir">
+        <b class="mkt-coin">綜合</b><span class="mkt-dir">{{ dirTxt(marketDir.dir) }}</span>
+      </span>
+      <span class="mkt-chip" :class="marketDir.btc === 'neutral' ? 'na' : marketDir.btc">
+        <b class="mkt-coin">BTC</b><span class="mkt-dir">{{ dirTxt(marketDir.btc) }}</span>
+      </span>
+      <span class="mkt-chip" :class="marketDir.eth === 'neutral' ? 'na' : marketDir.eth">
+        <b class="mkt-coin">ETH</b><span class="mkt-dir">{{ dirTxt(marketDir.eth) }}</span>
+      </span>
+    </div>
+
     <!-- 整點大盤分析 (live message, above the recs) -->
     <div v-if="marketAI && marketAI.text" class="mai-live">
       <div class="mai-live-top">
@@ -2208,6 +2227,8 @@ watch([role, tabPerms, authReady], () => {
       <StrategyBook
         :state="conv"
         :risky="stratRisky('conv')"
+        :mkt-filter="stratMktFilter('conv')"
+        :stock-filter="stratStockFilter('conv')"
         :tags="stratTagsOf('conv')"
         :stats-order="['type', 'win', 'avg', 'total']"
         :can-exit="can('admin')"
@@ -2227,6 +2248,8 @@ watch([role, tabPerms, authReady], () => {
       <StrategyBook
         :state="microState"
         :risky="stratRisky(curStrat)"
+        :mkt-filter="stratMktFilter(curStrat)"
+        :stock-filter="stratStockFilter(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
         :can-exit="can('admin')"
@@ -2535,7 +2558,7 @@ watch([role, tabPerms, authReady], () => {
       </div>
 
       <div v-if="mainTab === 'emaonly' && book && book.market && book.market.length" class="mkt-bias">
-        <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">大盤(BTC / ETH)目前 <b>1 小時 EMA 趨勢</b>方向。小幣若<b>逆大盤</b>進場(例如大盤看跌卻做多小幣)風險較高、成功率較低,可作為進場前的參考。⚠️ 僅供參考,不影響本策略的自動進出場。</span></span></span>
+        <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">大盤(BTC / ETH)目前 <b>1 小時 EMA 趨勢</b>方向。小幣若<b>逆大盤</b>進場(例如大盤看跌卻做多小幣)風險較高、成功率較低。⚠️ 預設僅供參考;若該策略在後台開啟「<b>大盤過濾</b>」,大盤明確(BTC+ETH 同向)時只允許順向進場,中性/分歧則照策略自己。</span></span></span>
         <span v-for="m in book.market" :key="m.coin" class="mkt-chip" :class="m.ok ? m.bias : 'na'">
           <b class="mkt-coin">{{ m.coin }}</b>
           <span class="mkt-dir">{{ !m.ok ? '評估中…' : m.bias === 'long' ? '看漲 ▲' : m.bias === 'short' ? '看跌 ▼' : '中性 —' }}</span>
@@ -2548,6 +2571,8 @@ watch([role, tabPerms, authReady], () => {
         <span class="tf-note">統計依所選範圍重算</span>
       </div>
       <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
+      <p v-if="stratMktFilter(curPaperBook)" class="mktfilter-tag">🧭 大盤過濾:<b>開啟</b> —— 大盤明確(BTC+ETH 1h EMA 同向)時只順大盤方向進場,中性/分歧照策略自己</p>
+      <p v-if="stratStockFilter(curPaperBook)" class="mktfilter-tag">🚫 股票代幣過濾:<b>開啟</b> —— 不進代幣化股票/商品(NVDA/TSLA/XAG…),只做加密幣</p>
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bookF.stats.win_rate >= 50 ? 'long' : 'short'">{{ bookF.stats.win_rate }}%</div></div>
@@ -3215,6 +3240,7 @@ body::before {
 .tagchip.on { background: #2ea86a22; border-color: #2ea86a; color: #57d495; }
 .stat-tags { font-size: 12px !important; color: #cdd0d6 !important; line-height: 1.35; }
 .riskwarn { background: #4a2b1a; border: 1px solid #b4642a; color: #ffbf7d; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600; margin: 8px 0; line-height: 1.5; }
+.mktfilter-tag { background: #14261f; border: 1px solid #2f7a53; color: #6fe0a0; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; font-weight: 600; margin: 8px 0; line-height: 1.5; }
 .strat-row { display: flex; align-items: center; gap: 9px; }
 .strat-name { flex: 1; font-size: 13px; color: #cdd0d6; }
 .strat-status { font-size: 11px; width: 28px; }
@@ -3543,6 +3569,9 @@ footer { padding: 18px 0 30px; text-align: center; }
 .mkt-chip.short .mkt-dir { color: #ff5c5c; }
 .mkt-chip.na .mkt-dir { color: #8b909a; }
 .mkt-sub { font-size: 11px; color: #8b909a; }
+.mkt-home { margin: 12px 0 14px; }
+.mkt-chip.mkt-main { min-width: 132px; border-width: 2px; }
+.mkt-chip.mkt-main .mkt-coin { color: #ffd479; }
 </style>
 
 <style>

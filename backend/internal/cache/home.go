@@ -62,6 +62,14 @@ type AltSeason struct {
 	Prev  int    `json:"prev"` // yesterday's value, 0 if unknown
 }
 
+// MarketDirInfo 是首頁要顯示的「大盤方向」:BTC/ETH 各自的 1h EMA 讀數,以及綜合方向
+// (唯有兩者同向才是明確 long/short,否則 neutral)。與策略的「大盤過濾」同源。
+type MarketDirInfo struct {
+	Dir string `json:"dir"` // long | short | neutral
+	BTC string `json:"btc"` // long | short | neutral
+	ETH string `json:"eth"`
+}
+
 // HomeData is the full landing-page payload.
 type HomeData struct {
 	Ticker    map[string]TickerLite `json:"ticker"`
@@ -69,7 +77,21 @@ type HomeData struct {
 	ShortRecs []Rec                 `json:"short_recs"`
 	AltSeason AltSeason             `json:"alt_season"`
 	Market    []MarketRow           `json:"market"`
+	MarketDir MarketDirInfo         `json:"market_dir"`
 	Total     int                   `json:"total"`
+}
+
+// coinBias 回傳單一幣的 1h EMA 方向字串(long/short/neutral)。
+func (s *Store) coinBias(coin string) string {
+	if st, ok := s.emaLookup(coin); ok {
+		if st.longReady {
+			return "long"
+		}
+		if st.shortReady {
+			return "short"
+		}
+	}
+	return "neutral"
 }
 
 func coinOf(symbol string) string { return strings.TrimSuffix(symbol, "USDT") }
@@ -171,6 +193,7 @@ func (s *Store) computeHome() (HomeData, error) {
 		ShortRecs: shorts,
 		AltSeason: s.altSeason(tickers, bySym["BTCUSDT"]),
 		Market:    market,
+		MarketDir: MarketDirInfo{Dir: s.marketDir(), BTC: s.coinBias("BTC"), ETH: s.coinBias("ETH")},
 		Total:     total,
 	}, nil
 }

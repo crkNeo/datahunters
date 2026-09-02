@@ -20,6 +20,8 @@ const props = defineProps({
   state: { type: Object, default: null },
   // 風控警語(由後台「顯示風控建議」控制)
   risky: { type: Boolean, default: false },
+  mktFilter: { type: Boolean, default: false }, // 是否對此策略啟用「大盤過濾」(顯示徽章)
+  stockFilter: { type: Boolean, default: false }, // 是否啟用「股票代幣過濾」(顯示徽章)
   // 策略類型標籤,例如 ['激進','高頻']
   tags: { type: Array, default: () => [] },
   // 統計列順序:type | win | avg | total
@@ -46,6 +48,8 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 <template>
   <div>
     <p v-if="risky" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
+    <p v-if="mktFilter" class="mktfilter-tag">🧭 大盤過濾:<b>開啟</b> —— 大盤明確(BTC+ETH 1h EMA 同向)時只順大盤方向進場,中性/分歧照策略自己</p>
+    <p v-if="stockFilter" class="mktfilter-tag">🚫 股票代幣過濾:<b>開啟</b> —— 不進代幣化股票/商品(NVDA/TSLA/XAG…),只做加密幣</p>
 
     <div v-if="state" class="pstats">
       <template v-for="k in statsOrder" :key="k">

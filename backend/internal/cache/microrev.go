@@ -693,7 +693,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		dirty = open
 	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
 		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) && s.microTPOK(b, entry, tp) &&
-			(b.gate == nil || b.gate(coin, cs)) { // 品質閘門(脈衝星v2 的 OI/CVD),nil=不設限
+			(b.gate == nil || b.gate(coin, cs)) && s.marketAllows(b.strat(), dir) && s.stockAllowed(b.strat(), coin) { // 品質閘門 + 大盤過濾 + 股票代幣過濾
 			tr := &PaperTrade{
 				ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:     coin,

@@ -48,7 +48,7 @@ function toggleStratTag(st, tag) {
 async function saveStratCfg(st) {
   const n = (v) => Number(v) || 0
   const cfg = {
-    tags: st.tags || [], show_risk: !!st.show_risk, max_sl_pct: n(st.max_sl_pct), min_tp_pct: n(st.min_tp_pct),
+    tags: st.tags || [], show_risk: !!st.show_risk, mkt_filter: !!st.mkt_filter, stock_filter: !!st.stock_filter, max_sl_pct: n(st.max_sl_pct), min_tp_pct: n(st.min_tp_pct),
     exit_mode: st.exit_mode || 'single',
     split_a: n(st.split_a), split_b: n(st.split_b),
     split_w1: n(st.split_w1), split_w2: n(st.split_w2), split_w3: n(st.split_w3),
@@ -158,6 +158,14 @@ defineExpose({ load: loadStratStates })
         <label class="stratcfg-chk"><input v-model="st.notify_be" type="checkbox" /> 保本位</label>
       </div>
 
+      <div class="stratcfg-line">
+        <label class="stratcfg-chk"><input v-model="st.mkt_filter" type="checkbox" /> 大盤過濾</label>
+        <span class="stratcfg-hint">開:大盤明確(BTC+ETH 1h EMA 同向)時只順向進場;中性/分歧照策略自己</span>
+      </div>
+      <div class="stratcfg-line">
+        <label class="stratcfg-chk"><input v-model="st.stock_filter" type="checkbox" /> 股票代幣過濾</label>
+        <span class="stratcfg-hint">開:不進代幣化股票/商品(NVDA/TSLA/XAG…)的單,只做加密幣</span>
+      </div>
       <div class="stratcfg-line">
         <label class="stratcfg-chk"><input v-model="st.show_risk" type="checkbox" /> 顯示風控建議</label>
         <button class="minibtn" @click="saveStratCfg(st)">儲存</button>

@@ -494,7 +494,6 @@ func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
 		return strings.EqualFold(s, "SELL") || strings.EqualFold(s, "SHORT")
 	}
 	var lastErr error
-	var lastRaw []byte
 	// 市價成交後持倉不會「同一瞬間」就出現在查詢裡 → 重試幾次(~3s)。帶 symbol 查詢,並自己
 	// 再比對一次 symbol + 方向,取最新建立那一筆(= 我剛開的)。
 	for attempt := 0; attempt < 6; attempt++ {
@@ -507,7 +506,6 @@ func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
 			lastErr = err
 			continue
 		}
-		lastRaw = raw
 		var r struct {
 			codeMsg
 			Data []Position `json:"data"`
@@ -532,12 +530,7 @@ func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
 		}
 		lastErr = fmt.Errorf("找不到 %s %s 的持倉(第 %d 次)", venueSymbol, dir, attempt+1)
 	}
-	// 診斷:把最後一次的原始回應(截斷)帶進錯誤,方便查為何回空
-	snippet := string(lastRaw)
-	if len(snippet) > 400 {
-		snippet = snippet[:400]
-	}
-	return "", fmt.Errorf("%v | raw=%s", lastErr, snippet)
+	return "", lastErr
 }
 
 // CloseQtyMarket 送一張 reduce-only 市價單平掉某「持倉」的 qty(dir 是持倉方向,平倉單走
@@ -569,8 +562,7 @@ func (c *Client) CloseQtyMarket(venueSymbol, dir string, qty float64, basePrec i
 	var r codeMsg
 	json.Unmarshal(raw, &r)
 	if !r.ok() {
-		bj, _ := json.Marshal(body) // 診斷:印出送出的參數,看 10002 是哪個欄位
-		return fmt.Errorf("close code=%s msg=%s | body=%s", r.Code, r.Msg, string(bj))
+		return fmt.Errorf("close code=%s msg=%s", r.Code, r.Msg)
 	}
 	return nil
 }

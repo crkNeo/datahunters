@@ -28,6 +28,13 @@ type StratCfg struct {
 	MaxSLPct float64  `json:"max_sl_pct"` // >0: 止損距離超過此 % 就不開新單(0 = 不限制)
 	MinTPPct float64  `json:"min_tp_pct"` // >0: 止盈距離小於此 % 就不開新單(0 = 不限制)
 
+	// 大盤過濾:開時只在「大盤方向」與進場方向一致才開(BTC+ETH 1h EMA 同向才算明確;
+	// 中性/分歧則不介入,照策略自己)。預設關。
+	MktFilter bool `json:"mkt_filter"`
+
+	// 股票代幣過濾:開時不進「代幣化股票/商品」(NVDA/TSLA/XAG…)的單,只做加密幣。預設關。
+	StockFilter bool `json:"stock_filter"`
+
 	// 出場模式,三選一。分批止盈與保本互斥:保本是靠 TP1 觸發的,
 	// 兩者混用只會得到「開了保本卻永遠不觸發」的假設定。
 	//   split      = 分批止盈(TP1/TP2/TP3 三段,TP1 後移保本、TP2 後鎖 TP1)
@@ -393,8 +400,10 @@ func (s *Store) StrategyStates() []StrategyState {
 // StratMeta is the public (non-admin) view of a strategy's config: just what the
 // strategy pages render — 類型 tags and the risk-warning flag.
 type StratMeta struct {
-	Tags     []string `json:"tags"`
-	ShowRisk bool     `json:"show_risk"`
+	Tags        []string `json:"tags"`
+	ShowRisk    bool     `json:"show_risk"`
+	MktFilter   bool     `json:"mkt_filter"`   // 是否對此策略啟用「大盤過濾」(策略頁顯示用)
+	StockFilter bool     `json:"stock_filter"` // 是否啟用「股票代幣過濾」
 }
 
 // StrategyMeta returns name → public meta for every strategy, for the frontend to
@@ -405,7 +414,7 @@ func (s *Store) StrategyMeta() map[string]StratMeta {
 	out := make(map[string]StratMeta, len(allStrategies))
 	for _, n := range allStrategies {
 		c := s.stratCfgLocked(n)
-		out[n] = StratMeta{Tags: c.Tags, ShowRisk: c.ShowRisk}
+		out[n] = StratMeta{Tags: c.Tags, ShowRisk: c.ShowRisk, MktFilter: c.MktFilter, StockFilter: c.StockFilter}
 	}
 	return out
 }

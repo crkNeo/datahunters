@@ -403,6 +403,12 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 					continue
 				}
 			}
+			if !s.marketAllows(b.name, dir) { // 大盤過濾:大盤明確反向就不開
+				continue
+			}
+			if !s.stockAllowed(b.name, it.Coin) { // 股票代幣過濾:開了就不進股票/商品代幣
+				continue
+			}
 			tr := &PaperTrade{
 				ID:   fmt.Sprintf("%s|%s|%s|%d", b.name, it.Coin, dir, now.UnixMilli()),
 				Coin: it.Coin, Dir: dir, Score: it.Score, Entry: roundPx(p), TP: roundPx(it.TP), SL: roundPx(it.SL),
@@ -848,6 +854,44 @@ func (s *Store) marketBias(coin string, px map[string]float64) MarketBias {
 		mb.Bias = "short"
 	}
 	return mb
+}
+
+// marketDir 回傳「大盤方向」:唯有 BTC 與 ETH 的 1h EMA 讀數「同向」時才明確(long/short);
+// 任何分歧或含中性 → "neutral"(視為不明)。與銀河的方向定義同源(EMA5/20/50 on 1h)。
+func (s *Store) marketDir() string {
+	b, okb := s.emaLookup("BTC")
+	e, oke := s.emaLookup("ETH")
+	if !okb || !oke {
+		return "neutral"
+	}
+	if b.longReady && e.longReady {
+		return "long"
+	}
+	if b.shortReady && e.shortReady {
+		return "short"
+	}
+	return "neutral"
+}
+
+// marketAllows 回報某策略要開 dir 方向的單時是否通過「大盤過濾」:過濾關 → 一律放行;
+// 大盤不明(中性/分歧)→ 放行(照策略自己);大盤明確 → 只放行與大盤同向的單。
+func (s *Store) marketAllows(name, dir string) bool {
+	if !s.StratConfigOf(name).MktFilter {
+		return true
+	}
+	if d := s.marketDir(); d != "neutral" {
+		return dir == d
+	}
+	return true
+}
+
+// stockAllowed 回報某策略是否可進 coin 的單:未開「股票代幣過濾」→ 一律可;開了 → 只放行
+// 加密幣(擋掉代幣化股票/商品,未知則放行不誤殺)。
+func (s *Store) stockAllowed(name, coin string) bool {
+	if !s.StratConfigOf(name).StockFilter {
+		return true
+	}
+	return s.cryptoOnly(coin, nil)
 }
 
 // serve snapshots a book and stamps live funding + momentum onto open trades.
