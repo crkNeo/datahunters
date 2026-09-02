@@ -284,6 +284,9 @@ func (t *bitunixTrader) followOpen(a *bitunixAccount, book string, tr *PaperTrad
 	if perr != nil {
 		// 沒抓到 positionId → 套保(移動止損)會失效,但初始 SL 已掛、分批平倉仍可用。
 		log.Printf("bitunix follow: %s [%s] %s 抓 positionId 失敗(套保將失效,初始 SL 仍在): %v", a.label, book, tr.Coin, perr)
+	} else if err := a.cli.SetPositionSL(res.Symbol, posID, tr.SL*res.Factor, res.QuotePrec); err != nil {
+		// 明確設一次初始止損(避險模式下開倉附帶的 SL 不一定掛得上;這裡確保安全網到位)。
+		log.Printf("bitunix follow: %s [%s] %s 設初始止損失敗(仍有開倉附帶 SL): %v", a.label, book, tr.Coin, err)
 	}
 	fp := &followPos{
 		TradeID: tr.ID, Acct: a.label, Symbol: res.Symbol, PosID: posID, Dir: tr.Dir,

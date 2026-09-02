@@ -484,9 +484,14 @@ type Position struct {
 // 之後分批平倉 / 移動止損 / 整倉平 都鎖這個 id —— 即使帳號是分倉/避險(同幣同向可能有多
 // 筆獨立倉),也不會誤動到別筆。
 func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
-	want := "LONG"
-	if dir == "short" {
-		want = "SHORT"
+	long := dir != "short"
+	// 實測:get_pending_positions 的 side 欄回 "BUY"/"SELL"(不是文件寫的 LONG/SHORT)。
+	// 兩種都相容,避免哪天 API 又改回去。
+	sideOK := func(s string) bool {
+		if long {
+			return strings.EqualFold(s, "BUY") || strings.EqualFold(s, "LONG")
+		}
+		return strings.EqualFold(s, "SELL") || strings.EqualFold(s, "SHORT")
 	}
 	var lastErr error
 	var lastRaw []byte
@@ -514,7 +519,7 @@ func (c *Client) PositionID(venueSymbol, dir string) (string, error) {
 		}
 		best, bestC := "", int64(-1)
 		for _, p := range r.Data {
-			if !strings.EqualFold(p.Symbol, venueSymbol) || !strings.EqualFold(p.Side, want) {
+			if !strings.EqualFold(p.Symbol, venueSymbol) || !sideOK(p.Side) {
 				continue
 			}
 			ct, _ := p.Ctime.Int64()
