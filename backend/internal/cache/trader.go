@@ -122,6 +122,26 @@ func (t *bitunixTrader) removeFollow(tradeID, acct string) {
 	}
 }
 
+// ensurePosID 回傳這筆跟隨單的 positionId;若還是空的(開倉當下漏抓、或側欄舊 bug 前開的
+// 舊單),當場重抓一次並補寫回追蹤表。到了平倉/套保時,倉一定已存在,通常一抓就中。
+func (t *bitunixTrader) ensurePosID(a *bitunixAccount, fp *followPos) string {
+	if fp.PosID != "" {
+		return fp.PosID
+	}
+	id, err := a.cli.PositionID(fp.Symbol, fp.Dir)
+	if err != nil || id == "" {
+		return ""
+	}
+	t.fmu.Lock()
+	fp.PosID = id
+	t.fmu.Unlock()
+	if t.db != nil {
+		t.db.saveFollow(fp)
+	}
+	log.Printf("bitunix follow: %s [%s] 補抓 positionId=%s", a.label, fp.TradeID, id)
+	return id
+}
+
 // hasFollow reports whether any account runs in follow mode (so the store only
 // wires the stepTP/closeTrade hooks when needed).
 func (t *bitunixTrader) hasFollow() bool {
@@ -314,13 +334,14 @@ func (t *bitunixTrader) onLeg(tr *PaperTrade, weight float64) {
 		}
 		a, fp, sl := a, fp, tr.SL
 		go func() {
+			pid := t.ensurePosID(a, fp)
 			q := floorTo(fp.OrigQty*weight, fp.BasePrec)
-			if err := a.cli.CloseQtyMarket(fp.Symbol, fp.Dir, q, fp.BasePrec, fp.Hedge, fp.PosID); err != nil {
+			if err := a.cli.CloseQtyMarket(fp.Symbol, fp.Dir, q, fp.BasePrec, fp.Hedge, pid); err != nil {
 				log.Printf("bitunix follow: %s [%s] 分批平倉 %.4f 失敗: %v", a.label, tr.ID, q, err)
 			} else {
 				log.Printf("bitunix follow: %s [%s] 分批平倉 %.4f(比例 %.0f%%)OK", a.label, tr.ID, q, weight*100)
 			}
-			if err := a.cli.SetPositionSL(fp.Symbol, fp.PosID, sl*fp.Factor, fp.QuotePrec); err != nil {
+			if err := a.cli.SetPositionSL(fp.Symbol, pid, sl*fp.Factor, fp.QuotePrec); err != nil {
 				log.Printf("bitunix follow: %s [%s] 移動止損→%.6g 失敗: %v", a.label, tr.ID, sl, err)
 			}
 		}()
@@ -343,9 +364,10 @@ func (t *bitunixTrader) onClose(tr *PaperTrade) {
 		go func() {
 			// 最終平倉:依 positionId 整倉市價平(只動這一倉,分倉/避險安全)。沒有 positionId
 			// 才退回用原始數量 reduce-only(交易所會平掉還剩的)。
+			pid := t.ensurePosID(a, fp)
 			var err error
-			if fp.PosID != "" {
-				err = a.cli.FlashClose(fp.PosID)
+			if pid != "" {
+				err = a.cli.FlashClose(pid)
 			} else {
 				err = a.cli.CloseQtyMarket(fp.Symbol, fp.Dir, fp.OrigQty, fp.BasePrec, fp.Hedge, "")
 			}
