@@ -50,7 +50,7 @@ func roundPx(v float64) float64 {
 type PaperTrade struct {
 	ID         string     `json:"id"` // book|coin|dir|opentime; also the manual-close key
 	Coin       string     `json:"coin"`
-	Dir        string     `json:"dir"` // long | short
+	Dir        string     `json:"dir"`          // long | short
 	TF         string     `json:"tf,omitempty"` // 週期標籤(2155多:1h/4h/1d)— 供多週期同頁分類,serve 時填
 	Score      int        `json:"score"`
 	Entry      float64    `json:"entry"` // fill price (market at signal)
@@ -141,16 +141,16 @@ type paperBook struct {
 	minScore     int
 	requireCross bool // true: only enter on a fresh cross up; false: chase anything
 	cooldown     time.Duration
-	trail        float64 // >0: trailing-stop exit (trail×R behind peak); 0: fixed TP/SL
-	skipNY       bool    // skip new entries during the NY session (12-18 UTC)
-	requireAlign bool    // only enter when OI and CVD both agree with direction
-	requireFuel  bool    // only enter when funding is "fuel" (contrarian) for the direction
-	requireEMA   bool    // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
-	adminOnly    bool    // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
-	maxSLPct     float64 // >0: skip entries whose SL distance exceeds this % (caps far-SL / liquidation risk)
-	posGate      float64 // >0: skip chasing exhaustion — long if range-pos > gate, short if < 1-gate
+	trail        float64       // >0: trailing-stop exit (trail×R behind peak); 0: fixed TP/SL
+	skipNY       bool          // skip new entries during the NY session (12-18 UTC)
+	requireAlign bool          // only enter when OI and CVD both agree with direction
+	requireFuel  bool          // only enter when funding is "fuel" (contrarian) for the direction
+	requireEMA   bool          // only enter when the multi-TF EMA trend confirms (15m EMA200 + 1h EMA5/20)
+	adminOnly    bool          // admin-only book: no user push/TG/real-mirror on open/close; alerts go to admins
+	maxSLPct     float64       // >0: skip entries whose SL distance exceeds this % (caps far-SL / liquidation risk)
+	posGate      float64       // >0: skip chasing exhaustion — long if range-pos > gate, short if < 1-gate
 	expiry       time.Duration // >0: per-book 逾時 (overrides paperExpiry); 0 = 用全域 24h
-	plan         *tpPlan // >nil: 分批止盈 (multi take-profit) instead of a single TP
+	plan         *tpPlan       // >nil: 分批止盈 (multi take-profit) instead of a single TP
 	trades       []*PaperTrade
 	armed        map[string]bool
 	lastOpen     map[string]time.Time // coin|dir → last entry time (dedupe guard)
@@ -456,20 +456,14 @@ func bookLabel(name string) string {
 		return "火星"
 	case "bollema":
 		return "海王星"
-	case "ema2155", "ema2155_4h", "ema2155_1d":
-		return "2155多"
 	case "pulsar":
 		return "脈衝星"
-	case "pulsarv2":
-		return "脈衝星v2"
 	case "pulsarv3":
 		return "脈衝星v3"
-	case "pulsarv4":
-		return "脈衝星v4"
 	case "pulsarv5":
 		return "脈衝星v5"
-	case "pulsarv3s":
-		return "反脈衝星v3"
+	case "pulsarv6":
+		return "脈衝星v6"
 	case "orderblock", "orderblock_1h", "orderblock_4h":
 		return "訂單塊"
 	}
@@ -525,10 +519,8 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "meanrev", "bollema", "ema2155", "pulsar", "pulsarv2", "pulsarv3", "pulsarv4", "pulsarv5", "pulsarv3s", "orderblock":
+	case "gamble", "emaonly", "conv", "meanrev", "bollema", "pulsar", "pulsarv3", "pulsarv5", "pulsarv6", "orderblock":
 		return name
-	case "ema2155_4h", "ema2155_1d": // 三週期共用一個分頁
-		return "ema2155"
 	case "orderblock_1h", "orderblock_4h": // 三週期共用一個分頁
 		return "orderblock"
 	}

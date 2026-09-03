@@ -58,14 +58,11 @@ var tabMeta = []struct {
 	{"meanrev", "火星", "admin", false},
 	{"bollema", "海王星", "admin", false},
 	{"srmtf", "錘頭/射擊星", "admin", false},
-	{"ema2155", "2155多", "admin", false},
 	{"surge", "爆量脈搏", "admin", false},
 	{"pulsar", "脈衝星", "admin", false},
-	{"pulsarv2", "脈衝星v2", "admin", false},
 	{"pulsarv3", "脈衝星v3", "admin", false},
-	{"pulsarv4", "脈衝星v4", "admin", false},
 	{"pulsarv5", "脈衝星v5", "admin", false},
-	{"pulsarv3s", "反脈衝星v3", "admin", false},
+	{"pulsarv6", "脈衝星v6", "admin", false},
 	{"orderblock", "訂單塊", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
@@ -81,9 +78,9 @@ var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"meanrev": "signal", "bollema": "signal",
-	"srmtf": "signal", "ema2155": "signal",
-	"surge": "signal", "pulsar": "signal", "pulsarv2": "signal", "pulsarv3": "signal", "pulsarv4": "signal", "pulsarv5": "signal",
-	"pulsarv3s": "signal", "orderblock": "signal",
+	"srmtf": "signal",
+	"surge": "signal", "pulsar": "signal", "pulsarv3": "signal", "pulsarv5": "signal",
+	"pulsarv6": "signal", "orderblock": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -251,9 +248,9 @@ var tabOfRoute = map[string]string{
 	"/api/paper": "paper", "/api/gamble": "gamble", "/api/ema-only": "emaonly",
 	"/api/conv": "conv", "/api/sr": "sr",
 	"/api/admin/meanrev": "meanrev", "/api/admin/bollema": "bollema",
-	"/api/srmtf": "srmtf", "/api/ema2155": "ema2155",
-	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv2": "pulsarv2", "/api/pulsarv3": "pulsarv3", "/api/pulsarv4": "pulsarv4", "/api/pulsarv5": "pulsarv5",
-	"/api/pulsarv3s": "pulsarv3s", "/api/orderblock": "orderblock",
+	"/api/srmtf":       "srmtf",
+	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3", "/api/pulsarv5": "pulsarv5",
+	"/api/pulsarv6": "pulsarv6", "/api/orderblock": "orderblock",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

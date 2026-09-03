@@ -145,16 +145,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
-	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))    // 冥王星 (動態ATR均線收斂 4H)
-	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF)) // 多週期支壓 (1H+4H 提示)
-	mux.HandleFunc("/api/ema2155", s.gateTab("ema2155", s.handleEMA2155)) // 2155多 (EMA21/55 金叉)
-	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge)) // 爆量脈搏面板
-	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))       // 脈衝星策略
-	mux.HandleFunc("/api/pulsarv2", s.gateTab("pulsarv2", s.handlePulsarV2)) // 脈衝星v2 (含 OI/CVD 閘門)
-	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3)) // 脈衝星v3 (ATR + runner)
-	mux.HandleFunc("/api/pulsarv4", s.gateTab("pulsarv4", s.handlePulsarV4)) // 脈衝星v4 (= v1, 無逾時)
-	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5)) // 脈衝星v5 (= v1, 固定% TP)
-	mux.HandleFunc("/api/pulsarv3s", s.gateTab("pulsarv3s", s.handlePulsarV3s)) // 反脈衝星v3 (v3 做空鏡像)
+	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                   // 冥王星 (動態ATR均線收斂 4H)
+	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                // 多週期支壓 (1H+4H 提示)
+	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))          // 爆量脈搏面板
+	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))             // 脈衝星策略
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))       // 脈衝星v3 (ATR + runner)
+	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))       // 脈衝星v5 (= v1, 固定% TP)
+	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))       // 脈衝星v6 (v3 + 確認棒)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock)) // 訂單塊 SMC (斐波四段, 15m/1h/4h)
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
@@ -714,11 +711,6 @@ func (s *Server) handleBollEMA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.BollEMAState())
 }
 
-// handleEMA2155 serves the 2155多 (EMA21/55 金叉 只做多) tracker.
-func (s *Server) handleEMA2155(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.EMA2155State())
-}
-
 // handleSurge serves the 爆量脈搏 board (全市場相對爆量斥候, admin-only).
 func (s *Server) handleSurge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SurgeBoard())
@@ -729,19 +721,9 @@ func (s *Server) handlePulsar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarState())
 }
 
-// handlePulsarV2 serves the 脈衝星v2 (脈衝星 + OI/CVD 品質閘門) tracker.
-func (s *Server) handlePulsarV2(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV2State())
-}
-
 // handlePulsarV3 serves the 脈衝星v3 (ATR 自適應 + 追尾 runner) tracker.
 func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV3State())
-}
-
-// handlePulsarV4 serves the 脈衝星v4 (= v1, 4h 逾時關閉) tracker.
-func (s *Server) handlePulsarV4(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV4State())
 }
 
 // handlePulsarV5 serves the 脈衝星v5 (= v1, 固定百分比止盈 5/10/15%) tracker.
@@ -749,16 +731,15 @@ func (s *Server) handlePulsarV5(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV5State())
 }
 
-// handlePulsarV3s serves the 反脈衝星v3 (v3 做空鏡像) tracker.
-func (s *Server) handlePulsarV3s(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV3sState())
+// handlePulsarV6 serves the 脈衝星v6 (v3 + 確認棒進場) tracker.
+func (s *Server) handlePulsarV6(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV6State())
 }
 
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.
 func (s *Server) handleOrderBlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SMCState())
 }
-
 
 // handleSRMTF serves the 多週期支壓 (1H+4H 支撐壓力提示) board.
 func (s *Server) handleSRMTF(w http.ResponseWriter, r *http.Request) {
@@ -929,7 +910,6 @@ func (s *Server) handleScoreLog(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Risk())
 }
-
 
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())

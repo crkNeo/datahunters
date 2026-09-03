@@ -18,7 +18,7 @@ export const ROUTE_TABS = [
   'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'meanrev', 'bollema', 'ema2155', 'surge', 'pulsar', 'pulsarv2', 'pulsarv3', 'pulsarv4', 'pulsarv5', 'pulsarv3s', 'orderblock', 'srmtf',
+  'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'srmtf',
   'admin', 'referral',
 ]
 

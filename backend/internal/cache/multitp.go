@@ -44,12 +44,6 @@ var (
 	// 與保本緩衝由 strat 設定驅動(tpFor)。trailR=1.5 → runner 停損 = 峰值 − 1.5R,鎖 ≥1R。
 	tpPulsarV3 = &tpPlan{rMult: true, a: 1, b: 2, w1: 0.50, w2: 0.25, w3: 0.25, beBuf: 0.0005, trailAfterTP2: true, trailR: 1.5}
 
-	// 2155多 v2(脈衝星v3 式的追尾):TP1=+5% 平 50%→保本、TP2=+10% 平 40%→鎖 TP1、
-	// 剩 10% 追尾(峰值−1.5×R,R=TP1−進場=5%,不低於 TP1),沒有固定 TP3 close ——
-	// runner 只靠追尾停損或死叉出場,讓贏單吃到後面的大波段(解決舊版 +2% 封頂問題)。
-	// a/b/rMult 由 ema2155TPLevels 覆蓋成固定百分比;比例 50/40/10 由後台 SplitW1/2/3 驅動。
-	tpEMA2155 = &tpPlan{rMult: true, a: 1, b: 2, w1: 0.50, w2: 0.40, w3: 0.10, beBuf: 0.0005, trailAfterTP2: true, trailR: 1.5}
-
 	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段平剩下 25%。
 	// a/b 只是佔位 —— 實際 TP1/TP2/TP3 由 smcFibTPLevels 依斐波格覆蓋。沿路套保:TP1→保本、
 	// TP2→TP1、TP3→TP2(見 stepTP)。

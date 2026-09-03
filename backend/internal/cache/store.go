@@ -60,10 +60,10 @@ type Store struct {
 	symTypes map[string]string
 	symTime  time.Time
 
-	paperMu       sync.Mutex // guards the paper-trading books
-	paperMain     *paperBook // disciplined: high bar, fresh-cross only
-	paperGamble   *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12% + 逾時6h
-	paperEMA      *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
+	paperMu     sync.Mutex // guards the paper-trading books
+	paperMain   *paperBook // disciplined: high bar, fresh-cross only
+	paperGamble *paperBook // loose: low bar, chases already-elevated coins; 分批止盈 + FILTER@12% + 逾時6h
+	paperEMA    *paperBook // standalone: 1h EMA5/20 cross + 15m EMA200 side (long+short)
 
 	emaMu   sync.Mutex          // guards the multi-timeframe EMA cache
 	emaMap  map[string]emaState // coin -> latest closed-bar EMA read
@@ -133,16 +133,13 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	meanRevBook  *microBook // 火星:乖離回歸 1h (admin, microrev.go)
-	bollEMABook  *microBook // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
-	ema2155Books []*microBook // 2155多:EMA21/55 金叉 只做多,死叉即時止損;1h/4h/1d 三週期同頁 (microrev.go)
+	meanRevBook  *microBook   // 火星:乖離回歸 1h (admin, microrev.go)
+	bollEMABook  *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
 	surge        *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
 	pulsarBook   *microBook   // 脈衝星:建在爆量熱名單上的觀察策略 (microrev.go)
-	pulsarV2Book *microBook   // 脈衝星v2:脈衝星 + OI/CVD 品質閘門 (microrev.go)
-	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner + 大盤閘門 (microrev.go)
-	pulsarV4Book *microBook   // 脈衝星v4:= v1,但關閉 4h 逾時 (microrev.go)
+	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV5Book *microBook   // 脈衝星v5:= v1,但固定百分比止盈 5%/10%/15% (microrev.go)
-	pulsarV3sBook *microBook  // 反脈衝星v3:脈衝星v3 的做空鏡像(爆量下殺初段)(microrev.go)
+	pulsarV6Book *microBook   // 脈衝星v6:v3 + 確認棒進場(濾掉一進場就秒回調的假突破)(microrev.go)
 	smcBooks     []*microBook // 訂單塊:LuxAlgo SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h 三週期同頁 (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
@@ -243,7 +240,7 @@ func NewStore(coins []string) *Store {
 	// weren't NY-concentrated; skipNY left at its default false).
 	// 分批止盈 (TP1/TP2 = 進場→TP3 的 40%/70%) 套用到 radar/EMA 書。gamble 另加 FILTER@12%。
 	s.paperGamble.plan = tpMomentum
-	s.paperGamble.maxSLPct = 12  // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
+	s.paperGamble.maxSLPct = 12          // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
 	s.paperGamble.expiry = 6 * time.Hour // 超新星改用短逾時(原超新星v2 的邏輯):24h→6h,動能不快出現就是死單
 	s.paperMain.plan = tpMomentum
 	s.paperEMA.plan = tpMomentum
@@ -251,32 +248,18 @@ func NewStore(coins []string) *Store {
 	// candidate fix so it can be compared against the base 超新星.
 	// 火星:乖離回歸 1h (microrev.go)
 	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
-	// 2155多:EMA21/55 金叉進場(只做多)、SL=近20根低點、TP 1:2/1:3/1:4 分批、死叉即時出場。
-	// expiry=0 → 無時間出場;分批位置(50%/75% → 2R/3R)與比例由 strat 設定驅動。
-	// 三個週期(1h/4h/1d)同頁呈現、共用一個開關與設定(stratKey=ema2155),各自獨立持倉、
-	// 不做同幣互斥(同一幣可同時在 1h 與 4h 各開一單,以 TF 欄位分類)。
-	s.ema2155Books = []*microBook{
-		{name: "ema2155", tf: "1h", barSec: 3600, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
-		{name: "ema2155_4h", tf: "4h", barSec: 14400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
-		{name: "ema2155_1d", tf: "1d", barSec: 86400, klimit: 300, minBars: 80, expiry: 0, cooldown: 4, keep: 500, plan: tpEMA2155, stratKey: "ema2155", tfTag: true, signal: ema2155Signal, exitSignal: ema2155DeathCross, tpLevels: ema2155TPLevels, gate: s.cryptoOnly},
-	}
 	// 脈衝星:建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
 	// 15m 動能確認進場、近10根 swing-low 止損、1:4 分批(50/75 → 1:2/1:3)、12h 逾時。
 	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
-	// 脈衝星v2:與脈衝星完全相同,但多一道 OI/CVD 品質閘門(只放行 OI 擴張 + 買盤主導的爆量)。
-	// 兩本並存是為了 A/B 對照:閘門有沒有把品質拉起來。
-	s.pulsarV2Book = &microBook{name: "pulsarv2", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, gate: s.oiCvdGate}
 	// 脈衝星v3:ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
 	// runnerExpiry 96 根 = 24h,突破 4h 讓小倉測後續跑動。plan=tpPulsarV3(1R/2R + 追尾)。
 	// gate 先關掉(不加 BTC 大盤閘門);要再開回來就把 gate: s.btcRegimeGate 加回去。
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
-	// 脈衝星v4:與 v1 完全相同,唯一差別 expiry=0 → 關閉 4h 逾時(只靠 TP/SL 出場)。
-	s.pulsarV4Book = &microBook{name: "pulsarv4", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 0, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
 	// 脈衝星v5:= v1(含 4h 逾時),但止盈改成固定百分比 TP1=+5%/TP2=+10%/最終=+15%(tpLevels 覆蓋)。
 	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
-	// 反脈衝星v3:脈衝星v3 的做空鏡像。結構完全對稱(ATR 自適應 + 追尾 runner + 4h/24h 逾時 + 4h 冷卻),
-	// 只是做空。宇宙同爆量熱名單(崩跌也爆量)。
-	s.pulsarV3sBook = &microBook{name: "pulsarv3s", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: antiSurgeV3Signal}
+	// 脈衝星v6:= v3,但進場多一道「確認棒」—— 設定在前一根成立、這一根確認才進,濾掉秒回調假突破。
+	// 其餘(ATR 濾網、追尾、4h/24h 逾時、4h 冷卻、比例)完全同 v3。開來跟 v3 A/B。
+	s.pulsarV6Book = &microBook{name: "pulsarv6", tf: "15m", barSec: 900, klimit: 200, minBars: 42, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: confirmSurgeV3Signal}
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
@@ -302,15 +285,10 @@ func NewStore(coins []string) *Store {
 		s.convTrades = db.loadTrades("conv")
 		s.meanRevBook.trades = db.loadTrades("meanrev")
 		s.bollEMABook.trades = db.loadTrades("bollema")
-		for _, b := range s.ema2155Books {
-			b.trades = db.loadTrades(b.name)
-		}
 		s.pulsarBook.trades = db.loadTrades("pulsar")
-		s.pulsarV2Book.trades = db.loadTrades("pulsarv2")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
-		s.pulsarV4Book.trades = db.loadTrades("pulsarv4")
 		s.pulsarV5Book.trades = db.loadTrades("pulsarv5")
-		s.pulsarV3sBook.trades = db.loadTrades("pulsarv3s")
+		s.pulsarV6Book.trades = db.loadTrades("pulsarv6")
 		for _, b := range s.smcBooks {
 			b.trades = db.loadTrades(b.name)
 		}

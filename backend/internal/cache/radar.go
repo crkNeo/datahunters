@@ -39,8 +39,8 @@ type RadarData struct {
 
 // coinTypes returns the cached coin -> underlyingType map (refreshed ~daily),
 // so the radar can split crypto ("COIN") from tokenized equities/commodities.
-// cryptoOnly 是策略用的品質閘門:只讓「加密幣」進場,擋掉代幣化股票/商品(NVDA/TSLA/
-// XAG…)。Binance 合約類型 "COIN"=加密;未知則保留(不誤殺)。給 2155多 排除股票用。
+// cryptoOnly 回報 coin 是否為加密幣(Binance 合約類型 "COIN");代幣化股票/商品(NVDA/TSLA/
+// XAG…)回 false。未知則保留(不誤殺)。供 stockAllowed 的「股票代幣過濾」用。
 func (s *Store) cryptoOnly(coin string, _ []exchange.Candle) bool {
 	if t, ok := s.coinTypes()[coin]; ok {
 		return t == "COIN"

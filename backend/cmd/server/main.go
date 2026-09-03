@@ -222,13 +222,10 @@ func main() {
 			store.ConvMarkTick()
 			store.MeanRevMarkTick()
 			store.BollEMAMarkTick()
-			store.EMA2155MarkTick()
 			store.PulsarMarkTick()
-			store.PulsarV2MarkTick()
 			store.PulsarV3MarkTick()
-			store.PulsarV4MarkTick()
 			store.PulsarV5MarkTick()
-			store.PulsarV3sMarkTick()
+			store.PulsarV6MarkTick()
 			store.SMCMarkTick()
 		}
 	}()
@@ -248,30 +245,18 @@ func main() {
 			store.BollEMATick()
 		}
 	}()
-	// 2155多:EMA21/55 金叉(只做多),死叉即時出場。
-	go func() {
-		store.EMA2155Tick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.EMA2155Tick()
-		}
-	}()
-	// 脈衝星 / 脈衝星v2:爆量熱名單上的觀察策略(15m 動能確認進場);v2 多一道 OI/CVD 閘門。
+	// 脈衝星家族:爆量熱名單上的觀察策略(15m 動能確認進場)。
 	go func() {
 		store.PulsarTick()
-		store.PulsarV2Tick()
 		store.PulsarV3Tick()
-		store.PulsarV4Tick()
 		store.PulsarV5Tick()
-		store.PulsarV3sTick()
+		store.PulsarV6Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
-			store.PulsarV2Tick()
 			store.PulsarV3Tick()
-			store.PulsarV4Tick()
 			store.PulsarV5Tick()
-			store.PulsarV3sTick()
+			store.PulsarV6Tick()
 		}
 	}()
 	// 訂單塊 SMC:LuxAlgo 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h。

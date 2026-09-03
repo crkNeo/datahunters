@@ -36,7 +36,7 @@ defineEmits(['coin', 'exit'])
 const openFilled = computed(() => (props.state?.open || []).filter((t) => t.status !== 'pending').length)
 const openPending = computed(() => (props.state?.open || []).filter((t) => t.status === 'pending').length)
 
-// 多週期策略(如 2155多:1h/4h/1d 同頁)才帶 tf 欄位;有才顯示「週期」欄,其餘策略維持原樣。
+// 多週期策略(如 訂單塊:15m/1h/4h 同頁)才帶 tf 欄位;有才顯示「週期」欄,其餘策略維持原樣。
 const hasTf = computed(() =>
   [...(props.state?.open || []), ...(props.state?.closed || [])].some((t) => t.tf)
 )

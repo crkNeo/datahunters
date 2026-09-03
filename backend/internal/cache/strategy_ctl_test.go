@@ -251,8 +251,8 @@ func TestManualExitAlwaysNotifies(t *testing.T) {
 	if !s.notifyCloseBook("meanrev", tr, time.Now(), true) {
 		t.Error("手動出場沒有發通知")
 	}
-	// 多週期分腿(ema2155_4h)要能解析回主 key,不能因為查不到設定而漏發
-	if !s.notifyCloseBook("ema2155_4h", tr, time.Now(), true) {
-		t.Error("2155多 分週期的手動出場沒有發通知")
+	// 多週期分腿(orderblock_4h)要能解析回主 key,不能因為查不到設定而漏發
+	if !s.notifyCloseBook("orderblock_4h", tr, time.Now(), true) {
+		t.Error("訂單塊 分週期的手動出場沒有發通知")
 	}
 }
