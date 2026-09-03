@@ -1359,6 +1359,16 @@ function positionHelpPop(help) {
   })
 }
 
+// 彈窗開著時鎖住背景(首頁)滾動,避免滑動穿透到底層、要重新點擊才滾得到彈窗內容。
+const anyModalOpen = computed(() => !!(
+  refShow.value || refRulesShow.value || vipShow.value || refOfShow.value ||
+  loginOpen.value || pwModal.value || welcomeOpen.value || noticeShow.value ||
+  proofView.value || artEdit.value || detailCoin.value
+))
+watch(anyModalOpen, (open) => {
+  document.documentElement.classList.toggle('modal-lock', open)
+})
+
 let hiddenAt = 0
 onMounted(async () => {
   // help popovers: click the ? to toggle, click anywhere else (or another ?) to
@@ -2805,7 +2815,7 @@ body::before {
 .namebtn:hover { color: #d8ad48; }
 .refnote { background: rgba(216,173,72,.1); border: 1px solid #3a3320; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #d8ad48; display: flex; flex-direction: column; gap: 2px; }
 .refnote span { color: #8b909a; font-size: 11px; }
-.refbox { box-sizing: border-box; background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px; width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
+.refbox { box-sizing: border-box; background: #14161c; border: 1px solid #23262f; border-radius: 14px; padding: 16px; width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 /* 我的推廣 modal:置中、往下推、不要滿版高(尤其手機)—— ✕ 才不會頂到瀏覽器列 */
 .refover { justify-content: center; align-items: flex-start; padding-top: 8vh; }
 .refover .refbox { max-height: 80vh; }
@@ -2862,7 +2872,8 @@ body::before {
 .vipnote.ok { background: #103a24; color: #2ec26b; border: 1px solid #1f5a34; }
 .vipfile { margin-bottom: 10px; }
 /* 疊在我的推廣 modal 之上 —— 同樣是 .overlay,不加這行會被蓋住 */
-.rulesover { z-index: 60; }
+.rulesover { z-index: 60; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+.rulesover .refbox { max-height: 78vh; }
 /* 申請 VIP modal:置中、往下推,避免 ✕ 頂到手機瀏覽器列/瀏海按不到 */
 .vipover { z-index: 60; justify-content: center; align-items: flex-start; }
 .vipbox { box-sizing: border-box; background: #14161c; border: 1px solid #23262f; border-radius: 14px;
@@ -3242,7 +3253,9 @@ footer { margin-top: 24px; font-size: 11px; color: #5c616b; line-height: 1.6; }
 .loading { color: #8b909a; }
 
 /* drawer */
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: flex-end; z-index: 50; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: flex-end; z-index: 50; overscroll-behavior: contain; }
+/* 彈窗開著時鎖住背景(首頁)滾動,避免滑動穿透 */
+html.modal-lock, html.modal-lock body { overflow: hidden !important; }
 .drawer { width: 460px; max-width: 92vw; height: 100%; overflow-y: auto; background: #0d0f13; border-left: 1px solid #23262d; padding: 20px 18px 48px; box-sizing: border-box; }
 .close { position: sticky; top: 0; float: right; background: #16181d; border: 1px solid #23262d; color: #b8bcc4; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
 .drawer .card { margin-bottom: 14px; }
