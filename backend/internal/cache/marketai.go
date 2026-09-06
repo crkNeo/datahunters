@@ -24,7 +24,7 @@ const maiSystem = "你是專業、有觀點的加密貨幣大盤分析師。只�
 	"第一行:20 字內的重點摘要當標題(不要標點結尾)。第二行空一行。接著依序:\n" +
 	"🔴 市場偏多/偏空/中性 · 信心 高/中/低(自行判斷方向與信心,擇一)\n" +
 	"① 重點一\n② 重點二\n③ 重點三\n" +
-	"\n📍 關鍵支撐壓力\nBTC 支撐 X / 壓力 Y\nETH 支撐 X / 壓力 Y(數字取自數據的支撐壓力,沒有寫「—」)\n" +
+	"\n📍 關鍵支撐壓力\nBTC 支撐 X / 壓力 Y\nETH 支撐 X / 壓力 Y(直接引用數據中的『關鍵位』數字,務必填上,不要寫「—」)\n" +
 	"\n📊 經濟數據\n就數據中的經濟數據用 1–3 點判讀:已公布的比較「實際 vs 預期」推論對風險資產偏多或偏空;即將公布的給倒數與觀望提醒。無數據就寫「近期無高影響數據」。\n" +
 	"\n🌐 板塊 / 山寨季\n一句話:領頭與落後板塊、本小時資金轉向、山寨季位置。\n" +
 	"\n👀 接下來注意\n1–3 點:關鍵價位觸發的情境(例如跌破 X → 空間擴大)。\n" +
@@ -145,11 +145,7 @@ func (s *Store) marketSnapshot() string {
 			if e.Released {
 				fmt.Fprintf(&b, "%s 已公布 實際%s/預期%s/前值%s", e.Title, nz(e.Actual), nz(e.Forecast), nz(e.Previous))
 			} else {
-				cd := e.Countdown
-				if cd == "" {
-					cd = "待定"
-				}
-				fmt.Fprintf(&b, "%s %s後公布 預期%s/前值%s", e.Title, cd, nz(e.Forecast), nz(e.Previous))
+				fmt.Fprintf(&b, "%s %s公布 預期%s/前值%s", e.Title, humanCountdown(e.Time), nz(e.Forecast), nz(e.Previous))
 			}
 			n++
 		}
@@ -163,6 +159,12 @@ func (s *Store) marketSnapshot() string {
 		hi := fb.Rows[0]              // most positive (rows sorted desc)
 		lo := fb.Rows[len(fb.Rows)-1] // most negative
 		fmt.Fprintf(&b, "資金費率極端:%s %+.3f%%(多方擁擠)/ %s %+.3f%%(空方擁擠)\n", hi.Coin, hi.Rate*100, lo.Coin, lo.Rate*100)
+	}
+
+	{ // BTC/ETH 關鍵位:一定有值(確認 SR 優先,否則近 24h 區間),給 📍 用
+		bs, br := s.keyLevels("BTC")
+		es, er := s.keyLevels("ETH")
+		fmt.Fprintf(&b, "關鍵位:BTC 支撐$%s 壓力$%s;ETH 支撐$%s 壓力$%s\n", fmtPx(bs), fmtPx(br), fmtPx(es), fmtPx(er))
 	}
 
 	if sr := s.SR(); len(sr.Levels) > 0 { // 主流幣 1h 支撐壓力位 + 剛破/剛突破
@@ -217,6 +219,50 @@ func (s *Store) marketSnapshot() string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// keyLevels 回傳某幣「一定有值」的關鍵支撐/壓力:優先用已確認的 SR 群聚 level,沒有就退回
+// 近 24 根 1h 的區間低/高。給 AI 的 📍 用,避免顯示「—」。
+func (s *Store) keyLevels(coin string) (sup, res float64) {
+	s.srMu.Lock()
+	info := s.srInfo[coin]
+	s.srMu.Unlock()
+	sup, res = info.Support, info.Resistance
+	if sup > 0 && res > 0 {
+		return
+	}
+	cs := s.closed1h(coin, 24) // 退回:近 24 根 1h 的區間高低
+	if len(cs) == 0 {
+		return
+	}
+	lo, hi := cs[0].Low, cs[0].High
+	for _, c := range cs {
+		if c.Low < lo {
+			lo = c.Low
+		}
+		if c.High > hi {
+			hi = c.High
+		}
+	}
+	if sup == 0 {
+		sup = lo
+	}
+	if res == 0 {
+		res = hi
+	}
+	return
+}
+
+// humanCountdown 把經濟事件的倒數轉成好讀字串(>48h 顯示「約N天後」,否則 XhYm後)。
+func humanCountdown(t time.Time) string {
+	d := time.Until(t)
+	if d <= 0 {
+		return "即將"
+	}
+	if d >= 48*time.Hour {
+		return fmt.Sprintf("約%d天後", int(d.Hours())/24)
+	}
+	return fmt.Sprintf("%dh%02dm後", int(d.Hours()), int(d.Minutes())%60)
 }
 
 func riskCN(r string) string {
