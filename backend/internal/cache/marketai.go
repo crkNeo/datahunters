@@ -18,10 +18,18 @@ type MarketAIData struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-const maiSystem = "你是專業、有觀點的加密貨幣大盤分析師。根據提供的即時數據,用繁體中文分析目前大盤動態," +
-	"並明確給出你自己的偏向與看法(偏多/偏空/中性,以及你的理由、信心程度、該留意的關卡)。敢下判斷,不要只是中立描述數據。" +
-	"格式:第一行是一句 20 字內的重點摘要(當標題,不要標點結尾);接著 3-5 句分析與你的判斷;最後獨立一行『⚠️ 僅提供資訊,不構成投資建議』。" +
-	"不要用 markdown、不要條列符號、不要重複貼回數據。"
+const maiSystem = "你是專業、有觀點的加密貨幣大盤分析師。只根據我提供的即時數據判讀,敢下判斷、給明確偏向。" +
+	"數字一律引用數據內的真實值,不要自行編造沒有的數字;數據沒有的欄位就寫「—」。用繁體中文。\n" +
+	"嚴格照以下結構輸出:用 emoji 標題與換行分段,不要用 markdown 的 #、*、表格,不要重複整段貼回數據。\n" +
+	"第一行:20 字內的重點摘要當標題(不要標點結尾)。第二行空一行。接著依序:\n" +
+	"🔴 市場偏多/偏空/中性 · 信心 高/中/低(自行判斷方向與信心,擇一)\n" +
+	"① 重點一\n② 重點二\n③ 重點三\n" +
+	"\n📍 關鍵支撐壓力\nBTC 支撐 X / 壓力 Y\nETH 支撐 X / 壓力 Y(數字取自數據的支撐壓力,沒有寫「—」)\n" +
+	"\n📊 經濟數據\n就數據中的經濟數據用 1–3 點判讀:已公布的比較「實際 vs 預期」推論對風險資產偏多或偏空;即將公布的給倒數與觀望提醒。無數據就寫「近期無高影響數據」。\n" +
+	"\n🌐 板塊 / 山寨季\n一句話:領頭與落後板塊、本小時資金轉向、山寨季位置。\n" +
+	"\n👀 接下來注意\n1–3 點:關鍵價位觸發的情境(例如跌破 X → 空間擴大)。\n" +
+	"\n📝 總結:一句話 方向 + 關鍵價 + 該做什麼\n" +
+	"⚠️ 僅提供資訊,不構成投資建議"
 
 // MarketAITick generates the hourly market commentary. Self-gated to once per hour
 // bucket; the first run seeds (shows, no push).
@@ -123,6 +131,29 @@ func (s *Store) marketSnapshot() string {
 	fmt.Fprintf(&b, "美股/宏觀:%s;被帶崩風險 %s\n", riskCN(risk.Risk), orDash(risk.Push.Level))
 	if len(risk.RiskReasons) > 0 {
 		fmt.Fprintf(&b, "風險因素:%s\n", strings.Join(risk.RiskReasons, "、"))
+	}
+	if len(risk.Events) > 0 { // 高影響美國經濟數據(非農/小非農/PPI/CPI…)實際 vs 預期
+		b.WriteString("經濟數據(高影響):")
+		n := 0
+		for _, e := range risk.Events {
+			if n >= 4 {
+				break
+			}
+			if n > 0 {
+				b.WriteString("; ")
+			}
+			if e.Released {
+				fmt.Fprintf(&b, "%s 已公布 實際%s/預期%s/前值%s", e.Title, nz(e.Actual), nz(e.Forecast), nz(e.Previous))
+			} else {
+				cd := e.Countdown
+				if cd == "" {
+					cd = "待定"
+				}
+				fmt.Fprintf(&b, "%s %s後公布 預期%s/前值%s", e.Title, cd, nz(e.Forecast), nz(e.Previous))
+			}
+			n++
+		}
+		b.WriteString("\n")
 	}
 
 	liq := s.Liquidations()
