@@ -36,12 +36,12 @@ func TestNotifyBookRespectsToggle(t *testing.T) {
 		t.Error("force=true 應繞過平倉開關")
 	}
 
-	// 訂單塊 多週期:傳 orderblock_1h/orderblock_4h,開關讀的是合併後的 orderblock
+	// 訂單塊 多週期:傳 orderblock(1h 本身)/orderblock_4h,開關讀的是合併後的 orderblock
 	fam := &Store{stratCfg: map[string]StratCfg{
 		"orderblock": {NotifyOpen: true, NotifyClose: true},
 	}}
-	if !fam.notifyOpenBook("orderblock_1h", tr) {
-		t.Error("orderblock_1h 的開關應併回 orderblock 讀取")
+	if !fam.notifyOpenBook("orderblock", tr) {
+		t.Error("orderblock 的開關應生效")
 	}
 	if !fam.notifyCloseBook("orderblock_4h", tr, time.Now(), false) {
 		t.Error("orderblock_4h 的開關應併回 orderblock 讀取")

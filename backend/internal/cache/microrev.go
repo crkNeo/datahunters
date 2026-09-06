@@ -860,6 +860,16 @@ func (s *Store) SMCMarkTick() {
 		s.microMarkTick(b)
 	}
 }
+func (s *Store) SMCV2Tick() {
+	for _, b := range s.smcV2Books {
+		s.microTick(b)
+	}
+}
+func (s *Store) SMCV2MarkTick() {
+	for _, b := range s.smcV2Books {
+		s.microMarkTick(b)
+	}
+}
 
 func (s *Store) MeanRevMarkTick() { s.microMarkTick(s.meanRevBook) }
 func (s *Store) BollEMAMarkTick() { s.microMarkTick(s.bollEMABook) }
@@ -891,8 +901,12 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
 		s.bollEMABook.mu.Unlock()
-	case "orderblock": // 一個開關清三個週期(15m/1h/4h)
-		for _, b := range s.smcBooks {
+	case "orderblock", "orderblockv2": // 一個開關清兩個週期(1h/4h)
+		books := s.smcBooks
+		if book == "orderblockv2" {
+			books = s.smcV2Books
+		}
+		for _, b := range books {
 			b.mu.Lock()
 			b.trades = keepIf(b.trades, closedOnly)
 			b.mu.Unlock()
@@ -994,3 +1008,4 @@ func (s *Store) PulsarV3State() PaperState { return s.microState(s.pulsarV3Book)
 func (s *Store) PulsarV5State() PaperState { return s.microState(s.pulsarV5Book) }
 func (s *Store) PulsarV6State() PaperState { return s.microState(s.pulsarV6Book) }
 func (s *Store) SMCState() PaperState      { return s.microState(s.smcBooks...) }
+func (s *Store) SMCV2State() PaperState    { return s.microState(s.smcV2Books...) }

@@ -14,6 +14,7 @@
 <script setup>
 import { computed } from 'vue'
 import { fmtPct, fmtPrice, fmtClock, lvlPct, pctOf, outcomeCN, outcomeCls } from '../lib/format'
+import Pager from './Pager.vue'
 
 const props = defineProps({
   // PaperState: { open: [], closed: [], stats: {} }
@@ -117,24 +118,26 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
     </table>
 
     <h3 class="psub" v-if="state && state.closed.length">已結束 ({{ state.closed.length }})</h3>
-    <table v-if="state && state.closed.length" class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
-      <tbody>
-        <tr v-for="(t, i) in state.closed" :key="i" class="clickable" @click="$emit('coin', t.coin)">
-          <td class="coin">{{ t.coin }}</td>
-          <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
-          <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-          <td class="r">{{ fmtPrice(t.entry) }}</td>
-          <td class="r">{{ t.outcome === 'cancel' ? '—' : fmtPrice(t.cur) }}</td>
-          <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ outcomeCN(t.outcome, t.pnl_pct) }}</span></td>
-          <td class="r" :class="t.outcome === 'cancel' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
-            <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
-          </td>
-          <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-          <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <Pager v-if="state && state.closed.length" :items="state.closed" :size="50" v-slot="{ items }">
+      <table class="grid">
+        <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in items" :key="i" class="clickable" @click="$emit('coin', t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ t.outcome === 'cancel' ? '—' : fmtPrice(t.cur) }}</td>
+            <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ outcomeCN(t.outcome, t.pnl_pct) }}</span></td>
+            <td class="r" :class="t.outcome === 'cancel' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
+              <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
+            </td>
+            <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Pager>
 
     <p v-if="state && !state.open.length && !state.closed.length" class="loading">{{ emptyText }}</p>
     <p v-else-if="!state" class="loading">載入中…</p>

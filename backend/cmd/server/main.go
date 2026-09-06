@@ -227,6 +227,7 @@ func main() {
 			store.PulsarV5MarkTick()
 			store.PulsarV6MarkTick()
 			store.SMCMarkTick()
+			store.SMCV2MarkTick()
 		}
 	}()
 
@@ -259,12 +260,14 @@ func main() {
 			store.PulsarV6Tick()
 		}
 	}()
-	// 訂單塊 SMC:LuxAlgo 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h。
+	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。
 	go func() {
 		store.SMCTick()
+		store.SMCV2Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.SMCTick()
+			store.SMCV2Tick()
 		}
 	}()
 

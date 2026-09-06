@@ -152,7 +152,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))       // 脈衝星v3 (ATR + runner)
 	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))       // 脈衝星v5 (= v1, 固定% TP)
 	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))       // 脈衝星v6 (v3 + 確認棒)
-	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock)) // 訂單塊 SMC (斐波四段, 15m/1h/4h)
+	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
+	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
@@ -739,6 +740,10 @@ func (s *Server) handlePulsarV6(w http.ResponseWriter, r *http.Request) {
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.
 func (s *Server) handleOrderBlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SMCState())
+}
+
+func (s *Server) handleOrderBlockV2(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SMCV2State())
 }
 
 // handleSRMTF serves the 多週期支壓 (1H+4H 支撐壓力提示) board.

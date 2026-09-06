@@ -226,14 +226,26 @@ func extractOB(cs []exchange.Candle, parsedHigh, parsedLow []float64, from, to, 
 // 這是無狀態訊號:每根收盤都從 K 線重算 fib(含 re-anchor),接 microrev 掛單框架 —— 位置到 +
 // 型態成立就進場。分批四段止盈交給 smcFibTPLevels + stepTP。
 const (
-	smcFibEntryLo     = 0.142 // 進場區下界(靠訂單塊那側)
-	smcFibEntryHi     = 0.382 // 進場區上界
+	smcFibEntryLo     = 0.142 // 訂單塊(v1)進場區下界(靠訂單塊那側)
+	smcFibEntryHi     = 0.382 // 訂單塊(v1)進場區上界
+	smcFibV2EntryLo   = 0.0   // 訂單塊v2 進場區下界(更深,貼近訂單塊邊緣)
+	smcFibV2EntryHi   = 0.236 // 訂單塊v2 進場區上界
 	smcFibSL          = 0.13  // 止損:fib-0.13
-	smcFibFinalTP     = 2.0   // 最終目標:fib2.0
+	smcFibFinalTP     = 1.618 // 最終目標:fib1.618(三段止盈 0.618 / 1.13 / 1.618)
 	smcFibMaxRangePct = 10.0  // 斐波 0→1 距離(r/fib0)上限%;超過代表波段過大、目標過度延伸 → 不進場
 )
 
-func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+// smcFibSignal(v1)進場區 0.142–0.382;smcFibSignalV2 進場區 0–0.236(更深),其餘完全相同
+// (同樣要影線落在區間 + 頭槌/射擊之星反轉型態、同 TP/SL)。
+func smcFibSignal(cs []exchange.Candle) (string, float64, float64, float64, bool) {
+	return smcFibSignalZone(cs, smcFibEntryLo, smcFibEntryHi)
+}
+
+func smcFibSignalV2(cs []exchange.Candle) (string, float64, float64, float64, bool) {
+	return smcFibSignalZone(cs, smcFibV2EntryLo, smcFibV2EntryHi)
+}
+
+func smcFibSignalZone(cs []exchange.Candle, entryLo, entryHi float64) (dir string, entry, sl, tp float64, ok bool) {
 	n := len(cs)
 	if n < obSwingSize+5 {
 		return
@@ -280,8 +292,8 @@ func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok b
 		if r/fib0*100 > smcFibMaxRangePct { // 斐波 0→1 距離 >10% → 波段過大,不進場
 			return
 		}
-		zoneLo := fib0 + smcFibEntryLo*r
-		zoneHi := fib0 + smcFibEntryHi*r
+		zoneLo := fib0 + entryLo*r
+		zoneHi := fib0 + entryHi*r
 		if last.Low < zoneLo || last.Low > zoneHi { // 頭槌低點要落在回撤區
 			return
 		}
@@ -309,8 +321,8 @@ func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok b
 	if r/fib0*100 > smcFibMaxRangePct { // 斐波 0→1 距離 >10% → 波段過大,不進場
 		return
 	}
-	zoneHi := fib0 - smcFibEntryLo*r
-	zoneLo := fib0 - smcFibEntryHi*r
+	zoneHi := fib0 - entryLo*r
+	zoneLo := fib0 - entryHi*r
 	if last.High > zoneHi || last.High < zoneLo { // 射擊之星高點要落在回撤區
 		return
 	}
@@ -323,16 +335,17 @@ func smcFibSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok b
 	return "short", entry, sl, tp, true
 }
 
-// smcFibTPLevels 從 sl(fib-0.13)與 finalTP(fib2.0)還原斐波格,回傳三個分批位
-// TP1=fib1.0、TP2=fib1.382、TP3=fib1.618。tr.TP 維持 finalTP(fib2.0)= 第四段。
+// smcFibTPLevels 從 sl(fib-0.13)與 finalTP(fib1.618)還原斐波格,回傳分批位
+// TP1=fib0.618、TP2=fib1.13、TP3=0(不用第三段,tr.TP=finalTP=fib1.618 就是最終段)。
+// 三段止盈 0.618 / 1.13 / 1.618,分批 40/30/30 由 stratDefaults 驅動。
 func smcFibTPLevels(entry, sl, finalTP float64) (tp1, tp2, tp3 float64) {
-	if finalTP > entry { // 多:sl=fib0-0.13r、finalTP=fib0+2r → finalTP-sl=2.13r
+	if finalTP > entry { // 多:sl=fib0-0.13r、finalTP=fib0+1.618r → finalTP-sl=1.748r
 		r := (finalTP - sl) / (smcFibFinalTP + smcFibSL)
 		fib0 := sl + smcFibSL*r
-		return roundPx(fib0 + 1.0*r), roundPx(fib0 + 1.382*r), roundPx(fib0 + 1.618*r)
+		return roundPx(fib0 + 0.618*r), roundPx(fib0 + 1.13*r), 0
 	}
-	// 空:sl=fib0+0.13r、finalTP=fib0-2r → sl-finalTP=2.13r
+	// 空:sl=fib0+0.13r、finalTP=fib0-1.618r → sl-finalTP=1.748r
 	r := (sl - finalTP) / (smcFibFinalTP + smcFibSL)
 	fib0 := sl - smcFibSL*r
-	return roundPx(fib0 - 1.0*r), roundPx(fib0 - 1.382*r), roundPx(fib0 - 1.618*r)
+	return roundPx(fib0 - 0.618*r), roundPx(fib0 - 1.13*r), 0
 }

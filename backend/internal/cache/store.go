@@ -140,7 +140,8 @@ type Store struct {
 	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV5Book *microBook   // 脈衝星v5:= v1,但固定百分比止盈 5%/10%/15% (microrev.go)
 	pulsarV6Book *microBook   // 脈衝星v6:v3 + 確認棒進場(濾掉一進場就秒回調的假突破)(microrev.go)
-	smcBooks     []*microBook // 訂單塊:LuxAlgo SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星進場,四段套保;15m/1h/4h 三週期同頁 (orderblock.go)
+	smcBooks     []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
+	smcV2Books   []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -264,10 +265,15 @@ func NewStore(coins []string) *Store {
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
 	// 訂單塊 SMC:15m/1h/4h 三週期同頁。無逾時(expiry:0)—— 掛單型,位置到 + 型態成立才進場。
+	// 訂單塊(v1):進場區 0.142-0.382,1h/4h 兩週期(已去掉 15m)。
 	s.smcBooks = []*microBook{
-		{name: "orderblock", tf: "15m", barSec: 900, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
-		{name: "orderblock_1h", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
+		{name: "orderblock", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
 		{name: "orderblock_4h", tf: "4h", barSec: 14400, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
+	}
+	// 訂單塊v2:進場區 0-0.236(更深),其餘同 v1;1h/4h。
+	s.smcV2Books = []*microBook{
+		{name: "orderblockv2", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblockv2", tfTag: true, signal: smcFibSignalV2, tpLevels4: smcFibTPLevels},
+		{name: "orderblockv2_4h", tf: "4h", barSec: 14400, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblockv2", tfTag: true, signal: smcFibSignalV2, tpLevels4: smcFibTPLevels},
 	}
 	if s.notifier.Enabled() {
 		log.Printf("telegram alerts: enabled")
@@ -290,6 +296,9 @@ func NewStore(coins []string) *Store {
 		s.pulsarV5Book.trades = db.loadTrades("pulsarv5")
 		s.pulsarV6Book.trades = db.loadTrades("pulsarv6")
 		for _, b := range s.smcBooks {
+			b.trades = db.loadTrades(b.name)
+		}
+		for _, b := range s.smcV2Books {
 			b.trades = db.loadTrades(b.name)
 		}
 		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",

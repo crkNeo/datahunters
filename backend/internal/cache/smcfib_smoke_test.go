@@ -66,17 +66,27 @@ func TestSMCFibLongSetup(t *testing.T) {
 	if r/fib0*100 > smcFibMaxRangePct {
 		t.Errorf("斐波 0→1 距離應 ≤10%%,got %.2f%%", r/fib0*100)
 	}
-	// 四段 TP:tp1=fib1.0、tp2=fib1.382、tp3=fib1.618、tp(final)=fib2.0
+	// 三段 TP:tp1=fib0.618、tp2=fib1.13、tp3=0(不用)、tp(final)=fib1.618
 	tp1, tp2, tp3 := smcFibTPLevels(entry, sl, tp)
-	wantTP1 := fib0 + 1.0*r
-	wantTP2 := fib0 + 1.382*r
-	wantTP3 := fib0 + 1.618*r
-	t.Logf("四段 TP: TP1=%.2f TP2=%.2f TP3=%.2f TP4(final)=%.2f", tp1, tp2, tp3, tp)
-	if math.Abs(tp1-wantTP1) > 0.5 || math.Abs(tp2-wantTP2) > 0.5 || math.Abs(tp3-wantTP3) > 0.5 {
-		t.Errorf("四段 TP 還原不符: got %.2f/%.2f/%.2f want %.2f/%.2f/%.2f", tp1, tp2, tp3, wantTP1, wantTP2, wantTP3)
+	wantTP1 := fib0 + 0.618*r
+	wantTP2 := fib0 + 1.13*r
+	t.Logf("三段 TP: TP1=%.2f TP2=%.2f TP3=%.2f(0=不用) 最終=%.2f", tp1, tp2, tp3, tp)
+	if math.Abs(tp1-wantTP1) > 0.5 || math.Abs(tp2-wantTP2) > 0.5 || tp3 != 0 {
+		t.Errorf("三段 TP 還原不符: got %.2f/%.2f/%.2f want %.2f/%.2f/0", tp1, tp2, tp3, wantTP1, wantTP2)
 	}
-	if !(sl < entry && entry < tp1 && tp1 < tp2 && tp2 < tp3 && tp3 < tp) {
-		t.Errorf("價位順序不對: sl=%.2f entry=%.2f tp1=%.2f tp2=%.2f tp3=%.2f tp=%.2f", sl, entry, tp1, tp2, tp3, tp)
+	if !(sl < entry && tp1 < tp2 && tp2 < tp) { // 進場價可能落在 tp1 附近,不強制 entry<tp1
+		t.Errorf("價位順序不對: sl=%.2f entry=%.2f tp1=%.2f tp2=%.2f final=%.2f", sl, entry, tp1, tp2, tp)
+	}
+}
+
+// 訂單塊v2:進場區更深(0–0.236)。用同一組資料,頭槌低點 101.5 需落在 [100, 100+0.236r] 內
+// 才會進場;此處驗證 v2 wrapper 走同一套幾何(zone 換成 0–0.236)。
+func TestSMCFibV2Zone(t *testing.T) {
+	// obLow=100、fib1≈106.5、r≈6.5 → v2 進場區 [100, 101.53]。頭槌低點需 ≤101.53。
+	cs := smcLongFixture(100)
+	// smcLongFixture 的頭槌低點是 101.5,落在 v2 區間內,應進場。
+	if _, _, _, _, ok := smcFibSignalV2(cs); !ok {
+		t.Fatalf("v2(0–0.236)應進場(頭槌低點 101.5 在區間內)")
 	}
 }
 

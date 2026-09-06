@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "pulsar", "pulsarv3", "pulsarv5", "pulsarv6", "orderblock"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "pulsar", "pulsarv3", "pulsarv5", "pulsarv6", "orderblock", "orderblockv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -96,7 +96,10 @@ var stratDefaults = map[string]StratCfg{
 	"pulsarv6": {Tags: []string{"爆量", "埋伏", "多單", "確認棒"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
 	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
-	"orderblock": {Tags: []string{"SMC", "訂單塊", "斐波", "多空"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 25, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
+	// 訂單塊(v1):三段斐波止盈 0.618/1.13/1.618,分批 40/30/30,止損 fib−0.13;進場區 0.142-0.382;1h/4h。
+	"orderblock": {Tags: []string{"SMC", "訂單塊", "斐波", "多空"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
+	// 訂單塊v2:同 v1,進場區改 0-0.236(更深)。
+	"orderblockv2": {Tags: []string{"SMC", "訂單塊", "斐波", "多空", "深回撤"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 }
 
 // StrategyState is one strategy's row for the admin UI: on/off + editable config.
@@ -354,8 +357,10 @@ func (s *Store) beCueFor(name string, bookDefault float64) float64 {
 // share one key, so notifications and config resolve to the same strategy.
 func stratKeyOf(book string) string {
 	switch book {
-	case "orderblock_1h", "orderblock_4h": // 訂單塊 的 1h/4h 週期併回主 key
+	case "orderblock_4h": // 訂單塊 的 4h 週期併回主 key(1h 週期的 book 名就是 orderblock)
 		return "orderblock"
+	case "orderblockv2_4h": // 訂單塊v2 的 4h 週期併回主 key
+		return "orderblockv2"
 	}
 	return book
 }
@@ -468,8 +473,12 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV6Book.mu.Lock()
 		done = closeIn(s.pulsarV6Book.trades)
 		s.pulsarV6Book.mu.Unlock()
-	case "orderblock": // 三週期都找(15m/1h/4h)
-		for _, b := range s.smcBooks {
+	case "orderblock", "orderblockv2": // 兩週期都找(1h/4h)
+		books := s.smcBooks
+		if book == "orderblockv2" {
+			books = s.smcV2Books
+		}
+		for _, b := range books {
 			b.mu.Lock()
 			if tr := closeIn(b.trades); tr != nil {
 				done, dbBook = tr, b.name

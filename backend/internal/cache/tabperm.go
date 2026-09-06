@@ -45,7 +45,7 @@ var tabMeta = []struct {
 	{"articles", "文章專欄", "public", false},
 	// 會員
 	{"oi", "OI 儀表板", "member", false},
-	{"signals", "量化訊號", "member", false},
+	{"signals", "多空推薦", "member", false},
 	{"radar", "爆發雷達", "member", false},
 	{"scorelog", "訊號紀錄", "member", false},
 	// VIP
@@ -57,13 +57,14 @@ var tabMeta = []struct {
 	// 策略觀察書(預設管理員,可視需要開放給 VIP)
 	{"meanrev", "火星", "admin", false},
 	{"bollema", "海王星", "admin", false},
-	{"srmtf", "錘頭/射擊星", "admin", false},
+	{"srmtf", "反轉訊號", "admin", false},
 	{"surge", "爆量脈搏", "admin", false},
 	{"pulsar", "脈衝星", "admin", false},
 	{"pulsarv3", "脈衝星v3", "admin", false},
 	{"pulsarv5", "脈衝星v5", "admin", false},
 	{"pulsarv6", "脈衝星v6", "admin", false},
 	{"orderblock", "訂單塊", "admin", false},
+	{"orderblockv2", "訂單塊v2", "admin", false},
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -80,7 +81,7 @@ var tabDefaultKind = map[string]string{
 	"meanrev": "signal", "bollema": "signal",
 	"srmtf": "signal",
 	"surge": "signal", "pulsar": "signal", "pulsarv3": "signal", "pulsarv5": "signal",
-	"pulsarv6": "signal", "orderblock": "signal",
+	"pulsarv6": "signal", "orderblock": "signal", "orderblockv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -250,7 +251,7 @@ var tabOfRoute = map[string]string{
 	"/api/admin/meanrev": "meanrev", "/api/admin/bollema": "bollema",
 	"/api/srmtf":       "srmtf",
 	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3", "/api/pulsarv5": "pulsarv5",
-	"/api/pulsarv6": "pulsarv6", "/api/orderblock": "orderblock",
+	"/api/pulsarv6": "pulsarv6", "/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

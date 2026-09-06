@@ -15,6 +15,7 @@ import { fmtPct, fmtPrice, fmtNum, fundClock, fmtClock, lvlPct, pctOf, outcomeCl
 import { socialInfo, socialSvg } from './lib/social'
 import SectorBoard from './components/SectorBoard.vue'
 import StrategyBook from './components/StrategyBook.vue'
+import Pager from './components/Pager.vue'
 import FundingBoard from './components/FundingBoard.vue'
 import UnlockBoard from './components/UnlockBoard.vue'
 import LiquidationBoard from './components/LiquidationBoard.vue'
@@ -719,6 +720,15 @@ async function loadOrderBlock() {
     /* secondary */
   }
 }
+const orderblockv2 = ref(null)
+async function loadOrderBlockV2() {
+  try {
+    const res = await authFetch('/api/orderblockv2')
+    if (res.ok) orderblockv2.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 // 爆量脈搏面板(全市場相對爆量斥候,純觀察)
 const surge = ref(null)
 const surgeSort = ref('surge_x')
@@ -784,8 +794,12 @@ const microMeta = {
     help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
   },
   orderblock: {
-    title: '訂單塊 · SMC 斐波四段 · 15m / 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
-    help: '<b>SMC 訂單塊 + 斐波回撤策略 · 多空都做</b>。用 LuxAlgo「Smart Money Concepts」的<b>訂單塊</b>(內部 5 根 + swing 50 根)當供需區,從波段極值拉斐波,埋伏回撤到訂單塊的低吸/高空。<br><b>三個週期同頁</b>:<b>15m / 4H / 1H</b>各自獨立掃描持倉,列表以「<b>週期</b>」欄分類。<br><br><b>【斐波幾何】</b>做多:<b>fib0 = 訂單塊下緣</b>、<b>fib1 = 訂單塊之後的最高高點</b>(自動 re-anchor:出新高就把 fib1 移過去,fib0 不動)。做空對稱(fib0 = 訂單塊上緣、fib1 = 之後最低低點)。<br><b>【進場】</b>價格回撤進 <b>0.142–0.382</b> 區間(靠近訂單塊)+ 收出<b>頭槌</b>(多)/<b>射擊之星</b>(空)→ 收盤進場。像掛單:每根收盤重算斐波、位置到 + 型態成立才進。<b>暫無逾時</b>。<br><b>【距離過濾】</b>若<b>斐波 0→1 的距離(fib0→fib1)超過 10%</b>(相對 fib0)→ 波段過大、fib2.0 目標過度延伸,<b>不進場</b>。<br><b>【止損】</b>fib <b>−0.13</b>(訂單塊外側緩衝)。<br><b>【止盈:四段沿路套保】</b><b>TP1 = fib1.0</b>(平 25%→止損移保本)、<b>TP2 = fib1.382</b>(平 25%→移 TP1)、<b>TP3 = fib1.618</b>(平 25%→移 TP2)、<b>最終 = fib2.0</b>(平剩 25%)。冷卻 4 根。<br><br>⚠️ 觀察用書,預設靜默、不接實盤。管理員專屬模擬單,非投資建議。',
+    title: '訂單塊 · SMC 斐波 · 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
+    help: '<b>SMC 訂單塊 + 斐波回撤策略 · 多空都做</b>。用「Smart Money Concepts」的<b>訂單塊</b>(內部 5 根 + swing 50 根)當供需區,從波段極值拉斐波,埋伏回撤到訂單塊的低吸/高空。<br><b>兩個週期同頁</b>:<b>1H / 4H</b>各自獨立掃描持倉,列表以「<b>週期</b>」欄分類。<br><br><b>【斐波幾何】</b>做多:<b>fib0 = 訂單塊下緣</b>、<b>fib1 = 訂單塊之後的最高高點</b>(自動 re-anchor:出新高就把 fib1 移過去,fib0 不動)。做空對稱(fib0 = 訂單塊上緣、fib1 = 之後最低低點)。<br><b>【進場】</b>價格回撤進 <b>0.142–0.382</b> 區間(靠近訂單塊)+ 收出<b>頭槌</b>(多)/<b>射擊之星</b>(空)→ 收盤進場。<b>暫無逾時</b>。<br><b>【距離過濾】</b>若<b>斐波 0→1 距離超過 10%</b> → 波段過大,<b>不進場</b>。<br><b>【止損】</b>fib <b>−0.13</b>(訂單塊外側緩衝)。<br><b>【止盈:三段沿路套保】</b><b>TP1 = fib0.618</b>(平 40%→止損移保本)、<b>TP2 = fib1.13</b>(平 30%→移 TP1)、<b>最終 = fib1.618</b>(平剩 30%)。冷卻 4 根。<br><br>⚠️ 觀察用書,預設靜默、不接實盤。管理員專屬模擬單,非投資建議。',
+  },
+  orderblockv2: {
+    title: '訂單塊v2 · 深回撤 0–0.236 · 1h / 4h', load: loadOrderBlockV2, get: () => orderblockv2.value,
+    help: '<b>訂單塊v2 = 訂單塊的深回撤版 · 多空都做</b>。斐波幾何、止盈止損、距離過濾<b>與訂單塊完全相同</b>,唯一差別是<b>進場區更深</b>。<br><b>兩個週期同頁</b>:<b>1H / 4H</b>。<br><br><b>【進場】</b>價格回撤進 <b>0–0.236</b> 區間(<b>更貼近訂單塊邊緣</b>,比 v1 的 0.142–0.382 更深)+ 收出<b>頭槌</b>(多)/<b>射擊之星</b>(空)反轉型態 → 收盤進場。<br><b>【止損】</b>fib <b>−0.13</b>。<br><b>【止盈:三段沿路套保】</b>TP1 = fib0.618(平 40%→保本)、TP2 = fib1.13(平 30%→移 TP1)、最終 = fib1.618(平剩 30%)。冷卻 4 根。<br><br>⚠️ 觀察用書,預設靜默、不接實盤。管理員專屬模擬單,非投資建議。',
   },
 }
 const micro = computed(() => microMeta[mainTab.value] || null)
@@ -849,20 +863,19 @@ async function exportCSV() {
 const timeWin = ref(0) // ms; 0 = all
 const timePresets = [
   { label: '全部', ms: 0 },
-  { label: '近1h', ms: 3600e3 },
-  { label: '近6h', ms: 6 * 3600e3 },
-  { label: '近24h', ms: 24 * 3600e3 },
-  { label: '近3天', ms: 3 * 24 * 3600e3 },
-  { label: '近7天', ms: 7 * 24 * 3600e3 },
+  { label: '1h', ms: 3600e3 },
+  { label: '24h', ms: 24 * 3600e3 },
+  { label: '3日', ms: 3 * 24 * 3600e3 },
+  { label: '7日', ms: 7 * 24 * 3600e3 },
 ]
 function withinWin(iso) {
   if (!timeWin.value || !iso) return true
   return Date.now() - new Date(iso).getTime() <= timeWin.value
 }
 const scoreLogF = computed(() => scoreLog.value.filter((e) => withinWin(e.time)))
-// book filtered by time window, with stats recomputed over the filtered set
-const bookF = computed(() => {
-  const b = book.value
+// filterBook:把一個策略 state(open/closed/stats)依時間窗過濾,並重算統計。
+// 給紙上策略頁(bookF)、冥王星(convF)、微策略(microF)共用,確保「統計依所選範圍重算」。
+function filterBook(b) {
   if (!b) return null
   const open = (b.open || []).filter((t) => withinWin(t.open_time))
   const closed = (b.closed || []).filter((t) => withinWin(t.close_time))
@@ -878,6 +891,7 @@ const bookF = computed(() => {
   return {
     open,
     closed,
+    market: b.market, // 銀河的大盤方向等附加欄位帶著走
     stats: {
       closed: n,
       wins,
@@ -890,7 +904,10 @@ const bookF = computed(() => {
       tp1, tp2, tp3,
     },
   }
-})
+}
+const bookF = computed(() => filterBook(book.value))
+const convF = computed(() => filterBook(conv.value))
+const microF = computed(() => filterBook(microState.value))
 
 const scoreLog = ref([])
 async function loadScoreLog() {
@@ -1236,6 +1253,7 @@ function loadAll() {
   if (canTab('pulsarv5')) loadPulsarV5()
   if (canTab('pulsarv6')) loadPulsarV6()
   if (canTab('orderblock')) loadOrderBlock()
+  if (canTab('orderblockv2')) loadOrderBlockV2()
   if (canTab('surge')) loadSurge()
   if (canTab('srmtf')) loadSRMTF()
   // 純管理功能:不在標籤權限的管轄範圍(tabMeta 裡是 locked),維持身分判斷
@@ -1309,7 +1327,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1320,7 +1338,8 @@ const router = useRouter()
 let syncing = false // 防止兩個 watch 互相觸發成迴圈
 
 watch(() => route.params.tab, (t) => {
-  const next = ROUTE_TABS.includes(t) ? t : 'ranking'
+  let next = ROUTE_TABS.includes(t) ? t : 'ranking'
+  if (next === 'scorelog') next = 'signals' // 訊號紀錄已併入「多空推薦」
   if (next === mainTab.value) return
   syncing = true
   mainTab.value = next
@@ -1457,7 +1476,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', gamble: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip',
-  meanrev: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv3: 'admin', pulsarv5: 'admin', pulsarv6: 'admin', orderblock: 'admin', srmtf: 'admin',
+  meanrev: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv3: 'admin', pulsarv5: 'admin', pulsarv6: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1490,7 +1509,7 @@ const NAV_GROUPS = computed(() => {
   const slots = []
   for (const [tier, tl] of NAV_TIERS) {
     slots.push([`${tier}:info`, `${tl}·資訊`])
-    slots.push([`${tier}:signal`, `${tl}·訊號`])
+    slots.push([`${tier}:signal`, tier === 'vip' ? 'VIP策略' : `${tl}·訊號`])
   }
   slots.push(['admin:*', '管理'])
   return slots
@@ -1499,7 +1518,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  meanrev: 'signal', bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv5: 'signal', pulsarv6: 'signal', orderblock: 'signal', srmtf: 'signal',
+  meanrev: 'signal', bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv5: 'signal', pulsarv6: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1507,7 +1526,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'srmtf',
+  'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -1997,11 +2016,8 @@ watch([role, tabPerms, authReady], () => {
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
           <button v-if="inGroup('oi', grp[0])" :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
-          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'">
-            數據訊號<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
-          </button>
-          <button v-if="inGroup('scorelog', grp[0])" :class="{ active: mainTab === 'scorelog' }" @click="mainTab = 'scorelog'">
-            訊號紀錄<em v-if="scoreLog.length" class="navbadge">{{ scoreLog.length }}</em>
+          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'; loadScoreLog()">
+            多空推薦<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
           </button>
           <button v-if="inGroup('radar', grp[0])" :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
           <button v-if="inGroup('paper', grp[0])" :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
@@ -2047,7 +2063,10 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock' }" @click="mainTab = 'orderblock'; loadOrderBlock()">
             訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em>
           </button>
-          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">錘頭/射擊星</button>
+          <button v-if="inGroup('orderblockv2', grp[0])" :class="{ active: mainTab === 'orderblockv2' }" @click="mainTab = 'orderblockv2'; loadOrderBlockV2()">
+            訂單塊v2<em v-if="orderblockv2 && orderblockv2.open.length" class="navbadge">{{ orderblockv2.open.length }}</em>
+          </button>
+          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">反轉訊號</button>
         </div>
       </div>
       </template>
@@ -2119,7 +2138,7 @@ watch([role, tabPerms, authReady], () => {
     <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
       <div class="mk-head">
-        <h2>錘頭/射擊星<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒型態</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘頭線(做多)</b>:實體很小、下影線明顯較長(遠大於實體)且絕對主導上影線(即使帶一點點上影線仍算)、且當根 low < 前 10 根最低(局部低點)。<br><b>射擊星(做空)</b>:實體很小、上影線明顯較長且絕對主導下影線、且當根 high > 前 10 根最高(局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <h2>反轉訊號<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒反轉型態(錘頭/射擊星)</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘頭線(做多)</b>:實體很小、下影線明顯較長(遠大於實體)且絕對主導上影線(即使帶一點點上影線仍算)、且當根 low < 前 10 根最低(局部低點)。<br><b>射擊星(做空)</b>:實體很小、上影線明顯較長且絕對主導下影線、且當根 high > 前 10 根最高(局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="srmtf && srmtf.hits">最近 {{ srmtf.hits.length }} 筆 · 1H/4H 收盤掃描</span>
       </div>
 
@@ -2179,10 +2198,11 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="mainTab === 'conv' && canTab('conv')">
       <div class="mk-head">
         <h2>冥王星<span class="help" tabindex="0">?<span class="help-pop">‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }} · 已結束 {{ conv.stats.closed }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="convF">進行中 {{ convF.open.length }} · 已結束 {{ convF.stats.closed }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
+      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
       <StrategyBook
-        :state="conv"
+        :state="convF"
         :risky="stratRisky('conv')"
         :tags="stratTagsOf('conv')"
         :stats-order="['type', 'win', 'avg', 'total']"
@@ -2197,11 +2217,12 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }} · 已結束 {{ microState.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="microF">進行中 {{ microF.open.length }} · 已結束 {{ microF.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
+      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
 
       <StrategyBook
-        :state="microState"
+        :state="microF"
         :risky="stratRisky(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
@@ -2400,10 +2421,10 @@ watch([role, tabPerms, authReady], () => {
       </table>
     </section>
 
-    <!-- 數據訊號 (actionable entries) -->
+    <!-- 多空推薦 = 數據訊號(上)+ 訊號紀錄(下)合併 -->
     <section v-else-if="mainTab === 'signals'">
       <div class="mk-head">
-        <h2>數據訊號</h2>
+        <h2>多空推薦</h2>
         <span class="mk-count">{{ signals.length }} 個可進場訊號（評分 ≥ 20 / ≤ −20）<template v-if="regimeFilter"> · 順 BTC 趨勢</template><template v-if="qualityFilter"> · OI 收縮</template></span>
       </div>
       <table v-if="signals.length" class="grid">
@@ -2431,6 +2452,28 @@ watch([role, tabPerms, authReady], () => {
         </tbody>
       </table>
       <p v-else class="empty">目前無確定可進場的訊號（沒有任何幣種評分達到 ±20）</p>
+
+      <!-- 訊號紀錄(併入本頁下方)-->
+      <div class="mk-head" style="margin-top:20px">
+        <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。資料持久保存,重啟不流失。</span></span></h2>
+        <span class="mk-count">評分跨過 ±20 的時間點 · 符合範圍 {{ scoreLogF.length }} / 全部 {{ scoreLog.length }} 筆</span>
+      </div>
+      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
+      <Pager v-if="scoreLogF.length" :items="scoreLogF" :size="50" v-slot="{ items }">
+        <table class="grid">
+          <thead><tr><th>時間</th><th>幣種</th><th>方向</th><th class="r">評分</th><th class="r">當時價格</th></tr></thead>
+          <tbody>
+            <tr v-for="(e, i) in items" :key="i" class="clickable" @click="openDetail(e.coin)">
+              <td class="tsmall">{{ fmtClock(e.time) }}</td>
+              <td class="coin">{{ e.coin }}</td>
+              <td><span class="dir" :class="e.bias === 'long' ? 'long' : 'short'">{{ e.bias === 'long' ? '做多' : '做空' }}</span></td>
+              <td class="r" :class="['score', e.bias === 'long' ? 'long' : 'short']">{{ e.score }}</td>
+              <td class="r">{{ fmtPrice(e.price) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </Pager>
+      <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
     </section>
 
     <!-- 爆發雷達 (breakout radar, small coins included) -->
@@ -2478,30 +2521,6 @@ watch([role, tabPerms, authReady], () => {
 
     <!-- 訊號追蹤 (paper-trading from radar signals) -->
     <!-- 訊號紀錄 (when score crossed ±20) -->
-    <section v-else-if="mainTab === 'scorelog'">
-      <div class="mk-head">
-        <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。資料持久保存,重啟不流失。</span></span></h2>
-        <span class="mk-count">每次評分跨過 ±20(進入做多/做空)的時間點 · 顯示 {{ scoreLogF.length }} / {{ scoreLog.length }} 筆</span>
-      </div>
-      <div class="timefilter">
-        <span class="tf-label">時間範圍</span>
-        <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
-      </div>
-      <table v-if="scoreLogF.length" class="grid">
-        <thead><tr><th>時間</th><th>幣種</th><th>方向</th><th class="r">評分</th><th class="r">當時價格</th></tr></thead>
-        <tbody>
-          <tr v-for="(e, i) in scoreLogF" :key="i" class="clickable" @click="openDetail(e.coin)">
-            <td class="tsmall">{{ fmtClock(e.time) }}</td>
-            <td class="coin">{{ e.coin }}</td>
-            <td><span class="dir" :class="e.bias === 'long' ? 'long' : 'short'">{{ e.bias === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r" :class="['score', e.bias === 'long' ? 'long' : 'short']">{{ e.score }}</td>
-            <td class="r">{{ fmtPrice(e.price) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
-    </section>
-
     <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
       <div class="mk-head">
         <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
@@ -2565,24 +2584,26 @@ watch([role, tabPerms, authReady], () => {
       <p v-else-if="bookF" class="empty">此範圍內無進行中的模擬部位</p>
 
       <h3 class="psub" v-if="bookF && bookF.closed.length">已結束 ({{ bookF.closed.length }})</h3>
-      <table v-if="bookF && bookF.closed.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
-        <tbody>
-          <tr v-for="(t, i) in bookF.closed" :key="t.coin + i" class="clickable" @click="openDetail(t.coin)">
-            <td class="coin">{{ t.coin }}</td>
-            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-            <td class="r">{{ fmtPrice(t.entry) }}</td>
-            <td class="r">{{ fmtPrice(t.cur) }}</td>
-            <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ convOutcome(t.outcome, t.pnl_pct) }}</span></td>
-            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-            <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-            <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
-            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-            <td class="r">{{ fmtDur(holdMs(t)) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <Pager v-if="bookF && bookF.closed.length" :items="bookF.closed" :size="50" v-slot="{ items }">
+        <table class="grid">
+          <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
+          <tbody>
+            <tr v-for="(t, i) in items" :key="t.coin + i" class="clickable" @click="openDetail(t.coin)">
+              <td class="coin">{{ t.coin }}</td>
+              <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+              <td class="r">{{ fmtPrice(t.entry) }}</td>
+              <td class="r">{{ fmtPrice(t.cur) }}</td>
+              <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ convOutcome(t.outcome, t.pnl_pct) }}</span></td>
+              <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+              <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+              <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
+              <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+              <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+              <td class="r">{{ fmtDur(holdMs(t)) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </Pager>
       <p v-else-if="bookF" class="empty">此範圍內尚無已結束的模擬交易</p>
     </section>
 
