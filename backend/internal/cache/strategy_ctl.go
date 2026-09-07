@@ -126,6 +126,16 @@ func (s *Store) loadStratOff() {
 	s.stratMu.Unlock()
 }
 
+// IsStrategy 回報 key 是否為已知策略(給 DB 分頁 API 白名單用)。
+func IsStrategy(key string) bool {
+	for _, n := range allStrategies {
+		if n == key {
+			return true
+		}
+	}
+	return false
+}
+
 // StrategyEnabled reports whether a strategy may open new trades.
 func (s *Store) StrategyEnabled(name string) bool {
 	s.stratMu.RLock()

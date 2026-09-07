@@ -130,7 +130,7 @@ type MarketBias struct {
 const (
 	paperMaxOpen   = 15
 	paperExpiry    = 24 * time.Hour
-	paperKeepClose = 500 // in-memory cap (full history still in MySQL)
+	paperKeepClose = 500 // in-memory cap(即時 state 用);完整歷史走 DB 分頁 (strathistory.go)
 )
 
 // paperBook is one simulated-trading account with its own entry rules. The main

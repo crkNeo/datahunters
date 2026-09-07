@@ -15,7 +15,7 @@ import { fmtPct, fmtPrice, fmtNum, fundClock, fmtClock, lvlPct, pctOf, outcomeCl
 import { socialInfo, socialSvg } from './lib/social'
 import SectorBoard from './components/SectorBoard.vue'
 import StrategyBook from './components/StrategyBook.vue'
-import Pager from './components/Pager.vue'
+import PageNav from './components/PageNav.vue'
 import FundingBoard from './components/FundingBoard.vue'
 import UnlockBoard from './components/UnlockBoard.vue'
 import LiquidationBoard from './components/LiquidationBoard.vue'
@@ -906,8 +906,33 @@ function filterBook(b) {
   }
 }
 const bookF = computed(() => filterBook(book.value))
-const convF = computed(() => filterBook(conv.value))
-const microF = computed(() => filterBook(microState.value))
+
+// ---- 策略「已結束」+ 訊號紀錄:後端 DB 分頁(全歷史、依時間窗、統計於全篩選集聚合)----
+const emptyStats = { closed: 0, win_rate: 0, avg_pnl: 0, total_pnl: 0, tp1: 0, tp2: 0, tp3: 0, multi_tp: false }
+// 星軌/超新星/銀河(paperBook)的已結束歷史
+const paperHist = ref({ rows: [], total: 0, pages: 1, page: 1, stats: { ...emptyStats } })
+const paperPage = ref(1)
+async function fetchPaperHist() {
+  const b = curPaperBook.value
+  if (!b) return
+  try {
+    const res = await authFetch(`/api/strat-history?book=${b}&win=${timeWin.value || 0}&page=${paperPage.value}&size=50`)
+    if (res.ok) paperHist.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+watch([curPaperBook, timeWin], () => { paperPage.value = 1; fetchPaperHist() })
+watch(paperPage, fetchPaperHist)
+// 訊號紀錄(score_events)的歷史
+const scoreHist = ref({ rows: [], total: 0, pages: 1, page: 1 })
+const scorePage = ref(1)
+async function fetchScoreHist() {
+  try {
+    const res = await authFetch(`/api/scorelog-history?win=${timeWin.value || 0}&page=${scorePage.value}&size=50`)
+    if (res.ok) scoreHist.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+watch(timeWin, () => { scorePage.value = 1; fetchScoreHist() })
+watch(scorePage, fetchScoreHist)
 
 const scoreLog = ref([])
 async function loadScoreLog() {
@@ -1240,9 +1265,9 @@ function loadAll() {
   // 後端每個端點都有 gateTab 把關,所以這裡多打一次不會洩漏資料,最多就是拿到 403。
   if (canTab('oi')) loadBoard()
   if (canTab('radar')) loadRadar()
-  if (canTab('scorelog')) loadScoreLog()
+  if (canTab('signals')) fetchScoreHist()
   // 星軌/超新星/銀河 共用 /api/paper(靠 curPaperBook 切換),任一個看得到就要載
-  if (canTab('paper') || canTab('gamble') || canTab('emaonly')) loadPaper()
+  if (canTab('paper') || canTab('gamble') || canTab('emaonly')) { loadPaper(); fetchPaperHist() }
   if (canTab('sr')) loadSR()
   if (canTab('conv')) loadConv()
   // 這四個的端點路徑是 /api/admin/* (歷史名稱),但權限同樣由 gateTab 決定
@@ -2016,7 +2041,7 @@ watch([role, tabPerms, authReady], () => {
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
           <button v-if="inGroup('oi', grp[0])" :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
-          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'; loadScoreLog()">
+          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'; fetchScoreHist()">
             多空推薦<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
           </button>
           <button v-if="inGroup('radar', grp[0])" :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
@@ -2198,11 +2223,13 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="mainTab === 'conv' && canTab('conv')">
       <div class="mk-head">
         <h2>冥王星<span class="help" tabindex="0">?<span class="help-pop">‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="convF">進行中 {{ convF.open.length }} · 已結束 {{ convF.stats.closed }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
       <StrategyBook
-        :state="convF"
+        :state="conv"
+        :book="'conv'"
+        :win="timeWin"
         :risky="stratRisky('conv')"
         :tags="stratTagsOf('conv')"
         :stats-order="['type', 'win', 'avg', 'total']"
@@ -2217,12 +2244,14 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="microF">進行中 {{ microF.open.length }} · 已結束 {{ microF.stats.closed }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
 
       <StrategyBook
-        :state="microF"
+        :state="microState"
+        :book="curStrat"
+        :win="timeWin"
         :risky="stratRisky(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
@@ -2456,24 +2485,23 @@ watch([role, tabPerms, authReady], () => {
       <!-- 訊號紀錄(併入本頁下方)-->
       <div class="mk-head" style="margin-top:20px">
         <h2>訊號紀錄<span class="help" tabindex="0">?<span class="help-pop">每當追蹤幣種的評分從 &lt;20 跨到 ≥20(或 ≤−20)就記錄當下的時間與價格,方便你回去對照那個時間點的線圖。資料持久保存,重啟不流失。</span></span></h2>
-        <span class="mk-count">評分跨過 ±20 的時間點 · 符合範圍 {{ scoreLogF.length }} / 全部 {{ scoreLog.length }} 筆</span>
+        <span class="mk-count">評分跨過 ±20 的時間點 · 共 {{ scoreHist.total }} 筆(此範圍)</span>
       </div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
-      <Pager v-if="scoreLogF.length" :items="scoreLogF" :size="50" v-slot="{ items }">
-        <table class="grid">
-          <thead><tr><th>時間</th><th>幣種</th><th>方向</th><th class="r">評分</th><th class="r">當時價格</th></tr></thead>
-          <tbody>
-            <tr v-for="(e, i) in items" :key="i" class="clickable" @click="openDetail(e.coin)">
-              <td class="tsmall">{{ fmtClock(e.time) }}</td>
-              <td class="coin">{{ e.coin }}</td>
-              <td><span class="dir" :class="e.bias === 'long' ? 'long' : 'short'">{{ e.bias === 'long' ? '做多' : '做空' }}</span></td>
-              <td class="r" :class="['score', e.bias === 'long' ? 'long' : 'short']">{{ e.score }}</td>
-              <td class="r">{{ fmtPrice(e.price) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </Pager>
-      <p v-else class="empty">{{ scoreLog.length ? '此時間範圍內無紀錄' : '尚無紀錄（剛啟動需等有幣種評分跨過 ±20）' }}</p>
+      <table v-if="scoreHist.rows.length" class="grid">
+        <thead><tr><th>時間</th><th>幣種</th><th>方向</th><th class="r">評分</th><th class="r">當時價格</th></tr></thead>
+        <tbody>
+          <tr v-for="(e, i) in scoreHist.rows" :key="i" class="clickable" @click="openDetail(e.coin)">
+            <td class="tsmall">{{ fmtClock(e.time) }}</td>
+            <td class="coin">{{ e.coin }}</td>
+            <td><span class="dir" :class="e.bias === 'long' ? 'long' : 'short'">{{ e.bias === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r" :class="['score', e.bias === 'long' ? 'long' : 'short']">{{ e.score }}</td>
+            <td class="r">{{ fmtPrice(e.price) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <PageNav :page="scoreHist.page" :pages="scoreHist.pages" :total="scoreHist.total" @go="(p) => (scorePage = p)" />
+      <p v-if="!scoreHist.total" class="empty">此範圍內尚無訊號紀錄（剛啟動需等有幣種評分跨過 ±20）</p>
     </section>
 
     <!-- 爆發雷達 (breakout radar, small coins included) -->
@@ -2545,15 +2573,15 @@ watch([role, tabPerms, authReady], () => {
       <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
-        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="bookF.stats.win_rate >= 50 ? 'long' : 'short'">{{ bookF.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="bookF.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.avg_pnl) }}</div></div>
-        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="bookF.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(bookF.stats.total_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="paperHist.stats.win_rate >= 50 ? 'long' : 'short'">{{ paperHist.stats.win_rate }}%</div></div>
+        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="paperHist.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(paperHist.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="paperHist.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(paperHist.stats.total_pnl) }}</div></div>
       </div>
-      <div v-if="bookF && bookF.stats.multi_tp && bookF.stats.closed" class="tpfunnel">
-        <div class="tpf-title">止盈達成漏斗 · 共 {{ bookF.stats.closed }} 筆已結束</div>
-        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp1, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp1 }} 筆 · <b>{{ pctOf(bookF.stats.tp1, bookF.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp2, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp2 }} 筆 · <b>{{ pctOf(bookF.stats.tp2, bookF.stats.closed) }}%</b></span></div>
-        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(bookF.stats.tp3, bookF.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ bookF.stats.tp3 }} 筆 · <b>{{ pctOf(bookF.stats.tp3, bookF.stats.closed) }}%</b></span></div>
+      <div v-if="paperHist.stats.multi_tp && paperHist.stats.closed" class="tpfunnel">
+        <div class="tpf-title">止盈達成漏斗 · 共 {{ paperHist.stats.closed }} 筆已結束</div>
+        <div class="tpf-row"><span class="tpf-lbl">TP1 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(paperHist.stats.tp1, paperHist.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ paperHist.stats.tp1 }} 筆 · <b>{{ pctOf(paperHist.stats.tp1, paperHist.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP2 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(paperHist.stats.tp2, paperHist.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ paperHist.stats.tp2 }} 筆 · <b>{{ pctOf(paperHist.stats.tp2, paperHist.stats.closed) }}%</b></span></div>
+        <div class="tpf-row"><span class="tpf-lbl">TP3 達成</span><span class="tpf-bar"><i :style="{ width: pctOf(paperHist.stats.tp3, paperHist.stats.closed) + '%' }"></i></span><span class="tpf-val">{{ paperHist.stats.tp3 }} 筆 · <b>{{ pctOf(paperHist.stats.tp3, paperHist.stats.closed) }}%</b></span></div>
       </div>
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
@@ -2583,28 +2611,27 @@ watch([role, tabPerms, authReady], () => {
       </table>
       <p v-else-if="bookF" class="empty">此範圍內無進行中的模擬部位</p>
 
-      <h3 class="psub" v-if="bookF && bookF.closed.length">已結束 ({{ bookF.closed.length }})</h3>
-      <Pager v-if="bookF && bookF.closed.length" :items="bookF.closed" :size="50" v-slot="{ items }">
-        <table class="grid">
-          <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
-          <tbody>
-            <tr v-for="(t, i) in items" :key="t.coin + i" class="clickable" @click="openDetail(t.coin)">
-              <td class="coin">{{ t.coin }}</td>
-              <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
-              <td class="r">{{ fmtPrice(t.entry) }}</td>
-              <td class="r">{{ fmtPrice(t.cur) }}</td>
-              <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ convOutcome(t.outcome, t.pnl_pct) }}</span></td>
-              <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
-              <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-              <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
-              <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
-              <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
-              <td class="r">{{ fmtDur(holdMs(t)) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </Pager>
-      <p v-else-if="bookF" class="empty">此範圍內尚無已結束的模擬交易</p>
+      <h3 class="psub" v-if="paperHist.total">已結束 ({{ paperHist.total }})</h3>
+      <table v-if="paperHist.rows.length" class="grid">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in paperHist.rows" :key="t.coin + i" class="clickable" @click="openDetail(t.coin)">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r">{{ fmtPrice(t.entry) }}</td>
+            <td class="r">{{ fmtPrice(t.cur) }}</td>
+            <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ convOutcome(t.outcome, t.pnl_pct) }}</span></td>
+            <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
+            <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+            <td class="r tsmall">{{ fmtFund(t.funding) }}</td>
+            <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
+            <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
+            <td class="r">{{ fmtDur(holdMs(t)) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <PageNav :page="paperHist.page" :pages="paperHist.pages" :total="paperHist.total" @go="(p) => (paperPage = p)" />
+      <p v-if="bookF && !paperHist.total" class="empty">此範圍內尚無已結束的模擬交易</p>
     </section>
 
     <!-- 財經事件 (high-impact US economic calendar) -->
