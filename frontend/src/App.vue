@@ -2906,55 +2906,6 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
   .topbar{ flex-wrap:wrap; }
 }
 
-/* ============ optimize Phase 2:黑金表面 skin(全域,只動視覺屬性)============ */
-.card, .chart-card{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); }
-.grid th{ color:var(--c-mut); border-bottom:1px solid var(--c-line2); font-family:var(--f-disp);
-  font-size:10.5px; letter-spacing:1px; text-transform:uppercase; }
-.grid td{ border-bottom:1px solid var(--c-line); }
-.grid tbody tr:hover td{ background:var(--c-surf2); }
-.long{ color:var(--c-up); } .short{ color:var(--c-dn); }
-
-/* 頂欄控制項 */
-.tk{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-md); }
-.search{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); color:var(--c-mut2); }
-.regbtn{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-sm); color:var(--c-mut); }
-.regbtn.on{ color:var(--c-gold-b); border-color:var(--c-gold-d); background:var(--c-gold-soft); }
-.regbtn.login{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; font-weight:700; }
-.userchip{ background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:var(--r-md); }
-.userchip em{ font-family:var(--f-disp); color:var(--c-gold); }
-
-/* 大盤方向 chips */
-.mkt-chip{ border:1px solid var(--c-line); background:var(--c-bg2); border-radius:var(--r-sm); }
-.mkt-chip.long{ border-color:rgba(55,214,138,.4); } .mkt-chip.short{ border-color:rgba(255,92,108,.4); }
-
-/* 整點分析 */
-.mai-live{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); }
-.mai-live-title{ font-family:var(--f-disp); }
-.mai-dot{ background:var(--c-gold); box-shadow:0 0 8px var(--c-gold); }
-.mai-live-summary{ font-family:var(--f-disp); }
-
-/* 推薦列 */
-.rec-head{ font-family:var(--f-disp); }
-.rec-row{ border:1px solid var(--c-line); background:var(--c-bg2); border-radius:var(--r-sm); }
-.rec-row.featured{ border-color:var(--c-gold-d); }
-.bars .bar{ background:#262b3a; border-radius:2px; }
-.bars .bar.long{ background:var(--c-up); } .bars .bar.short{ background:var(--c-dn); }
-.qtag.hq{ background:rgba(232,184,75,.16); color:var(--c-gold-b); }
-.qtag.good{ background:var(--c-up-bg); color:var(--c-up); }
-
-/* 山寨季 */
-.gauge-title{ font-family:var(--f-disp); } .gauge-label{ font-family:var(--f-disp); }
-
-/* 分頁 / 篩選鈕 */
-.timefilter button, .sorttabs button{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-sm); color:var(--c-mut); }
-.timefilter button.on, .sorttabs button.active{ color:#161206; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); border-color:var(--c-gold); font-weight:700; }
-.navbadge{ background:var(--c-gold-soft); color:var(--c-gold); }
-
-/* 彈窗 / 表單 */
-.authcard, .refbox, .welcomebox, .authmodal{ background:var(--c-surf); border:1px solid var(--c-line2); border-radius:var(--r-xl); }
-.authin{ background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:var(--r-md); color:var(--c-txt); }
-.authbtn{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; border-radius:12px; font-weight:700; font-family:var(--f-disp); }
-.toast{ border-radius:var(--r-md); font-weight:600; }
 /* logo watermark: fixed, centred, low-opacity — shows through page gaps, never over card content */
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
@@ -3839,4 +3790,47 @@ footer { padding: 18px 0 30px; text-align: center; }
 .cfg-ico { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-flex;
   align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 15px; }
 .cfg-ico svg { width: 17px; height: 17px; display: block; }
+</style>
+
+<!-- ============ optimize:黑金表面 skin(置於檔尾,確保覆蓋原生規則)============ -->
+<style>
+.card, .chart-card{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); }
+.grid th{ color:var(--c-mut); border-bottom:1px solid var(--c-line2); font-family:var(--f-disp);
+  font-size:10.5px; letter-spacing:1px; text-transform:uppercase; }
+.grid td{ border-bottom:1px solid var(--c-line); }
+.grid tbody tr:hover td{ background:var(--c-surf2); }
+.long{ color:var(--c-up); } .short{ color:var(--c-dn); }
+/* 頂欄控制項 */
+.tk{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-md); }
+.search{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); }
+.regbtn{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-sm); color:var(--c-mut); }
+.regbtn.on{ color:var(--c-gold-b); border-color:var(--c-gold-d); background:var(--c-gold-soft); }
+.regbtn.login{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; font-weight:700; }
+.userchip{ background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:var(--r-md); }
+.userchip em{ font-family:var(--f-disp); color:var(--c-gold); }
+/* 大盤方向 */
+.mkt-chip{ border:1px solid var(--c-line); background:var(--c-bg2); border-radius:var(--r-sm); }
+.mkt-chip.long{ border-color:rgba(55,214,138,.4); } .mkt-chip.short{ border-color:rgba(255,92,108,.4); }
+/* 整點分析 */
+.mai-live{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); }
+.mai-live-title, .mai-live-summary{ font-family:var(--f-disp); }
+.mai-dot{ background:var(--c-gold); box-shadow:0 0 8px var(--c-gold); }
+/* 推薦列 */
+.rec-head{ font-family:var(--f-disp); }
+.rec-row{ border:1px solid var(--c-line); background:var(--c-bg2); border-radius:var(--r-sm); }
+.rec-row.featured{ border-color:var(--c-gold-d); }
+.bars .bar.long{ background:var(--c-up); } .bars .bar.short{ background:var(--c-dn); }
+.qtag.hq{ background:rgba(232,184,75,.16); color:var(--c-gold-b); }
+.qtag.good{ background:var(--c-up-bg); color:var(--c-up); }
+/* 山寨季 */
+.gauge-title, .gauge-label{ font-family:var(--f-disp); }
+/* 分頁 / 篩選鈕 */
+.timefilter button, .sorttabs button{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-sm); color:var(--c-mut); }
+.timefilter button.on, .sorttabs button.active{ color:#161206; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); border-color:var(--c-gold); font-weight:700; }
+.navbadge{ background:var(--c-gold-soft); color:var(--c-gold); }
+/* 彈窗 / 表單 */
+.authcard, .refbox, .welcomebox, .authmodal{ background:var(--c-surf); border:1px solid var(--c-line2); border-radius:var(--r-xl); }
+.authin{ background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:var(--r-md); color:var(--c-txt); }
+.authbtn{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; border-radius:12px; font-weight:700; font-family:var(--f-disp); }
+.toast{ border-radius:var(--r-md); font-weight:600; }
 </style>
