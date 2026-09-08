@@ -1,0 +1,57 @@
+/* =============================================================
+   數據看板 · 黑金設計 token(optimize 改版)
+   純變數 + 字體宣告,不覆寫既有樣式;新版外殼/元件一律用這裡的變數。
+   ============================================================= */
+:root{
+  /* 底色 / 表面 */
+  --c-bg:#0a0b0f;
+  --c-bg2:#0e1016;
+  --c-surf:#14161d;
+  --c-surf2:#1a1d26;
+  --c-line:#252a35;
+  --c-line2:#333947;
+
+  /* 金 */
+  --c-gold:#e8b84b;
+  --c-gold-b:#f0c968;
+  --c-gold-d:#856727;
+  --c-gold-soft:rgba(232,184,75,.1);
+
+  /* 文字 */
+  --c-txt:#eef1f6;
+  --c-mut:#949bad;
+  --c-mut2:#5f6678;
+
+  /* 語意:漲綠跌紅 */
+  --c-up:#37d68a;
+  --c-dn:#ff5c6c;
+  --c-up-bg:rgba(55,214,138,.12);
+  --c-dn-bg:rgba(255,92,108,.12);
+  --c-steel:#7fb0ff;
+  --c-steel-bg:rgba(88,150,255,.14);
+
+  /* 字體 */
+  --f-disp:"Chakra Petch",system-ui,sans-serif;   /* 標題 / 數字強調 */
+  --f-body:"IBM Plex Sans","Noto Sans TC",system-ui,sans-serif; /* 內文 */
+  --f-mono:"IBM Plex Mono",ui-monospace,monospace; /* 價格 / 數據 */
+
+  /* 間距節奏 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+
+  /* 圓角 */
+  --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px;
+
+  /* 陰影 */
+  --shadow:0 18px 40px -20px rgba(0,0,0,.7);
+
+  /* 響應式斷點(手機 ≤768 / 平板 769–1024 / 桌機 ≥1025)*/
+  --bp-mobile:768px;
+  --bp-tablet:1024px;
+
+  /* 側欄 / 抽屜 */
+  --side-w:232px;
+  --drawer-w:280px;
+}
+
+/* 數字對齊:任何用等寬字的地方都吃到 tabular-nums */
+.mono,[class*="mono"]{font-variant-numeric:tabular-nums}
