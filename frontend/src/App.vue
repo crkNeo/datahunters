@@ -1200,14 +1200,18 @@ const detail = ref(null)
 const detailCoin = ref('')
 const detailLoading = ref(false)
 const detailError = ref('')
+// 免費牆:非會員/非 VIP 開幣種明細,後端回 401/403 —— 不當成錯誤,改顯示「解鎖」面板。
+const detailLocked = ref(false)
 
 async function openDetail(coin) {
   detailCoin.value = coin
   detail.value = null
   detailError.value = ''
+  detailLocked.value = false
   detailLoading.value = true
   try {
     const res = await authFetch('/api/coin/' + coin)
+    if (res.status === 401 || res.status === 403) { detailLocked.value = true; return }
     if (!res.ok) throw new Error('HTTP ' + res.status)
     detail.value = await res.json()
   } catch (e) {
@@ -1219,6 +1223,13 @@ async function openDetail(coin) {
 function closeDetail() {
   detailCoin.value = ''
   detail.value = null
+  detailLocked.value = false
+}
+// 免費牆 CTA:公開身分先登入;已登入(會員)則導向「我的推廣」內的申請 VIP。
+function unlockDetail() {
+  closeDetail()
+  if (role.value === 'public') loginOpen.value = true
+  else openReferral()
 }
 const ratingDots = computed(() => {
   const r = detail.value ? detail.value.rating : 0
@@ -2784,6 +2795,25 @@ watch([role, tabPerms, authReady], () => {
     <aside class="drawer" @click.stop>
       <button class="close" @click="closeDetail">✕</button>
       <p v-if="detailLoading" class="loading">載入 {{ detailCoin }} 詳情…</p>
+      <!-- 免費牆:被鎖時顯示解鎖面板(不假造點位,只示意被鎖區塊 + 導向登入/VIP) -->
+      <div v-else-if="detailLocked" class="lockwall">
+        <div class="lw-top">
+          <span class="lw-coin">{{ detailCoin }}</span>
+          <span class="lw-tag">🔒 VIP 內容</span>
+        </div>
+        <div class="lw-body">
+          <div class="lw-fog" aria-hidden="true">
+            <div class="lw-line" v-for="n in 6" :key="n"><i></i><i></i><i></i></div>
+          </div>
+          <div class="lw-panel">
+            <div class="lw-lock">🔒</div>
+            <div class="lw-title">完整評分依據 · 進出場點位 · 相關幣種</div>
+            <div class="lw-sub">此幣種的完整分析為 {{ role === 'public' ? '會員 / VIP' : 'VIP' }} 內容</div>
+            <button class="lw-cta" @click="unlockDetail">{{ role === 'public' ? '登入解鎖' : '加入 VIP 解鎖' }}</button>
+            <div class="lw-note">公開版僅提供數據與分數,不含進場/止盈止損點位 · ⚠️ 非投資建議</div>
+          </div>
+        </div>
+      </div>
       <p v-else-if="detailError" class="err">{{ detailError }}</p>
       <template v-else-if="detail">
         <section class="card rationale" :class="biasClass(detail.bias)">
@@ -3917,4 +3947,29 @@ footer { padding: 18px 0 30px; text-align: center; }
 .cmp-empty{ padding:18px; text-align:center; color:var(--c-mut); font-size:12.5px; border:1px dashed var(--c-line2); border-radius:var(--r-md); margin:8px 0 4px; }
 @media (max-width:1024px){ .topgrid{ grid-template-columns:1fr; } }
 @media (max-width:768px){ .rrows{ grid-template-columns:1fr; } }
+</style>
+
+<!-- ============ optimize:幣種明細免費牆(非會員/VIP 的解鎖面板,取代裸 403)============ -->
+<style>
+.lockwall{ display:flex; flex-direction:column; }
+.lw-top{ display:flex; align-items:center; gap:10px; margin:2px 0 14px; }
+.lw-coin{ font-family:var(--f-disp); font-weight:700; font-size:22px; letter-spacing:.5px; }
+.lw-tag{ font-family:var(--f-mono); font-size:11px; color:var(--c-gold-b); background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:6px; padding:2px 8px; }
+.lw-body{ position:relative; }
+/* 被鎖區塊的示意骨架 —— 模糊處理,不含任何真實數值 */
+.lw-fog{ display:flex; flex-direction:column; gap:15px; padding:20px; min-height:260px; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-lg); filter:blur(3px); opacity:.45; pointer-events:none; user-select:none; }
+.lw-line{ display:flex; gap:10px; }
+.lw-line i{ height:13px; border-radius:4px; background:linear-gradient(90deg,var(--c-line2),var(--c-surf2)); }
+.lw-line i:nth-child(1){ flex:2; } .lw-line i:nth-child(2){ flex:3; } .lw-line i:nth-child(3){ flex:1.2; }
+/* 解鎖面板 —— 疊在模糊骨架之上、置中 */
+.lw-panel{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:10px; padding:20px;
+  background:radial-gradient(120% 80% at 50% 45%, rgba(10,11,15,.78), rgba(10,11,15,.55)); border-radius:var(--r-lg); }
+.lw-lock{ font-size:30px; filter:drop-shadow(0 0 12px rgba(232,184,75,.5)); }
+.lw-title{ font-family:var(--f-disp); font-weight:700; font-size:14px; color:var(--c-txt); }
+.lw-sub{ font-size:12.5px; color:var(--c-mut); }
+.lw-cta{ margin-top:6px; padding:9px 22px; border:none; border-radius:10px; cursor:pointer;
+  background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold-d)); color:#161206; font-family:var(--f-disp); font-weight:700; font-size:13.5px; letter-spacing:.5px;
+  box-shadow:0 0 18px -4px rgba(232,184,75,.5); }
+.lw-cta:hover{ filter:brightness(1.08); }
+.lw-note{ margin-top:4px; font-size:10.5px; color:var(--c-mut2); max-width:280px; line-height:1.6; }
 </style>
