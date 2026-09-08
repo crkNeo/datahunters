@@ -1086,12 +1086,8 @@ const boardRows = computed(() => {
   return rows
 })
 
-// ---- BTC regime filter (backtest: counter-BTC-trend signals lose money) ----
-const regimeFilter = ref(localStorage.getItem('regimeFilter') !== '0')
-function toggleRegime() {
-  regimeFilter.value = !regimeFilter.value
-  localStorage.setItem('regimeFilter', regimeFilter.value ? '1' : '0')
-}
+// ---- BTC regime filter —— 已依需求停用:一律不過濾(保留 ref 與判斷式相容既有邏輯)----
+const regimeFilter = ref(false)
 const btcChg = computed(() => (home.value ? home.value.ticker.BTC.chg : 0))
 const btcRegime = computed(() => (btcChg.value > 0 ? 'long' : btcChg.value < 0 ? 'short' : 'neutral'))
 function regimeAllows(bias) {
@@ -1105,11 +1101,7 @@ const marketDir = computed(() => (home.value ? home.value.market_dir : null))
 const dirTxt = (d) => (d === 'long' ? '看漲 ▲' : d === 'short' ? '看跌 ▼' : '中性 —')
 // ---- OI-contraction quality gate (OOS-validated: signals fire best while OI
 // is contracting = exhaustion/unwind, not while new money is piling in) ----
-const qualityFilter = ref(localStorage.getItem('qualityFilter') !== '0')
-function toggleQuality() {
-  qualityFilter.value = !qualityFilter.value
-  localStorage.setItem('qualityFilter', qualityFilter.value ? '1' : '0')
-}
+const qualityFilter = ref(false) // 已依需求停用:一律不過濾
 const boardOf = (coin) => board.value[coin] || null
 function oiContracting(r) {
   return !!r && r.oi_chg_1h < 0
@@ -1645,18 +1637,11 @@ watch([role, tabPerms, authReady], () => {
       <span class="tk"><b>ETH</b> {{ fmtPrice(home.ticker.ETH.price) }}
         <em :class="home.ticker.ETH.chg >= 0 ? 'long' : 'short'">{{ fmtPct(home.ticker.ETH.chg) }}</em></span>
     </div>
-    <div class="search">🔍 搜尋幣種…</div>
     <div class="topmeta">
       <span v-if="error" class="err">{{ error }}</span>
       <span v-if="home" class="regime">BTC 趨勢
         <b :class="btcRegime">{{ btcRegime === 'long' ? '偏多' : btcRegime === 'short' ? '偏空' : '中性' }}</b>
       </span>
-      <button class="regbtn" :class="{ on: regimeFilter }" @click="toggleRegime" title="只保留順 BTC 趨勢的方向訊號(回測有效)">
-        順勢過濾 {{ regimeFilter ? '✓' : '✕' }}
-      </button>
-      <button class="regbtn" :class="{ on: qualityFilter }" @click="toggleQuality" title="只保留 OI 收縮(衰竭/平倉)時的訊號;樣本外驗證有效">
-        OI收縮過濾 {{ qualityFilter ? '✓' : '✕' }}
-      </button>
       <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openAccount" title="個人中心">{{ username }}</button> <em>{{ role }}</em>
         <em v-if="regTime" class="regdate" title="註冊時間">註冊 {{ fmtRegDate(regTime) }}</em>
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
