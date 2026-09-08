@@ -29,6 +29,10 @@ const sectorRows = computed(() => {
   else rows.sort((a, b) => (sectorVw.value ? b.vw_chg - a.vw_chg : b.avg_chg - a.avg_chg))
   return rows
 })
+// 強弱長條(依 mock):寬度 ∝ 該板塊平均漲跌相對本批最大絕對值
+const chgOf = (r) => (sectorVw.value ? r.vw_chg : r.avg_chg)
+const secMaxAbs = computed(() => Math.max(0.01, ...sectorRows.value.map((r) => Math.abs(chgOf(r)))))
+const secBarW = (r) => Math.max(6, Math.round(Math.abs(chgOf(r)) / secMaxAbs.value * 100))
 
 // 不用 AI 的固定結論句:領頭 / 落後 / 本小時輪動。
 // 領頭與落後跟著「等權/量權」切換,才會與表格一致。
@@ -73,11 +77,12 @@ defineExpose({ load })
     <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = true" title="用成交量加權(大市值主導)">量權</button>
   </div>
   <table v-if="sectorRows.length" class="grid">
-    <thead><tr><th>板塊</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
+    <thead><tr><th>板塊</th><th class="sec-strength">強弱</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
     <tbody>
       <template v-for="r in sectorRows" :key="r.sector">
         <tr class="clickable" @click="sectorOpen = sectorOpen === r.sector ? '' : r.sector">
           <td class="coin">{{ sectorOpen === r.sector ? '▾' : '▸' }} {{ r.sector }}</td>
+          <td class="sec-strength"><span class="secbar"><i :class="chgOf(r) >= 0 ? 'pos' : 'neg'" :style="{ width: secBarW(r) + '%' }"></i></span></td>
           <td class="r" :class="(sectorVw ? r.vw_chg : r.avg_chg) >= 0 ? 'long' : 'short'"><b>{{ fmtPct(sectorVw ? r.vw_chg : r.avg_chg) }}</b></td>
           <td class="r" :class="r.vs_btc >= 0 ? 'long' : 'short'">{{ fmtPct(r.vs_btc) }}</td>
           <td class="r tsmall">{{ r.breadth }}%</td>
@@ -85,7 +90,7 @@ defineExpose({ load })
           <td class="r tsmall">{{ r.count }}</td>
         </tr>
         <tr v-if="sectorOpen === r.sector" class="sec-detail">
-          <td colspan="6">
+          <td colspan="7">
             <span class="sec-detail-lbl">板塊成員(24h 由強到弱):</span>
             <span v-for="c in r.coins" :key="c.coin" class="sec-chip" :class="c.chg >= 0 ? 'up' : 'down'">{{ c.coin }} {{ fmtPct(c.chg) }}</span>
           </td>
@@ -96,3 +101,13 @@ defineExpose({ load })
   <p v-else class="loading">計算板塊強弱中…(每整點更新;首個整點後建立)</p>
 </section>
 </template>
+
+<style scoped>
+/* 強弱長條(依 mock:綠正紅負,寬度 ∝ 相對強度)*/
+.sec-strength { width: 22%; min-width: 90px; }
+.secbar { display: block; height: 8px; border-radius: 5px; background: var(--c-surf2); overflow: hidden; }
+.secbar i { display: block; height: 100%; border-radius: 5px; }
+.secbar i.pos { background: linear-gradient(90deg, rgba(55,214,138,.5), var(--c-up)); }
+.secbar i.neg { background: linear-gradient(90deg, var(--c-dn), rgba(255,92,108,.5)); }
+@media (max-width: 768px) { .sec-strength { display: none; } }
+</style>
