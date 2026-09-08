@@ -32,7 +32,7 @@ const boardUpdated = ref('')
 const error = ref('')
 let timer = null
 
-const mainTab = ref('ranking')
+const mainTab = ref('home') // 'home' = 總覽(戰場/大盤方向/推薦/gauge/策略榜);其餘為各分頁
 const marketSort = ref('vol') // vol | gainers | losers
 
 // ---- auth (public web build) ----
@@ -1393,7 +1393,7 @@ const router = useRouter()
 let syncing = false // 防止兩個 watch 互相觸發成迴圈
 
 watch(() => route.params.tab, (t) => {
-  let next = ROUTE_TABS.includes(t) ? t : 'ranking'
+  let next = ROUTE_TABS.includes(t) ? t : 'home' // 根路徑 / = 總覽(home)
   if (next === 'scorelog') next = 'signals' // 訊號紀錄已併入「多空推薦」
   if (next === mainTab.value) return
   syncing = true
@@ -1403,7 +1403,7 @@ watch(() => route.params.tab, (t) => {
 
 watch(mainTab, (t) => {
   if (syncing) return
-  const path = t === 'ranking' ? '/' : '/' + t
+  const path = t === 'home' ? '/' : '/' + t
   if (route.path !== path) router.push(path)
 })
 let onVisibility = null
@@ -1915,8 +1915,8 @@ watch([role, tabPerms, authReady], () => {
     <span class="dd-act">{{ risk.push.action }}</span>
   </div>
 
-  <!-- 美股/風險背景燈 (always-visible strip) -->
-  <div v-if="risk && risk.items.length" class="riskbar" :class="risk.risk">
+  <!-- 美股/風險背景燈:只在「總覽」顯示(子頁不再重複整條市場列)-->
+  <div v-if="risk && risk.items.length && mainTab === 'home'" class="riskbar" :class="risk.risk">
     <span class="rb-light" :class="risk.risk">●</span>
     <span class="rb-tag">美股風險:{{ riskLabel(risk.risk) }}</span>
     <span class="rb-items">
@@ -1940,6 +1940,8 @@ watch([role, tabPerms, authReady], () => {
   </div>
 
   <div class="wrap">
+    <!-- 總覽:整區只在「總覽」分頁顯示,不再常駐每個子頁上方(側欄為 fixed,不影響此內容流)-->
+    <template v-if="mainTab === 'home'">
     <!-- optimize:首頁依 mock(homeA2opt)重排 —— ROW1 大盤方向 | 多空推薦 top-3 -->
     <div class="topgrid" v-if="marketDir || home">
       <!-- 大盤方向:BTC/ETH 1h EMA;兩者同向才明確(策略可在後台開「大盤過濾」順此方向進場) -->
@@ -2055,9 +2057,16 @@ watch([role, tabPerms, authReady], () => {
       <div v-else class="cmp-empty">今日尚無已平倉的策略訊號 · 各策略完整明細與進行中訊號請見左側「VIP · 策略」分頁</div>
       <p class="bt-note">僅計今日已平倉訊號 · 依你的層級顯示可見策略 · ⚠️ 非投資建議</p>
     </section>
+    </template>
+    <!-- /總覽 -->
 
     <!-- nav -->
     <nav class="mainnav" :class="{ 'side-open': sideOpen }" @click="sideOpen = false">
+      <!-- 總覽:固定在最上面,不走身分分組;點它回到市場總覽頁 -->
+      <div class="navrow">
+        <span class="navgroup">首頁</span>
+        <div class="navbtns"><button :class="{ active: mainTab === 'home' }" @click="mainTab = 'home'">總覽</button></div>
+      </div>
       <!-- 分組是動態的:每顆鈕出現在「它自己被設定的身分組」那一列(inGroup),
            所以後台把某頁調成 VIP,它就會從公開列移到 VIP 列。整列空了連標題一起收掉。
            四列都會走完整份按鈕清單,只是各自只顯示屬於自己那組的 —— 這樣按鈕的
