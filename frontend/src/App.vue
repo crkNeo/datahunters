@@ -1911,8 +1911,39 @@ watch([role, tabPerms, authReady], () => {
   </div>
 
   <div class="wrap">
-    <!-- 戰場: BTC 多空交戰(自給自足元件,自己連 WS、自己起停動畫) -->
-    <BattleField />
+    <!-- optimize:多空交戰 + 山寨季指數 並排(8:2)-->
+    <div class="home-hero">
+      <BattleField />
+      <section class="card gauge" v-if="home">
+        <div class="gauge-title">山寨季指數</div>
+        <svg viewBox="0 0 200 120" class="gsvg">
+          <path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="#23262d" stroke-width="14" stroke-linecap="round" />
+          <path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="url(#gg)" stroke-width="14" stroke-linecap="round"
+            :stroke-dasharray="251.2" :stroke-dashoffset="251.2 * (1 - (home.alt_season.value / 100))" />
+          <defs>
+            <linearGradient id="gg" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#ff5c5c" />
+              <stop offset="50%" stop-color="#e0b341" />
+              <stop offset="100%" stop-color="#2ec26b" />
+            </linearGradient>
+          </defs>
+          <line x1="100" y1="110" x2="100" y2="42" stroke="#e8eaed" stroke-width="3" stroke-linecap="round"
+            :transform="`rotate(${gaugeNeedle} 100 110)`" />
+          <circle cx="100" cy="110" r="6" fill="#e8eaed" />
+        </svg>
+        <div class="gauge-val">{{ home.alt_season.value }}</div>
+        <div class="gauge-label" :class="gaugeLabelClass">{{ home.alt_season.label }}</div>
+        <div class="gauge-prev" v-if="home.alt_season.prev">
+          昨日 {{ home.alt_season.prev }}
+          <em :class="home.alt_season.value - home.alt_season.prev >= 0 ? 'long' : 'short'">
+            ({{ home.alt_season.value - home.alt_season.prev >= 0 ? '+' : '' }}{{ home.alt_season.value - home.alt_season.prev }})
+          </em>
+        </div>
+        <div class="gauge-zones">
+          <span class="short">BTC季</span><span>偏BTC</span><span class="neutral">中性</span><span>偏山寨</span><span class="long">山寨季</span>
+        </div>
+      </section>
+    </div>
 
     <!-- 大盤方向:BTC/ETH 1h EMA;兩者同向才明確(策略可在後台開「大盤過濾」順此方向進場) -->
     <div v-if="marketDir" class="mkt-bias mkt-home">
@@ -1938,8 +1969,8 @@ watch([role, tabPerms, authReady], () => {
       <div class="mai-live-body">{{ maiBody }}</div>
     </div>
 
-    <!-- three cards -->
-    <div class="cards" v-if="home">
+    <!-- optimize:做多 / 做空 並排(5:5)-->
+    <div class="cards recs2" v-if="home">
       <!-- 做多推薦 -->
       <section class="card rec">
         <div class="rec-head"><span class="led long"></span>做多推薦</div>
@@ -1982,36 +2013,6 @@ watch([role, tabPerms, authReady], () => {
         <p v-if="!filteredShortRecs.length" class="empty">{{ regimeFilter && btcChg > 0 ? 'BTC 偏多 · 已過濾做空訊號' : '目前無做空訊號' }}</p>
       </section>
 
-      <!-- 山寨季指數 -->
-      <section class="card gauge">
-        <div class="gauge-title">山寨季指數</div>
-        <svg viewBox="0 0 200 120" class="gsvg">
-          <path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="#23262d" stroke-width="14" stroke-linecap="round" />
-          <path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="url(#gg)" stroke-width="14" stroke-linecap="round"
-            :stroke-dasharray="251.2" :stroke-dashoffset="251.2 * (1 - (home.alt_season.value / 100))" />
-          <defs>
-            <linearGradient id="gg" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#ff5c5c" />
-              <stop offset="50%" stop-color="#e0b341" />
-              <stop offset="100%" stop-color="#2ec26b" />
-            </linearGradient>
-          </defs>
-          <line x1="100" y1="110" x2="100" y2="42" stroke="#e8eaed" stroke-width="3" stroke-linecap="round"
-            :transform="`rotate(${gaugeNeedle} 100 110)`" />
-          <circle cx="100" cy="110" r="6" fill="#e8eaed" />
-        </svg>
-        <div class="gauge-val">{{ home.alt_season.value }}</div>
-        <div class="gauge-label" :class="gaugeLabelClass">{{ home.alt_season.label }}</div>
-        <div class="gauge-prev" v-if="home.alt_season.prev">
-          昨日 {{ home.alt_season.prev }}
-          <em :class="home.alt_season.value - home.alt_season.prev >= 0 ? 'long' : 'short'">
-            ({{ home.alt_season.value - home.alt_season.prev >= 0 ? '+' : '' }}{{ home.alt_season.value - home.alt_season.prev }})
-          </em>
-        </div>
-        <div class="gauge-zones">
-          <span class="short">BTC季</span><span>偏BTC</span><span class="neutral">中性</span><span>偏山寨</span><span class="long">山寨季</span>
-        </div>
-      </section>
     </div>
 
     <!-- nav -->
@@ -3833,4 +3834,15 @@ footer { padding: 18px 0 30px; text-align: center; }
 .authin{ background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:var(--r-md); color:var(--c-txt); }
 .authbtn{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; border-radius:12px; font-weight:700; font-family:var(--f-disp); }
 .toast{ border-radius:var(--r-md); font-weight:600; }
+</style>
+
+<!-- ============ optimize:首頁版面(8:2 交戰+山寨季、5:5 做多做空)============ -->
+<style>
+.home-hero{ display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; align-items:stretch; margin-bottom:14px; }
+.home-hero > .gauge{ display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.cards.recs2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.mkt-bias.mkt-home{ border:1px solid var(--c-gold-d); border-radius:var(--r-lg);
+  background:linear-gradient(120deg,rgba(232,184,75,.06),var(--c-surf) 55%); padding:12px 16px; }
+@media (max-width:1024px){ .cards.recs2{ grid-template-columns:1fr 1fr; } }
+@media (max-width:768px){ .home-hero{ grid-template-columns:1fr; } .cards.recs2{ grid-template-columns:1fr; } }
 </style>
