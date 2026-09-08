@@ -2832,7 +2832,11 @@ watch([role, tabPerms, authReady], () => {
 <style>
 :root { color-scheme: dark; }
 html { background: #0a0b0e; } /* base colour lives here so the body watermark can sit above it */
-body { margin: 0; background: transparent; color: #e8eaed; font-family: system-ui, -apple-system, "PingFang TC", sans-serif; }
+body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-body); }
+/* optimize 改版:標題與品牌用 Chakra Petch、價格/數據用 IBM Plex Mono */
+.brand, .mk-head h2, .mk-head h3, .psub, .gauge-title, .gauge-val, .rec-head, .bttl,
+.authbox h3, .welcomebox h3, .nb-title, .wc-title { font-family: var(--f-disp); }
+.mono, .rec-price, .coin, .score, .gauge-val, td.r, .om, .ignite { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 /* logo watermark: fixed, centred, low-opacity — shows through page gaps, never over card content */
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
