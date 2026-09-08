@@ -2785,7 +2785,7 @@ watch([role, tabPerms, authReady], () => {
       </div>
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
-      <table v-if="bookF && bookF.open.length" class="grid">
+      <div class="tblwrap" v-if="bookF && bookF.open.length"><table class="grid">
         <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大漲幅</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th class="r" title="當前資金費率">費率</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
@@ -2806,11 +2806,11 @@ watch([role, tabPerms, authReady], () => {
             <td v-if="can('admin')" class="r"><button class="exitbtn" @click.stop="mainTab === 'emaonly' ? manualExit(t) : manualExitStrat(curPaperBook, t.id, loadPaper)">手動出場</button></td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
       <p v-else-if="bookF" class="empty">此範圍內無進行中的模擬部位</p>
 
       <h3 class="psub" v-if="paperHist.total">已結束 ({{ paperHist.total }})</h3>
-      <table v-if="paperHist.rows.length" class="grid">
+      <div class="tblwrap" v-if="paperHist.rows.length"><table class="grid">
         <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
         <tbody>
           <tr v-for="(t, i) in paperHist.rows" :key="t.coin + i" class="clickable" @click="openDetail(t.coin)">
@@ -2827,7 +2827,7 @@ watch([role, tabPerms, authReady], () => {
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
       <PageNav :page="paperHist.page" :pages="paperHist.pages" :total="paperHist.total" @go="(p) => (paperPage = p)" />
       <p v-if="bookF && !paperHist.total" class="empty">此範圍內尚無已結束的模擬交易</p>
     </section>
@@ -4397,4 +4397,9 @@ footer { padding: 18px 0 30px; text-align: center; }
 .shead-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:-4px 0 14px; }
 .shead-badge{ font-family:var(--f-disp); font-weight:700; font-size:10px; letter-spacing:1px; color:#161206; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); border-radius:6px; padding:3px 9px; }
 .stag2{ font-family:var(--f-mono); font-size:11px; color:var(--c-mut); background:var(--c-bg2); border:1px solid var(--c-line); border-radius:6px; padding:2px 8px; }
+</style>
+
+<!-- ============ optimize:表格容器可橫向捲動(桌機寬表不撐破頁面)============ -->
+<style>
+.tblwrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
 </style>

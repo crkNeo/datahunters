@@ -141,7 +141,7 @@ function tpStatusCls(t) {
     </div>
 
     <h3 class="psub" v-if="hist.total">已結束 ({{ hist.total }})</h3>
-    <table v-if="hist.rows.length" class="grid">
+    <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
       <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in hist.rows" :key="i" class="clickable" @click="$emit('coin', t.coin)">
@@ -158,7 +158,7 @@ function tpStatusCls(t) {
           <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
         </tr>
       </tbody>
-    </table>
+    </table></div>
     <PageNav :page="hist.page" :pages="hist.pages" :total="hist.total" @go="(p) => (page = p)" />
 
     <p v-if="state && !state.open.length && !hist.total" class="loading">{{ emptyText }}</p>
