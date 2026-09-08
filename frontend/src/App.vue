@@ -1227,7 +1227,10 @@ async function openDetail(coin) {
     const res = await authFetch('/api/coin/' + coin)
     if (res.status === 401 || res.status === 403) { detailLocked.value = true; return }
     if (!res.ok) throw new Error('HTTP ' + res.status)
-    detail.value = await res.json()
+    const d = await res.json()
+    // 免費牆:未達會員時後端回 teaser(locked=true,只含 幣種/方向/評分),完整明細鎖住。
+    if (d && d.locked) { detail.value = d; detailLocked.value = true; return }
+    detail.value = d
   } catch (e) {
     detailError.value = String(e)
   } finally {
@@ -2824,7 +2827,13 @@ watch([role, tabPerms, authReady], () => {
       <div v-else-if="detailLocked" class="lockwall">
         <div class="lw-top">
           <span class="lw-coin">{{ detailCoin }}</span>
-          <span class="lw-tag">🔒 VIP 內容</span>
+          <span v-if="detail && detail.bias_label" class="lw-dir" :class="biasClass(detail.bias)">{{ detail.bias_label }}</span>
+          <span class="lw-tag">🔒 完整分析</span>
+        </div>
+        <!-- 免費可見(依 mock):多空方向 + 綜合評分 -->
+        <div v-if="detail" class="lw-teaser">
+          <div class="lw-t"><span class="lw-t-k">多空方向</span><span class="lw-t-v" :class="biasClass(detail.bias)">{{ detail.bias_label }}</span></div>
+          <div class="lw-t"><span class="lw-t-k">綜合評分</span><span class="dots lw-dots"><span v-for="(on, i) in ratingDots" :key="i" class="seg" :class="{ on, [biasClass(detail.bias)]: on }"></span></span></div>
         </div>
         <div class="lw-body">
           <div class="lw-fog" aria-hidden="true">
@@ -2832,10 +2841,10 @@ watch([role, tabPerms, authReady], () => {
           </div>
           <div class="lw-panel">
             <div class="lw-lock">🔒</div>
-            <div class="lw-title">完整評分依據 · 進出場點位 · 相關幣種</div>
+            <div class="lw-title">完整評分理由 · 評分依據拆解 · 相關幣種</div>
             <div class="lw-sub">此幣種的完整分析為 {{ role === 'public' ? '會員 / VIP' : 'VIP' }} 內容</div>
             <button class="lw-cta" @click="unlockDetail">{{ role === 'public' ? '登入解鎖' : '加入 VIP 解鎖' }}</button>
-            <div class="lw-note">公開版僅提供數據與分數,不含進場/止盈止損點位 · ⚠️ 非投資建議</div>
+            <div class="lw-note">公開版僅顯示方向與分數,完整依據需登入 · ⚠️ 非投資建議</div>
           </div>
         </div>
       </div>
@@ -4002,7 +4011,17 @@ footer { padding: 18px 0 30px; text-align: center; }
 .lockwall{ display:flex; flex-direction:column; }
 .lw-top{ display:flex; align-items:center; gap:10px; margin:2px 0 14px; }
 .lw-coin{ font-family:var(--f-disp); font-weight:700; font-size:22px; letter-spacing:.5px; }
-.lw-tag{ font-family:var(--f-mono); font-size:11px; color:var(--c-gold-b); background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:6px; padding:2px 8px; }
+.lw-tag{ font-family:var(--f-mono); font-size:11px; color:var(--c-gold-b); background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:6px; padding:2px 8px; margin-left:auto; }
+/* 免費可見的 teaser:方向 + 評分 */
+.lw-dir{ font-family:var(--f-disp); font-weight:700; font-size:13px; padding:2px 9px; border-radius:6px; background:var(--c-surf2); border:1px solid var(--c-line); color:var(--c-mut); }
+.lw-dir.long{ color:var(--c-up); border-color:rgba(55,214,138,.4); }
+.lw-dir.short{ color:var(--c-dn); border-color:rgba(255,92,108,.4); }
+.lw-teaser{ display:flex; gap:10px; margin-bottom:14px; }
+.lw-t{ flex:1; display:flex; flex-direction:column; gap:5px; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); padding:10px 12px; }
+.lw-t-k{ font-size:11px; color:var(--c-mut); }
+.lw-t-v{ font-family:var(--f-disp); font-weight:700; font-size:16px; color:var(--c-txt); }
+.lw-t-v.long{ color:var(--c-up); } .lw-t-v.short{ color:var(--c-dn); }
+.lw-dots{ display:flex; align-items:center; }
 .lw-body{ position:relative; }
 /* 被鎖區塊的示意骨架 —— 模糊處理,不含任何真實數值 */
 .lw-fog{ display:flex; flex-direction:column; gap:15px; padding:20px; min-height:260px; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-lg); filter:blur(3px); opacity:.45; pointer-events:none; user-select:none; }

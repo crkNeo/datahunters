@@ -170,7 +170,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/klines", s.gateTab("oi", s.handleKlines))
 	// 注意:「幣種一覽」分頁本身是公開的,但個別幣種的詳細資料仍是會員限定 —
 	// 兩者不是同一件事,別把這條接到 coins 分頁的權限上。
-	mux.HandleFunc("/api/coin/", s.gate(M, s.handleCoinDetail))
+	mux.HandleFunc("/api/coin/", s.gate(P, s.handleCoinDetail)) // 免費牆:public 只拿 teaser(幣種+方向+評分),完整明細需 member
 
 	// VIP (live entries with TP/SL)
 	mux.HandleFunc("/api/paper", s.gateTab("paper", s.handlePaper))
@@ -1044,6 +1044,20 @@ func (s *Server) handleCoinDetail(w http.ResponseWriter, r *http.Request) {
 	detail, err := s.store.Detail(coin)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// 免費牆:未達會員只回 teaser —— 幣種 + 多空方向 + 綜合評分(方向/評分在公開排行本就有)。
+	// 付費內容(評分理由 rationale、評分依據 breakdown、相關幣種 related、細部 stats)
+	// 一律不放進回應,避免任何外流;會員以上照回完整 detail。
+	if !auth.AtLeast(s.roleOf(r), auth.RoleMember) {
+		writeJSON(w, map[string]any{
+			"coin":       detail.Coin,
+			"bias":       detail.Bias,
+			"bias_label": detail.BiasLabel,
+			"rating":     detail.Rating,
+			"sector":     detail.Sector,
+			"locked":     true,
+		})
 		return
 	}
 	writeJSON(w, detail)
