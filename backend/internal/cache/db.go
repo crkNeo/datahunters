@@ -429,6 +429,25 @@ func (db *DB) insertLiquidation(r LiqRow) {
 		r.Time, r.Coin, r.Side, r.Px, r.USD)
 }
 
+// recentLiquidations loads persisted liquidations at/after cut (unix ms), oldest
+// first — used to warm the in-memory feed on startup so the 4h/24h heat windows
+// are populated immediately after a restart instead of only accruing forward.
+func (db *DB) recentLiquidations(cut int64) []LiqRow {
+	rows, err := db.sql.Query(`SELECT ts,coin,side,px,usd FROM liquidations WHERE ts>=? ORDER BY ts ASC`, cut)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []LiqRow
+	for rows.Next() {
+		var r LiqRow
+		if err := rows.Scan(&r.Time, &r.Coin, &r.Side, &r.Px, &r.USD); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // clearTrades deletes every simulated trade for one strategy book (admin reset).
 func (db *DB) clearTrades(book string) { db.sql.Exec(`DELETE FROM paper_trades WHERE book=?`, book) }
 

@@ -107,6 +107,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/ranking", s.gateTab("ranking", s.handleRanking))
 	mux.HandleFunc("/api/events", s.gateTab("events", s.handleEvents))
 	mux.HandleFunc("/api/liquidations", s.gateTab("flow", s.handleLiquidations))
+	mux.HandleFunc("/api/liquidations/heat", s.gateTab("flow", s.handleLiqHeat))
 	mux.HandleFunc("/api/upbit", s.gateTab("upbit", s.handleUpbit))             // Upbit announcements (zh-TW)
 	mux.HandleFunc("/api/news", s.gateTab("news", s.handleNews))                // GDELT market headlines (zh-TW)
 	mux.HandleFunc("/api/funding", s.gateTab("funding", s.handleFunding))       // OKX funding-rate board
@@ -958,6 +959,11 @@ func (s *Server) handleRisk(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.Liquidations())
+}
+
+func (s *Server) handleLiqHeat(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	writeJSON(w, s.store.LiquidationHeat(q.Get("coin"), q.Get("window")))
 }
 
 // handleBTCSR serves BTC's support/resistance only — the public 戰場 draws its

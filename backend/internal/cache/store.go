@@ -301,8 +301,13 @@ func NewStore(coins []string) *Store {
 		for _, b := range s.smcV2Books {
 			b.trades = db.loadTrades(b.name)
 		}
-		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades",
-			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades))
+		// 清算 feed 24h warm-load:重啟後 4h/24h 熱區視窗不必從零累積(見 LiquidationHeat)
+		s.liqFeed = db.recentLiquidations(time.Now().Add(-24 * time.Hour).UnixMilli())
+		for _, r := range s.liqFeed {
+			s.liqSeen[liqKey(r)] = true
+		}
+		log.Printf("mysql loaded: %d score events, main=%d gamble=%d emaonly=%d trades, %d liq(24h)",
+			len(s.scoreLog), len(s.paperMain.trades), len(s.paperGamble.trades), len(s.paperEMA.trades), len(s.liqFeed))
 	}
 	// Bitunix 完全跟隨:有 follow 帳號才注入 DB + 掛鉤,並把上次未平的追蹤表載回續管。
 	if s.trader != nil && s.trader.hasFollow() {

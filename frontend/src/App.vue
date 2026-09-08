@@ -1156,7 +1156,6 @@ const market = computed(() => {
   return m
 })
 // 市場熱力圖:依成交量排序取前 48,色塊依漲跌上色、前幾大放大(treemap 感)
-const listView = ref('table') // table | heat
 const heatTiles = computed(() => (home.value ? [...home.value.market].slice(0, 48) : []))
 function heatStyle(chg) {
   const a = Math.min(0.82, 0.14 + Math.abs(chg) / 12) // |漲跌| 越大越飽和
@@ -1613,7 +1612,7 @@ const TAB_KIND_FALLBACK = {
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
-  'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
+  'ranking', 'list', 'heatmap', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'orderblockv2', 'srmtf',
@@ -2105,6 +2104,7 @@ watch([role, tabPerms, authReady], () => {
         <div class="navbtns">
           <button v-if="inGroup('ranking', grp[0])" :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
           <button v-if="inGroup('list', grp[0])" :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
+          <button v-if="inGroup('heatmap', grp[0])" :class="{ active: mainTab === 'heatmap' }" @click="mainTab = 'heatmap'">市場熱力圖</button>
           <button v-if="inGroup('events', grp[0])" :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
             財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
           </button>
@@ -2606,20 +2606,11 @@ watch([role, tabPerms, authReady], () => {
         <span class="mk-count">共 {{ home.total }} 個合約，顯示前 {{ home.market.length }}</span>
       </div>
       <div class="sorttabs">
-        <button v-if="listView === 'table'" :class="{ active: marketSort === 'vol' }" @click="marketSort = 'vol'">依成交量</button>
-        <button v-if="listView === 'table'" :class="{ active: marketSort === 'gainers' }" @click="marketSort = 'gainers'">漲幅榜</button>
-        <button v-if="listView === 'table'" :class="{ active: marketSort === 'losers' }" @click="marketSort = 'losers'">跌幅榜</button>
-        <button class="tf-sort" :class="{ active: listView === 'table' }" @click="listView = 'table'">📋 表格</button>
-        <button class="tf-sort" :class="{ active: listView === 'heat' }" @click="listView = 'heat'">🟩 熱力圖</button>
+        <button :class="{ active: marketSort === 'vol' }" @click="marketSort = 'vol'">依成交量</button>
+        <button :class="{ active: marketSort === 'gainers' }" @click="marketSort = 'gainers'">漲幅榜</button>
+        <button :class="{ active: marketSort === 'losers' }" @click="marketSort = 'losers'">跌幅榜</button>
       </div>
-      <!-- 市場熱力圖:色塊依 24h 漲跌上色、依成交量大小排,點開幣種明細 -->
-      <div v-if="listView === 'heat'" class="mkt-heat">
-        <button v-for="(m, i) in heatTiles" :key="m.coin" class="heat-tile" :class="heatCls(i)" :style="heatStyle(m.chg)" @click="openDetail(m.coin)">
-          <span class="ht-coin">{{ m.coin }}</span>
-          <span class="ht-chg">{{ fmtPct(m.chg) }}</span>
-        </button>
-      </div>
-      <table v-else class="grid market">
+      <table class="grid market">
         <thead>
           <tr><th class="rank">#</th><th>幣種</th><th class="r">價格</th><th class="r">漲跌幅</th><th class="r">24H 成交量</th></tr>
         </thead>
@@ -2633,6 +2624,20 @@ watch([role, tabPerms, authReady], () => {
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <!-- 市場熱力圖(獨立分頁):色塊依 24h 漲跌上色、依成交量大小分級,點開幣種明細 -->
+    <section v-else-if="mainTab === 'heatmap' && home">
+      <div class="mk-head">
+        <h2>市場熱力圖<span class="help" tabindex="0">?<span class="help-pop">全市場合約的 24h 漲跌全景。<b>磚塊大小</b>=成交量排名(越大越前),<b>顏色</b>=漲跌幅(綠漲紅跌、越深越極端)。點任一磚看該幣明細。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 綠漲紅跌</span>
+      </div>
+      <div class="mkt-heat">
+        <button v-for="(m, i) in heatTiles" :key="m.coin" class="heat-tile" :class="heatCls(i)" :style="heatStyle(m.chg)" @click="openDetail(m.coin)">
+          <span class="ht-coin">{{ m.coin }}</span>
+          <span class="ht-chg">{{ fmtPct(m.chg) }}</span>
+        </button>
+      </div>
     </section>
 
     <!-- OI 儀表板 (score board) -->

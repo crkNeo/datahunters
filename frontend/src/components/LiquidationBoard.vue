@@ -19,34 +19,31 @@ function liqClock(ms) {
 }
 
 // 清算熱區:把某幣近期清算依「價位」分桶,看哪些價位發生多/空清算。
-// 誠實版:呈現「近期實際清算」的價位分布(非 OI 槓桿預測的未來磁吸位)。
+// 誠實版:呈現「實際發生的清算」的價位分布(非 OI 槓桿預測的未來磁吸位)。
+// 時間視窗可放大到 4h / 24h(後端從 24h in-memory feed 聚合,前端只選幣+視窗)。
+const LIQ_WINS = [
+  { k: "1h", t: "1 小時" },
+  { k: "4h", t: "4 小時" },
+  { k: "24h", t: "24 小時" },
+]
+const liqWin = ref("4h")
 const liqCoin = ref("")
-const liqCoins = computed(() => {
-  if (!liquidations.value) return []
-  const m = {}
-  for (const r of liquidations.value.recent) m[r.coin] = (m[r.coin] || 0) + r.usd
-  return Object.keys(m).sort((a, b) => m[b] - m[a]) // 清算量大→小
-})
-watch(liqCoins, (cs) => { if (cs.length && !cs.includes(liqCoin.value)) liqCoin.value = cs[0] }, { immediate: true })
-const liqHeat = computed(() => {
-  if (!liquidations.value || !liqCoin.value) return null
-  const evs = liquidations.value.recent.filter((r) => r.coin === liqCoin.value && r.px > 0)
-  if (evs.length < 3) return null
-  const ps = evs.map((e) => e.px)
-  const lo = Math.min(...ps), hi = Math.max(...ps)
-  if (hi <= lo) return null
-  const N = 12
-  const b = Array.from({ length: N }, (_, i) => ({ lo: lo + (hi - lo) * i / N, hi: lo + (hi - lo) * (i + 1) / N, long: 0, short: 0 }))
-  for (const e of evs) {
-    let i = Math.floor((e.px - lo) / (hi - lo) * N)
-    if (i >= N) i = N - 1; if (i < 0) i = 0
-    if (e.side === "long") b[i].long += e.usd; else b[i].short += e.usd
-  }
-  const max = Math.max(...b.map((x) => x.long + x.short), 1)
-  return { buckets: b.reverse(), max } // 高價在上
-})
+const liqHeat = ref(null) // { coin, window, coins[], buckets[], max }
+const liqCoins = computed(() => (liqHeat.value ? liqHeat.value.coins : []))
+async function loadHeat() {
+  try {
+    const qs = `?coin=${encodeURIComponent(liqCoin.value)}&window=${liqWin.value}`
+    const res = await authFetch("/api/liquidations/heat" + qs)
+    if (!res.ok) return
+    const d = await res.json()
+    // 後端會在未指定/失效時挑清算量最大的幣回填,前端同步一次以對齊下拉
+    if (!liqCoin.value || (d.coins.length && !d.coins.includes(liqCoin.value))) liqCoin.value = d.coin || (d.coins[0] || "")
+    liqHeat.value = d
+  } catch (e) { /* secondary */ }
+}
+watch([liqCoin, liqWin], loadHeat)
 let timer = null
-onMounted(() => { load(); timer = setInterval(load, 30000) })
+onMounted(() => { load(); loadHeat(); timer = setInterval(() => { load(); loadHeat() }, 30000) })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -63,14 +60,17 @@ onUnmounted(() => clearInterval(timer))
     <div class="liqbox"><div class="stat-k">偏向</div><div class="stat-v" :class="liquidations.long_usd_1h > liquidations.short_usd_1h ? 'short' : 'long'">{{ liquidations.long_usd_1h > liquidations.short_usd_1h ? '多單被洗(下殺)' : '空單被軋(上拉)' }}</div></div>
   </div>
 
-  <!-- 清算熱區:近期清算依價位分布(多單被清=紅、空單被清=綠)-->
-  <div v-if="liqHeat" class="liqheat">
+  <!-- 清算熱區:實際清算依價位分布(多單被清=紅、空單被清=綠),視窗可放大到 4h/24h -->
+  <div v-if="liqCoins.length" class="liqheat">
     <div class="lh-head">
-      <span class="lh-title">清算熱區<span class="help" tabindex="0">?<span class="help-pop">把該幣<b>近期實際發生的清算</b>依「價位」分桶,看哪些價位帶被清算最多。<b>紅</b>=多單被清(下殺打到)、<b>綠</b>=空單被清(上拉軋到)。這是近期已發生的分布,<b>非</b>用未平倉量預測的未來磁吸價位。</span></span></span>
+      <span class="lh-title">清算熱區<span class="help" tabindex="0">?<span class="help-pop">把該幣<b>實際發生的清算</b>依「價位」分桶,看哪些價位帶被清算最多。<b>紅</b>=多單被清(下殺打到)、<b>綠</b>=空單被清(上拉軋到)。這是已發生的分布,<b>非</b>用未平倉量預測的未來磁吸價位。可切換 1h / 4h / 24h 累計視窗。</span></span></span>
       <select v-model="liqCoin" class="lh-sel"><option v-for="c in liqCoins" :key="c" :value="c">{{ c }}</option></select>
+      <span class="lh-win">
+        <button v-for="w in LIQ_WINS" :key="w.k" :class="{ on: liqWin === w.k }" @click="liqWin = w.k">{{ w.t }}</button>
+      </span>
       <span class="lh-legend"><i class="lh-dot long"></i>多單被清 <i class="lh-dot short"></i>空單被清</span>
     </div>
-    <div class="lh-rows">
+    <div v-if="liqHeat && liqHeat.buckets.length" class="lh-rows">
       <div v-for="(b, i) in liqHeat.buckets" :key="i" class="lh-row">
         <span class="lh-px">{{ fmtPrice(b.hi) }}</span>
         <span class="lh-bar">
@@ -80,6 +80,7 @@ onUnmounted(() => clearInterval(timer))
         <span class="lh-amt">{{ (b.long + b.short) > 0 ? '$' + ((b.long + b.short) / 1e6).toFixed(2) + 'M' : '' }}</span>
       </div>
     </div>
+    <p v-else class="lh-empty">此視窗內 {{ liqCoin }} 清算樣本不足(需 ≥3 筆),試試更長的視窗或其他幣。</p>
   </div>
 
   <h3 class="psub" v-if="liquidations && liquidations.recent.length">近期清算事件 ({{ liquidations.recent.length }})</h3>
@@ -104,6 +105,11 @@ onUnmounted(() => clearInterval(timer))
 .lh-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .lh-title { font-family: var(--f-disp); font-weight: 700; font-size: 14px; }
 .lh-sel { background: var(--c-bg2); border: 1px solid var(--c-line2); color: var(--c-txt); border-radius: 8px; padding: 4px 8px; font-family: var(--f-mono); font-size: 12px; }
+.lh-win { display: inline-flex; gap: 4px; }
+.lh-win button { background: var(--c-bg2); border: 1px solid var(--c-line2); color: var(--c-mut); border-radius: 7px; padding: 4px 10px; font-family: var(--f-mono); font-size: 11.5px; cursor: pointer; transition: all .12s; }
+.lh-win button:hover { color: var(--c-txt); border-color: var(--c-gold); }
+.lh-win button.on { background: var(--c-gold); border-color: var(--c-gold); color: #1a1408; font-weight: 700; }
+.lh-empty { font-size: 12px; color: var(--c-mut2); padding: 14px 4px; margin: 0; }
 .lh-legend { margin-left: auto; font-size: 11px; color: var(--c-mut); display: flex; align-items: center; gap: 5px; }
 .lh-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
 .lh-dot.long { background: var(--c-dn); } .lh-dot.short { background: var(--c-up); }
