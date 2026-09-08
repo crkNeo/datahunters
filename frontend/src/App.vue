@@ -3856,3 +3856,39 @@ footer { padding: 18px 0 30px; text-align: center; }
   .risk-bar{ margin-left:var(--side-w) !important; }
 }
 </style>
+
+<!-- ============ optimize:內頁 bespoke 元件 skin(策略統計/明細抽屜/漏斗/區塊標題)============ -->
+<style>
+/* 區塊標題 / 計數 */
+.psub{ font-family:var(--f-disp); font-weight:700; }
+.mk-head h2{ font-family:var(--f-disp); }
+.mk-count{ color:var(--c-mut2); font-family:var(--f-mono); font-size:11px; }
+/* 統計磚(策略 pstats + 明細 stats)*/
+.pstats, .stats{ display:grid; gap:12px; }
+.pstat, .stats .stat{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); padding:12px 14px; }
+.pstat .stat-k, .stats .stat-k{ font-size:11px; color:var(--c-mut); letter-spacing:.5px; }
+.pstat .stat-v, .stats .stat-v{ font-family:var(--f-mono); font-weight:700; font-size:22px; letter-spacing:-.5px; }
+/* 止盈漏斗 */
+.tpfunnel{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); }
+.tpf-title{ font-family:var(--f-disp); color:var(--c-gold); }
+.tpf-bar{ background:#20242f; border-radius:5px; }
+.tpf-bar i{ background:linear-gradient(90deg,var(--c-gold-d),var(--c-gold)); border-radius:5px; }
+/* 幣種明細抽屜 */
+.drawer{ background:var(--c-surf); border-left:1px solid var(--c-line2); }
+.rationale{ border-radius:var(--r-lg); }
+.rationale-head h2{ font-family:var(--f-disp); }
+.badge{ font-family:var(--f-disp); }
+.bd-row{ border-bottom:1px solid var(--c-line); }
+.bd-label{ font-family:var(--f-disp); }
+.bd-score{ font-family:var(--f-mono); }
+.related .rc{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-sm); }
+.rc-coin{ font-family:var(--f-disp); }
+/* 清算 / 板塊 / 雷達 摘要 */
+.liqbox, .liqsum{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); }
+.sec-summary{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); }
+.sec-summary b{ font-family:var(--f-disp); }
+.ignite{ font-family:var(--f-mono); font-weight:700; }
+/* 確認框 */
+.cfm-box{ background:var(--c-surf); border:1px solid var(--c-line2); border-radius:var(--r-xl); }
+.cfm-ok{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; font-family:var(--f-disp); font-weight:700; }
+</style>
