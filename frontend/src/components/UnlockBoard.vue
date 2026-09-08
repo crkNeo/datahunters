@@ -58,7 +58,7 @@ onUnmounted(() => clearInterval(timer))
       <tr v-for="u in unlockRows" :key="u.name">
         <td class="coin">{{ u.coin }}<small class="vtag"> {{ u.name }}</small></td>
         <td class="r tsmall">{{ u.next7_pct ? u.next7_pct.toFixed(2) + '%' : '—' }}</td>
-        <td class="r"><b :class="{ short: u.next30_pct >= 3 }">{{ u.next30_pct.toFixed(2) }}%</b><small class="vtag"> {{ fmtNum(u.next30_amt) }}<template v-if="!u.by_circ"> ⚠</template></small></td>
+        <td class="r"><b :class="{ short: u.next30_pct >= 3 }">{{ u.next30_pct.toFixed(2) }}%</b><small class="vtag u-sub">{{ fmtNum(u.next30_amt) }}<template v-if="!u.by_circ"> ⚠</template></small></td>
         <td class="r tsmall">{{ u.usd30 ? '$' + fmtNum(u.usd30) : '—' }}</td>
         <td class="r tsmall">{{ unlockDate(u.peak_date) }} <span class="vtag">{{ unlockDays(u.peak_date) }}</span> · {{ u.peak_pct_max ? u.peak_pct_max.toFixed(2) + '%' : '—' }}</td>
         <td class="tsmall">{{ u.cats.join('、') }}</td>
@@ -68,3 +68,8 @@ onUnmounted(() => clearInterval(timer))
   <p v-else class="loading">載入代幣解鎖中…</p>
   </section>
 </template>
+
+<style scoped>
+/* 30天欄:解鎖數量另起一行,不與%擠在一起 */
+.u-sub { display: block; margin-top: 2px; }
+</style>
