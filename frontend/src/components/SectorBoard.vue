@@ -91,8 +91,13 @@ defineExpose({ load })
         </tr>
         <tr v-if="sectorOpen === r.sector" class="sec-detail">
           <td colspan="7">
-            <span class="sec-detail-lbl">板塊成員(24h 由強到弱):</span>
-            <span v-for="c in r.coins" :key="c.coin" class="sec-chip" :class="c.chg >= 0 ? 'up' : 'down'">{{ c.coin }} {{ fmtPct(c.chg) }}</span>
+            <div class="sec-detail-lbl">板塊成員(24h 由強到弱)</div>
+            <div class="sec-sublist">
+              <div v-for="c in r.coins" :key="c.coin" class="sec-subrow">
+                <span class="sec-sub-coin">{{ c.coin }}</span>
+                <span class="sec-sub-chg" :class="c.chg >= 0 ? 'long' : 'short'">{{ fmtPct(c.chg) }}</span>
+              </div>
+            </div>
           </td>
         </tr>
       </template>
@@ -109,5 +114,11 @@ defineExpose({ load })
 .secbar i { display: block; height: 100%; border-radius: 5px; }
 .secbar i.pos { background: linear-gradient(90deg, rgba(55,214,138,.5), var(--c-up)); }
 .secbar i.neg { background: linear-gradient(90deg, var(--c-dn), rgba(255,92,108,.5)); }
-@media (max-width: 768px) { .sec-strength { display: none; } }
+/* 展開:板塊成員逐條下拉列(一行一檔:幣種左、漲跌右)*/
+.sec-detail-lbl { display: block; font-size: 11px; color: var(--c-mut2); margin: 2px 0 8px; }
+.sec-sublist { display: flex; flex-direction: column; max-width: 460px; }
+.sec-subrow { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; font-family: var(--f-mono); font-size: 12.5px; border-bottom: 1px solid var(--c-line); }
+.sec-subrow:last-child { border-bottom: 0; }
+.sec-sub-coin { font-family: var(--f-disp); font-weight: 600; color: var(--c-txt); }
+@media (max-width: 768px) { .sec-strength { display: none; } .sec-sublist { max-width: 100%; } }
 </style>
