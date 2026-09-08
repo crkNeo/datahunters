@@ -1646,6 +1646,26 @@ function kindOf(tab) {
 function canTab(tab) {
   return can(tabNeed(tab))
 }
+// 導覽點擊:能看就進去(並跑該頁的載入副作用);不能看就依身分跳提示,不硬進被擋的頁。
+function navTo(tab, after) {
+  if (canTab(tab)) { mainTab.value = tab; if (typeof after === 'function') after(); return }
+  if (!authReady.value || role.value === 'public') {
+    loginOpen.value = true
+    showToast('登入後即可查看「' + (tabName(tab) || '此頁') + '」', 'warn')
+  } else {
+    showToast('「' + (tabName(tab) || '此頁') + '」需「' + tierLabel(tabNeed(tab)) + '」以上權限', 'warn')
+  }
+}
+// 分頁中文名(給提示訊息用)
+const TAB_NAMES = {
+  ranking: '綜合排行', list: '幣種一覽', heatmap: '市場熱力圖', events: '財經事件', flow: '清算',
+  capital: '資金流向', upbit: 'Upbit 公告', news: '市場快訊', funding: '資金費率', unlock: '代幣解鎖',
+  sectors: '板塊強弱', robinhood: 'Robinhood', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
+  radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
+  sr: '支撐壓力', meanrev: '火星', bollema: '海王星', surge: '爆量脈搏', pulsar: '脈衝星', pulsarv3: '脈衝星v3',
+  pulsarv5: '脈衝星v5', pulsarv6: '脈衝星v6', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號',
+}
+function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
 // 使用者看得到自己身分「以下」的所有列;管理員專屬分頁(後台/推廣/管理員策略本)
 // 集中在「管理」列,不分資訊/訊號。每格用 "tier:kind" 當 key,inGroup 解析。
@@ -1673,12 +1693,12 @@ const NAV_ORDER = [
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'orderblockv2', 'srmtf',
 ]
-// 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
-// "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
+// 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
+// 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
+// 標籤,點進去才依身分跳提示(navTo)。管理列仍只有管理員看得到(不對外曝露後台)。
 function inGroup(tab, slot) {
-  if (!canTab(tab)) return false
   const [tier, kind] = slot.split(':')
-  if (tier === 'admin') return tabNeed(tab) === 'admin'
+  if (tier === 'admin') return canTab(tab) && tabNeed(tab) === 'admin'
   return tabNeed(tab) === tier && kindOf(tab) === kind
 }
 // 整格都沒東西就連標題一起收掉
@@ -2163,81 +2183,81 @@ watch([role, tabPerms, authReady], () => {
       <div class="navrow" v-if="groupHas(grp[0])">
         <span class="navgroup">{{ grp[1] }}</span>
         <div class="navbtns">
-          <button v-if="inGroup('ranking', grp[0])" :class="{ active: mainTab === 'ranking' }" @click="mainTab = 'ranking'">綜合排行</button>
-          <button v-if="inGroup('list', grp[0])" :class="{ active: mainTab === 'list' }" @click="mainTab = 'list'">幣種一覽</button>
-          <button v-if="inGroup('heatmap', grp[0])" :class="{ active: mainTab === 'heatmap' }" @click="mainTab = 'heatmap'">市場熱力圖</button>
-          <button v-if="inGroup('events', grp[0])" :class="{ active: mainTab === 'events' }" @click="mainTab = 'events'">
-            財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
+          <button v-if="inGroup('ranking', grp[0])" :class="{ active: mainTab === 'ranking', lk: !canTab('ranking') }" @click="navTo('ranking')">綜合排行<i v-if="!canTab('ranking')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('list', grp[0])" :class="{ active: mainTab === 'list', lk: !canTab('list') }" @click="navTo('list')">幣種一覽<i v-if="!canTab('list')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('heatmap', grp[0])" :class="{ active: mainTab === 'heatmap', lk: !canTab('heatmap') }" @click="navTo('heatmap')">市場熱力圖<i v-if="!canTab('heatmap')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('events', grp[0])" :class="{ active: mainTab === 'events', lk: !canTab('events') }" @click="navTo('events')">
+            財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em><i v-if="!canTab('events')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('flow', grp[0])" :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
-          <button v-if="inGroup('capital', grp[0])" :class="{ active: mainTab === 'capital' }" @click="mainTab = 'capital'">資金流向</button>
-          <button v-if="inGroup('upbit', grp[0])" :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
-            Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
+          <button v-if="inGroup('flow', grp[0])" :class="{ active: mainTab === 'flow', lk: !canTab('flow') }" @click="navTo('flow')">清算<i v-if="!canTab('flow')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('capital', grp[0])" :class="{ active: mainTab === 'capital', lk: !canTab('capital') }" @click="navTo('capital')">資金流向<i v-if="!canTab('capital')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('upbit', grp[0])" :class="{ active: mainTab === 'upbit', lk: !canTab('upbit') }" @click="navTo('upbit')">
+            Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em><i v-if="!canTab('upbit')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('news', grp[0])" :class="{ active: mainTab === 'news' }" @click="mainTab = 'news'; loadNews()">
-            市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em>
+          <button v-if="inGroup('news', grp[0])" :class="{ active: mainTab === 'news', lk: !canTab('news') }" @click="navTo('news', loadNews)">
+            市場快訊<em v-if="news.length" class="navbadge">{{ news.length }}</em><i v-if="!canTab('news')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('funding', grp[0])" :class="{ active: mainTab === 'funding' }" @click="mainTab = 'funding'">資金費率</button>
-          <button v-if="inGroup('unlock', grp[0])" :class="{ active: mainTab === 'unlock' }" @click="mainTab = 'unlock'">代幣解鎖</button>
-          <button v-if="inGroup('sectors', grp[0])" :class="{ active: mainTab === 'sectors' }" @click="mainTab = 'sectors'">板塊強弱</button>
-          <button v-if="inGroup('robinhood', grp[0])" :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
-            Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em>
+          <button v-if="inGroup('funding', grp[0])" :class="{ active: mainTab === 'funding', lk: !canTab('funding') }" @click="navTo('funding')">資金費率<i v-if="!canTab('funding')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('unlock', grp[0])" :class="{ active: mainTab === 'unlock', lk: !canTab('unlock') }" @click="navTo('unlock')">代幣解鎖<i v-if="!canTab('unlock')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('sectors', grp[0])" :class="{ active: mainTab === 'sectors', lk: !canTab('sectors') }" @click="navTo('sectors')">板塊強弱<i v-if="!canTab('sectors')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('robinhood', grp[0])" :class="{ active: mainTab === 'robinhood', lk: !canTab('robinhood') }" @click="navTo('robinhood', loadRobinhood)">
+            Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em><i v-if="!canTab('robinhood')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('articles', grp[0])" :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
-            文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
+          <button v-if="inGroup('articles', grp[0])" :class="{ active: mainTab === 'articles', lk: !canTab('articles') }" @click="navTo('articles', () => { articleView = null })">
+            文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em><i v-if="!canTab('articles')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('oi', grp[0])" :class="{ active: mainTab === 'oi' }" @click="mainTab = 'oi'">OI 儀表板</button>
-          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals' }" @click="mainTab = 'signals'; fetchScoreHist()">
-            多空推薦<em v-if="signals.length" class="navbadge">{{ signals.length }}</em>
+          <button v-if="inGroup('oi', grp[0])" :class="{ active: mainTab === 'oi', lk: !canTab('oi') }" @click="navTo('oi')">OI 儀表板<i v-if="!canTab('oi')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('signals', grp[0])" :class="{ active: mainTab === 'signals', lk: !canTab('signals') }" @click="navTo('signals', fetchScoreHist)">
+            多空推薦<em v-if="signals.length" class="navbadge">{{ signals.length }}</em><i v-if="!canTab('signals')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('radar', grp[0])" :class="{ active: mainTab === 'radar' }" @click="mainTab = 'radar'">爆發雷達</button>
-          <button v-if="inGroup('paper', grp[0])" :class="{ active: mainTab === 'paper' }" @click="mainTab = 'paper'">
-            星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em>
+          <button v-if="inGroup('radar', grp[0])" :class="{ active: mainTab === 'radar', lk: !canTab('radar') }" @click="navTo('radar')">爆發雷達<i v-if="!canTab('radar')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('paper', grp[0])" :class="{ active: mainTab === 'paper', lk: !canTab('paper') }" @click="navTo('paper')">
+            星軌<em v-if="paper && paper.open.length" class="navbadge">{{ paper.open.length }}</em><i v-if="!canTab('paper')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('gamble', grp[0])" :class="{ active: mainTab === 'gamble' }" @click="mainTab = 'gamble'">
-            超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em>
+          <button v-if="inGroup('gamble', grp[0])" :class="{ active: mainTab === 'gamble', lk: !canTab('gamble') }" @click="navTo('gamble')">
+            超新星<em v-if="gamble && gamble.open.length" class="navbadge">{{ gamble.open.length }}</em><i v-if="!canTab('gamble')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('emaonly', grp[0])" :class="{ active: mainTab === 'emaonly' }" @click="mainTab = 'emaonly'">
-            銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em>
+          <button v-if="inGroup('emaonly', grp[0])" :class="{ active: mainTab === 'emaonly', lk: !canTab('emaonly') }" @click="navTo('emaonly')">
+            銀河<em v-if="emaOnly && emaOnly.open.length" class="navbadge">{{ emaOnly.open.length }}</em><i v-if="!canTab('emaonly')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('conv', grp[0])" :class="{ active: mainTab === 'conv' }" @click="mainTab = 'conv'; loadConv()">
-            冥王星<em v-if="conv && conv.open.length" class="navbadge">{{ conv.open.length }}</em>
+          <button v-if="inGroup('conv', grp[0])" :class="{ active: mainTab === 'conv', lk: !canTab('conv') }" @click="navTo('conv', loadConv)">
+            冥王星<em v-if="conv && conv.open.length" class="navbadge">{{ conv.open.length }}</em><i v-if="!canTab('conv')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('sr', grp[0])" :class="{ active: mainTab === 'sr' }" @click="mainTab = 'sr'; loadSR()">支撐壓力</button>
-          <button v-if="inGroup('admin', grp[0])" :class="{ active: mainTab === 'admin' }" @click="mainTab = 'admin'; loadUsers(); loadNotice()">
+          <button v-if="inGroup('sr', grp[0])" :class="{ active: mainTab === 'sr', lk: !canTab('sr') }" @click="navTo('sr', loadSR)">支撐壓力<i v-if="!canTab('sr')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('admin', grp[0])" :class="{ active: mainTab === 'admin' }" @click="navTo('admin', () => { loadUsers(); loadNotice() })">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
-          <button v-if="inGroup('referral', grp[0])" :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
+          <button v-if="inGroup('referral', grp[0])" :class="{ active: mainTab === 'referral' }" @click="navTo('referral', loadRefAdmin)">
             推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
           </button>
-          <button v-if="inGroup('meanrev', grp[0])" :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
-            火星<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
+          <button v-if="inGroup('meanrev', grp[0])" :class="{ active: mainTab === 'meanrev', lk: !canTab('meanrev') }" @click="navTo('meanrev', loadMeanrev)">
+            火星<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em><i v-if="!canTab('meanrev')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
-            海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
+          <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema', lk: !canTab('bollema') }" @click="navTo('bollema', loadBollema)">
+            海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em><i v-if="!canTab('bollema')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('surge', grp[0])" :class="{ active: mainTab === 'surge' }" @click="mainTab = 'surge'; loadSurge()">
-            爆量脈搏<em v-if="surge && surge.length" class="navbadge">{{ surge.length }}</em>
+          <button v-if="inGroup('surge', grp[0])" :class="{ active: mainTab === 'surge', lk: !canTab('surge') }" @click="navTo('surge', loadSurge)">
+            爆量脈搏<em v-if="surge && surge.length" class="navbadge">{{ surge.length }}</em><i v-if="!canTab('surge')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar' }" @click="mainTab = 'pulsar'; loadPulsar()">
-            脈衝星<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em>
+          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar', lk: !canTab('pulsar') }" @click="navTo('pulsar', loadPulsar)">
+            脈衝星<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em><i v-if="!canTab('pulsar')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsarv3', grp[0])" :class="{ active: mainTab === 'pulsarv3' }" @click="mainTab = 'pulsarv3'; loadPulsarV3()">
-            脈衝星v3<em v-if="pulsarv3 && pulsarv3.open.length" class="navbadge">{{ pulsarv3.open.length }}</em>
+          <button v-if="inGroup('pulsarv3', grp[0])" :class="{ active: mainTab === 'pulsarv3', lk: !canTab('pulsarv3') }" @click="navTo('pulsarv3', loadPulsarV3)">
+            脈衝星v3<em v-if="pulsarv3 && pulsarv3.open.length" class="navbadge">{{ pulsarv3.open.length }}</em><i v-if="!canTab('pulsarv3')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsarv5', grp[0])" :class="{ active: mainTab === 'pulsarv5' }" @click="mainTab = 'pulsarv5'; loadPulsarV5()">
-            脈衝星v5<em v-if="pulsarv5 && pulsarv5.open.length" class="navbadge">{{ pulsarv5.open.length }}</em>
+          <button v-if="inGroup('pulsarv5', grp[0])" :class="{ active: mainTab === 'pulsarv5', lk: !canTab('pulsarv5') }" @click="navTo('pulsarv5', loadPulsarV5)">
+            脈衝星v5<em v-if="pulsarv5 && pulsarv5.open.length" class="navbadge">{{ pulsarv5.open.length }}</em><i v-if="!canTab('pulsarv5')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsarv6', grp[0])" :class="{ active: mainTab === 'pulsarv6' }" @click="mainTab = 'pulsarv6'; loadPulsarV6()">
-            脈衝星v6<em v-if="pulsarv6 && pulsarv6.open.length" class="navbadge">{{ pulsarv6.open.length }}</em>
+          <button v-if="inGroup('pulsarv6', grp[0])" :class="{ active: mainTab === 'pulsarv6', lk: !canTab('pulsarv6') }" @click="navTo('pulsarv6', loadPulsarV6)">
+            脈衝星v6<em v-if="pulsarv6 && pulsarv6.open.length" class="navbadge">{{ pulsarv6.open.length }}</em><i v-if="!canTab('pulsarv6')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock' }" @click="mainTab = 'orderblock'; loadOrderBlock()">
-            訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em>
+          <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock', lk: !canTab('orderblock') }" @click="navTo('orderblock', loadOrderBlock)">
+            訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em><i v-if="!canTab('orderblock')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('orderblockv2', grp[0])" :class="{ active: mainTab === 'orderblockv2' }" @click="mainTab = 'orderblockv2'; loadOrderBlockV2()">
-            訂單塊v2<em v-if="orderblockv2 && orderblockv2.open.length" class="navbadge">{{ orderblockv2.open.length }}</em>
+          <button v-if="inGroup('orderblockv2', grp[0])" :class="{ active: mainTab === 'orderblockv2', lk: !canTab('orderblockv2') }" @click="navTo('orderblockv2', loadOrderBlockV2)">
+            訂單塊v2<em v-if="orderblockv2 && orderblockv2.open.length" class="navbadge">{{ orderblockv2.open.length }}</em><i v-if="!canTab('orderblockv2')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">反轉訊號</button>
+          <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf', lk: !canTab('srmtf') }" @click="navTo('srmtf', loadSRMTF)">反轉訊號<i v-if="!canTab('srmtf')" class="navlk">🔒</i></button>
         </div>
       </div>
       </template>
@@ -3199,6 +3219,10 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
 .nav-brand-name{ font-family:var(--f-disp); font-weight:800; font-size:17px; letter-spacing:.4px;
   color:var(--c-gold); text-shadow:0 0 12px rgba(232,184,75,.45); white-space:nowrap; }
 .nav-brand:hover .nav-brand-name{ color:var(--c-gold-b); }
+/* 無權限分頁:導覽鈕降透明度 + 小鎖頭(仍可點,點了跳提示)*/
+.mainnav .navbtns > button.lk{ color:var(--c-mut2); }
+.mainnav .navbtns > button.lk:hover{ color:var(--c-txt); }
+.mainnav .navbtns > button .navlk{ font-style:normal; font-size:9px; opacity:.6; margin-left:5px; vertical-align:middle; }
 
 /* ============ optimize Phase 1:左側欄外殼(桌機 ≥769)============ */
 @media (min-width: 769px){
