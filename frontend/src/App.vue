@@ -1740,7 +1740,7 @@ watch([role, tabPerms, authReady], () => {
         <button class="regbtn uc-out" @click="logout" title="登出">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
-      <span class="brand">數據看板</span>
+      <span class="brand">JMCH趨勢羅盤</span>
     </div>
   </header>
 
@@ -2139,6 +2139,11 @@ watch([role, tabPerms, authReady], () => {
 
     <!-- nav -->
     <nav class="mainnav" :class="{ 'side-open': sideOpen }" @click="sideOpen = false">
+      <!-- 品牌:logo + 站名(取代原本純文字的 ::before) -->
+      <div class="nav-brand" @click.stop="mainTab = 'home'; sideOpen = false">
+        <img :src="logoUrl" class="nav-brand-logo" alt="JMCH" />
+        <span class="nav-brand-name">JMCH趨勢羅盤</span>
+      </div>
       <!-- 總覽:固定在最上面,不走身分分組;點它回到市場總覽頁 -->
       <div class="navrow">
         <span class="navgroup">首頁</span>
@@ -3181,6 +3186,15 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
 .authbox h3, .welcomebox h3, .nb-title, .wc-title { font-family: var(--f-disp); }
 .mono, .rec-price, .coin, .score, .gauge-val, td.r, .om, .ignite { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 
+/* 側欄/抽屜品牌頭:logo + 站名(桌機側欄與手機抽屜共用)*/
+.nav-brand{ display:flex; align-items:center; gap:9px; padding:2px 8px 13px; margin-bottom:6px;
+  border-bottom:1px solid var(--c-line); cursor:pointer; }
+.nav-brand-logo{ width:30px; height:30px; border-radius:7px; object-fit:contain; flex:0 0 auto;
+  background:rgba(232,184,75,.08); padding:3px; box-shadow:0 0 0 1px var(--c-line); }
+.nav-brand-name{ font-family:var(--f-disp); font-weight:800; font-size:16px; letter-spacing:.4px;
+  color:var(--c-txt); white-space:nowrap; }
+.nav-brand:hover .nav-brand-name{ color:var(--c-gold); }
+
 /* ============ optimize Phase 1:左側欄外殼(桌機 ≥769)============ */
 @media (min-width: 769px){
   .mainnav{
@@ -3189,11 +3203,6 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
     overflow-y:auto; margin:0; padding:14px 10px 20px;
     background:linear-gradient(180deg,#0c0e14,#0a0b0f);
     border-right:1px solid var(--c-line); z-index:60;
-  }
-  .mainnav::before{
-    content:"數據看板"; display:block; font-family:var(--f-disp); font-weight:700;
-    font-size:16px; letter-spacing:.5px; color:var(--c-txt);
-    padding:4px 8px 14px; margin-bottom:6px; border-bottom:1px solid var(--c-line);
   }
   .mainnav .navrow{ display:flex; flex-direction:column; align-items:stretch; gap:2px; margin:8px 0 0; }
   .mainnav .navgroup{
@@ -3232,8 +3241,6 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
     display:flex; flex-direction:column; align-items:stretch; gap:2px;
   }
   .mainnav.side-open{ transform:translateX(0) !important; }
-  .mainnav::before{ content:"數據看板"; display:block; font-family:var(--f-disp); font-weight:700; font-size:16px;
-    color:var(--c-txt); padding:4px 8px 14px; border-bottom:1px solid var(--c-line); margin-bottom:6px; }
   .mainnav .navrow{ display:flex; flex-direction:column; align-items:stretch; gap:2px; margin:8px 0 0; }
   .mainnav .navgroup{ font-family:var(--f-disp); font-size:9.5px; letter-spacing:2px; text-transform:uppercase;
     color:var(--c-mut2); padding:8px 8px 4px; text-align:left; }
