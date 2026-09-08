@@ -67,6 +67,11 @@ type CoinDetail struct {
 	Breakdown []scorer.BreakdownItem `json:"breakdown"`
 	Stats     Stats                  `json:"stats"`
 	Related   []RelatedCoin          `json:"related"`
+	// 幣種明細 modal 用(依 coin.html mock):現價 / 24h 高低 / 近 24h 收盤 sparkline
+	Price   float64   `json:"price"`
+	High24h float64   `json:"high_24h"`
+	Low24h  float64   `json:"low_24h"`
+	Spark   []float64 `json:"spark"`
 }
 
 // Detail returns the cached score card for a tracked coin. For an untracked
@@ -136,6 +141,22 @@ func (s *Store) computeDetailCore(coin string, mom24h, btcChg float64) (CoinDeta
 		vol24 += c.QuoteVol
 	}
 
+	// 幣種明細 modal:現價(最後收盤)、24h 高/低、近 24h 收盤 sparkline
+	var price, hi, lo float64
+	spark := make([]float64, 0, len(kl))
+	for _, c := range kl {
+		if hi == 0 || c.High > hi {
+			hi = c.High
+		}
+		if lo == 0 || c.Low < lo {
+			lo = c.Low
+		}
+		spark = append(spark, c.Close)
+	}
+	if len(kl) > 0 {
+		price = kl[len(kl)-1].Close
+	}
+
 	res := scorer.ScoreDetail(scorer.DetailInput{
 		Coin:        coin,
 		OIChg1h:     oiChg1h,
@@ -168,6 +189,10 @@ func (s *Store) computeDetailCore(coin string, mom24h, btcChg float64) (CoinDeta
 			LongPct: round2(ls.LongAccount * 100),
 			Vol24h:  vol24,
 		},
+		Price:   price,
+		High24h: hi,
+		Low24h:  lo,
+		Spark:   spark,
 	}
 
 	snap := Snapshot{

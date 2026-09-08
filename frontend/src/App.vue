@@ -1266,6 +1266,30 @@ function toneClass(t) {
 function scoreClass(n) {
   return n > 0 ? 'long' : n < 0 ? 'short' : 'neutral'
 }
+// 幣種 modal:dirbar 5 格強度(rating 0..10 → 0..5)
+const detailBars = computed(() => {
+  const r = detail.value ? detail.value.rating : 0
+  return Math.max(0, Math.min(5, Math.round(r / 2)))
+})
+// 多空比(帳戶):long% / short%
+const detailLSR = computed(() => {
+  const lp = detail.value && detail.value.stats ? detail.value.stats.long_pct : 0
+  const sp = 100 - lp
+  return sp > 0 ? (lp / sp).toFixed(2) : '—'
+})
+// 近 24h 收盤 sparkline → SVG(折線 + 面積);顏色依 24h 漲跌
+const detailSpark = computed(() => {
+  const s = (detail.value && detail.value.spark) || []
+  if (s.length < 2) return null
+  const W = 520, H = 56, pad = 4
+  const lo = Math.min(...s), hi = Math.max(...s), span = hi - lo || 1
+  const pts = s.map((v, i) => {
+    const x = (i / (s.length - 1)) * W
+    const y = H - pad - ((v - lo) / span) * (H - pad * 2)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  })
+  return { line: pts.join(' '), area: `0,${H} ${pts.join(' ')} ${W},${H}` }
+})
 
 // load everything the current role is allowed to see (gated endpoints 403 quietly)
 //
@@ -2937,11 +2961,11 @@ watch([role, tabPerms, authReady], () => {
     </div>
   </div>
 
-  <!-- detail drawer -->
-  <div v-if="detailCoin" class="overlay" @click="closeDetail">
-    <aside class="drawer" @click.stop>
-      <button class="close" @click="closeDetail">✕</button>
-      <p v-if="detailLoading" class="loading">載入 {{ detailCoin }} 詳情…</p>
+  <!-- 幣種明細 modal(置中,依 coin.html mock)-->
+  <div v-if="detailCoin" class="overlay overlay-center" @click="closeDetail">
+    <div class="coinmodal" @click.stop>
+      <button class="cm-x" @click="closeDetail">✕</button>
+      <p v-if="detailLoading" class="loading" style="padding:32px 24px">載入 {{ detailCoin }} 詳情…</p>
       <!-- 免費牆:被鎖時顯示解鎖面板(不假造點位,只示意被鎖區塊 + 導向登入/VIP) -->
       <div v-else-if="detailLocked" class="lockwall">
         <div class="lw-top">
@@ -2967,56 +2991,94 @@ watch([role, tabPerms, authReady], () => {
           </div>
         </div>
       </div>
-      <p v-else-if="detailError" class="err">{{ detailError }}</p>
+      <p v-else-if="detailError" class="err" style="padding:24px">{{ detailError }}</p>
       <template v-else-if="detail">
-        <section class="card rationale" :class="biasClass(detail.bias)">
-          <div class="rationale-head">
-            <span class="dot" :class="biasClass(detail.bias)"></span>
-            <h2>{{ detail.coin }} · {{ rationaleTitle() }}</h2>
-            <span class="badge" :class="biasClass(detail.bias)">{{ headerBadge }}<small>{{ detail.bias_label }}</small></span>
+        <!-- header:符號 + 幣種 + 板塊 + 現價 -->
+        <div class="cm-head">
+          <div class="cm-sym">{{ detail.coin.slice(0, 4) }}</div>
+          <div class="cm-title">
+            <div class="cm-s">{{ detail.coin }} <span class="badge" :class="biasClass(detail.bias)">{{ detail.bias_label }}</span></div>
+            <div class="cm-n">{{ detail.sector }} · 永續合約</div>
           </div>
-          <div v-for="r in detail.rationale" :key="r.label" class="rationale-row">
-            <span class="rl-label">{{ r.label }}</span>
-            <span class="tag" :class="toneClass(r.tone)">{{ r.tag }}</span>
-            <span class="rl-text">{{ r.text }}</span>
+          <div class="cm-price" v-if="detail.price">
+            <div class="p">{{ fmtPrice(detail.price) }}</div>
+            <div class="c" :class="detail.stats.chg_24h >= 0 ? 'long' : 'short'">{{ fmtPct(detail.stats.chg_24h) }}</div>
           </div>
-        </section>
-        <div class="stats">
-          <div class="stat"><div class="stat-k">24H 漲跌</div><div class="stat-v" :class="detail.stats.chg_24h >= 0 ? 'long' : 'short'">{{ fmtPct(detail.stats.chg_24h) }}</div></div>
-          <div class="stat"><div class="stat-k">資金費率</div><div class="stat-v" :class="detail.stats.funding_rate >= 0 ? 'long' : 'short'">{{ (detail.stats.funding_rate * 100).toFixed(4) }}%</div></div>
-          <div class="stat"><div class="stat-k">未平倉量</div><div class="stat-v">{{ fmtNum(detail.stats.oi_value) }} USDT</div></div>
-          <div class="stat"><div class="stat-k">建議多空</div><div class="stat-v" :class="biasClass(detail.bias)">{{ detail.bias_label }}</div></div>
-          <div class="stat span2"><div class="stat-k">綜合評分</div><div class="dots"><span v-for="(on, i) in ratingDots" :key="i" class="seg" :class="{ on, [biasClass(detail.bias)]: on }"></span></div></div>
         </div>
-        <section class="card">
-          <h3>評分依據</h3>
-          <div v-for="b in detail.breakdown" :key="b.label" class="bd-row" :class="{ info: b.info }">
-            <span class="bd-label">{{ b.label }}</span><span class="bd-note">{{ b.note }}</span>
-            <span v-if="b.info" class="bd-score muted" title="回測顯示為反指標，僅供參考，不計入評分">參考</span>
-            <span v-else class="bd-score" :class="scoreClass(b.score)">{{ b.score >= 0 ? '+' : '' }}{{ b.score }} 分</span>
+        <div class="cm-body">
+          <!-- 方向 + 強度 -->
+          <div class="cm-dir" :class="biasClass(detail.bias)">
+            <span class="dl">{{ detail.bias === 'long' ? '做多推薦' : detail.bias === 'short' ? '做空推薦' : '中性 · 觀察' }}</span>
+            <span class="cm-bars"><i v-for="n in 5" :key="n" :class="{ on: n <= detailBars, [biasClass(detail.bias)]: n <= detailBars }"></i></span>
           </div>
-          <div v-if="detail.liq_factor < 1" class="bd-row info">
-            <span class="bd-label">流動性抑制</span>
-            <span class="bd-note">低流動性 · 小計 {{ detail.raw >= 0 ? '+' : '' }}{{ detail.raw }} ×{{ detail.liq_factor.toFixed(2) }}</span>
-            <span class="bd-score muted" title="24h 成交量偏低，評分按比例縮減">×{{ detail.liq_factor.toFixed(2) }}</span>
+
+          <!-- 綜合評分 + 評分依據 -->
+          <div class="cm-grid">
+            <div class="cm-scorebig"><div class="v">{{ detail.rating }}<small>/10</small></div><div class="k">綜合評分</div></div>
+            <div class="cm-comp">
+              <div v-for="b in detail.breakdown.slice(0, 5)" :key="b.label" class="cm-crow">
+                <span class="cl">{{ b.label }}</span>
+                <span class="cm-cscore" :class="b.info ? 'muted' : scoreClass(b.score)">{{ b.info ? '參考' : (b.score >= 0 ? '+' : '') + b.score + ' 分' }}</span>
+              </div>
+            </div>
           </div>
-          <div class="bd-row total">
-            <span class="bd-label">總分</span><span class="bd-note"></span>
-            <span class="bd-score" :class="scoreClass(detail.total)">{{ detail.total >= 0 ? '+' : '' }}{{ detail.total }} 分 = {{ detail.rating }}/10</span>
+
+          <!-- 關鍵數據 -->
+          <p class="eyebrow">關鍵數據</p>
+          <div class="cm-kv">
+            <div class="row"><span>未平倉 OI</span><b>{{ fmtNum(detail.stats.oi_value) }}</b></div>
+            <div class="row"><span>資金費率</span><b :class="detail.stats.funding_rate >= 0 ? 'long' : 'short'">{{ (detail.stats.funding_rate * 100).toFixed(4) }}%</b></div>
+            <div class="row"><span>24h 成交量</span><b>{{ fmtNum(detail.stats.vol_24h) }}</b></div>
+            <div class="row"><span>多空比(帳戶)</span><b>{{ detailLSR }}</b></div>
+            <div class="row" v-if="detail.high_24h"><span>24h 高</span><b>{{ fmtPrice(detail.high_24h) }}</b></div>
+            <div class="row" v-if="detail.low_24h"><span>24h 低</span><b>{{ fmtPrice(detail.low_24h) }}</b></div>
           </div>
-        </section>
-        <section v-if="detail.related.length" class="card">
-          <h3>相關幣種 <span class="sub">{{ detail.sector }}</span></h3>
-          <div class="related">
-            <button v-for="rc in detail.related" :key="rc.coin" class="rc" @click="openDetail(rc.coin)">
-              <div class="rc-coin">{{ rc.coin }}</div>
-              <div class="rc-chg" :class="rc.chg >= 0 ? 'long' : 'short'">{{ fmtPct(rc.chg) }}</div>
-              <div class="rc-score" :class="scoreClass(rc.score)">{{ rc.score >= 0 ? '+' : '' }}{{ rc.score }}</div>
-            </button>
+
+          <!-- 近 24h 走勢 -->
+          <template v-if="detailSpark">
+            <p class="eyebrow">近 24h 走勢</p>
+            <svg class="cm-spark" viewBox="0 0 520 56" preserveAspectRatio="none">
+              <polygon :points="detailSpark.area" :fill="detail.stats.chg_24h >= 0 ? 'rgba(55,214,138,.12)' : 'rgba(255,92,108,.12)'" />
+              <polyline :points="detailSpark.line" fill="none" :stroke="detail.stats.chg_24h >= 0 ? 'var(--c-up)' : 'var(--c-dn)'" stroke-width="2" vector-effect="non-scaling-stroke" />
+            </svg>
+          </template>
+
+          <!-- 評分理由(保留真資料)-->
+          <template v-if="detail.rationale && detail.rationale.length">
+            <p class="eyebrow">{{ rationaleTitle() }}</p>
+            <div class="cm-rationale">
+              <div v-for="r in detail.rationale" :key="r.label" class="cm-rrow">
+                <span class="rl-label">{{ r.label }}</span>
+                <span class="tag" :class="toneClass(r.tone)">{{ r.tag }}</span>
+                <span class="rl-text">{{ r.text }}</span>
+              </div>
+            </div>
+          </template>
+
+          <!-- 進場參考:VIP 看得到導引;非 VIP 鎖定 -->
+          <p class="eyebrow">進場參考</p>
+          <div v-if="can('vip')" class="cm-entry-open">完整進出場點位請見左側各 <b>VIP 策略</b> 分頁(訂單塊 / 脈衝星 / 星軌 …),依策略即時計算與追蹤。</div>
+          <div v-else class="plock">
+            <div class="plock-blur" aria-hidden="true"><span>進場 0.XXXX · 止損 0.XXXX</span><span>TP 0.XXXX / 0.XXXX</span></div>
+            <div class="plock-lay"><button class="lw-cta" @click="unlockDetail">🔒 {{ role === 'public' ? '登入' : '加入 VIP' }}解鎖進場點位</button></div>
           </div>
-        </section>
+
+          <!-- 相關幣種 -->
+          <template v-if="detail.related && detail.related.length">
+            <p class="eyebrow">相關幣種 · {{ detail.sector }}</p>
+            <div class="related">
+              <button v-for="rc in detail.related" :key="rc.coin" class="rc" @click="openDetail(rc.coin)">
+                <div class="rc-coin">{{ rc.coin }}</div>
+                <div class="rc-chg" :class="rc.chg >= 0 ? 'long' : 'short'">{{ fmtPct(rc.chg) }}</div>
+                <div class="rc-score" :class="scoreClass(rc.score)">{{ rc.score >= 0 ? '+' : '' }}{{ rc.score }}</div>
+              </button>
+            </div>
+          </template>
+
+          <p class="cm-note">公開版僅提供數據與評分,不提供進場 / 止盈止損點位。⚠️ 非投資建議。</p>
+        </div>
       </template>
-    </aside>
+    </div>
   </div>
 </template>
 
@@ -4238,5 +4300,61 @@ footer { padding: 18px 0 30px; text-align: center; }
   .acc-quick{ margin-left:0; width:100%; }
   .rb-btns{ margin-left:0; }
   .vipcard .acc-apply{ margin-left:0; width:100%; text-align:center; }
+}
+</style>
+
+<!-- ============ optimize:幣種明細 modal(依 coin.html mock,置中)============ -->
+<style>
+.coinmodal{ position:relative; background:var(--c-surf); border:1px solid var(--c-line2); border-radius:18px; max-width:560px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 30px 70px -24px rgba(0,0,0,.8); }
+.cm-x{ position:absolute; top:14px; right:16px; width:30px; height:30px; border-radius:9px; background:var(--c-bg2); border:1px solid var(--c-line); color:var(--c-mut); font-size:14px; cursor:pointer; z-index:2; }
+.cm-x:hover{ color:var(--c-txt); }
+.cm-head{ display:flex; align-items:center; gap:12px; padding:18px 20px 14px; border-bottom:1px solid var(--c-line); position:sticky; top:0; background:var(--c-surf); z-index:1; }
+.cm-sym{ width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,var(--c-surf2),var(--c-bg2)); border:1px solid var(--c-line2); display:grid; place-items:center; font-family:var(--f-disp); font-weight:700; font-size:16px; color:var(--c-gold-b); flex-shrink:0; }
+.cm-title .cm-s{ font-family:var(--f-disp); font-weight:700; font-size:19px; display:flex; align-items:center; gap:8px; }
+.cm-title .cm-n{ font-size:11.5px; color:var(--c-mut); }
+.cm-price{ margin-left:auto; text-align:right; padding-right:34px; }
+.cm-price .p{ font-family:var(--f-mono); font-weight:600; font-size:18px; }
+.cm-price .c{ font-family:var(--f-mono); font-size:12px; }
+.cm-body{ padding:16px 20px 20px; }
+.cm-dir{ display:flex; align-items:center; gap:10px; background:var(--c-up-bg); border:1px solid rgba(55,214,138,.35); border-radius:11px; padding:10px 14px; margin-bottom:16px; }
+.cm-dir.short{ background:var(--c-dn-bg); border-color:rgba(255,92,108,.35); }
+.cm-dir.neutral{ background:var(--c-surf2); border-color:var(--c-line); }
+.cm-dir .dl{ font-family:var(--f-disp); font-weight:700; font-size:14px; color:var(--c-up); }
+.cm-dir.short .dl{ color:var(--c-dn); } .cm-dir.neutral .dl{ color:var(--c-mut); }
+.cm-bars{ display:flex; gap:3px; margin-left:auto; }
+.cm-bars i{ width:6px; height:16px; border-radius:2px; background:var(--c-line2); }
+.cm-bars i.on.long{ background:var(--c-up); } .cm-bars i.on.short{ background:var(--c-dn); } .cm-bars i.on.neutral{ background:var(--c-mut); }
+.cm-grid{ display:grid; grid-template-columns:150px 1fr; gap:16px; align-items:center; margin-bottom:16px; }
+.cm-scorebig{ text-align:center; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:14px; padding:14px; }
+.cm-scorebig .v{ font-family:var(--f-mono); font-weight:700; font-size:40px; line-height:1; color:var(--c-gold-b); }
+.cm-scorebig .v small{ font-size:16px; color:var(--c-mut); }
+.cm-scorebig .k{ font-size:11px; color:var(--c-mut); margin-top:4px; }
+.cm-comp{ display:flex; flex-direction:column; gap:8px; }
+.cm-crow{ display:flex; align-items:center; justify-content:space-between; font-size:12.5px; }
+.cm-crow .cl{ color:var(--c-mut); }
+.cm-cscore{ font-family:var(--f-mono); font-weight:600; }
+.cm-cscore.long{ color:var(--c-up); } .cm-cscore.short{ color:var(--c-dn); } .cm-cscore.muted, .cm-cscore.neutral{ color:var(--c-mut2); }
+.cm-kv{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; margin-bottom:16px; }
+.cm-kv .row{ display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--c-line); font-size:12.5px; color:var(--c-mut); }
+.cm-kv .row b{ font-family:var(--f-mono); color:var(--c-txt); }
+.cm-spark{ width:100%; height:56px; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:10px; margin-bottom:16px; display:block; }
+.cm-rationale{ display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.cm-rrow{ display:grid; grid-template-columns:auto auto 1fr; gap:8px; align-items:center; font-size:12.5px; }
+.cm-rrow .rl-label{ font-family:var(--f-disp); font-weight:600; color:var(--c-txt); white-space:nowrap; }
+.cm-rrow .rl-text{ color:var(--c-mut); }
+.cm-rrow .tag{ font-size:10px; font-family:var(--f-mono); border-radius:5px; padding:1px 6px; }
+.cm-rrow .tag.long{ background:var(--c-up-bg); color:var(--c-up); } .cm-rrow .tag.short{ background:var(--c-dn-bg); color:var(--c-dn); } .cm-rrow .tag.neutral{ background:var(--c-surf2); color:var(--c-mut); }
+/* 進場參考:VIP 導引 / 非 VIP 鎖定 */
+.cm-entry-open{ font-size:12.5px; color:var(--c-mut); background:var(--c-bg2); border:1px solid var(--c-line); border-radius:11px; padding:12px 14px; margin-bottom:12px; }
+.cm-entry-open b{ color:var(--c-gold-b); }
+.plock{ position:relative; border:1px solid var(--c-gold-d); border-radius:11px; overflow:hidden; background:var(--c-bg2); margin-bottom:12px; }
+.plock-blur{ filter:blur(6px); opacity:.75; padding:14px; display:flex; justify-content:space-between; font-family:var(--f-mono); font-size:13px; user-select:none; }
+.plock-lay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:linear-gradient(90deg,rgba(10,11,15,.3),rgba(10,11,15,.6)); }
+.cm-note{ font-size:11px; color:var(--c-mut2); margin:12px 0 0; }
+@media (max-width:768px){
+  .cm-grid{ grid-template-columns:1fr; }
+  .cm-kv{ grid-template-columns:1fr; }
+  .cm-rrow{ grid-template-columns:auto 1fr; }
+  .cm-rrow .tag{ grid-column:2; justify-self:start; }
 }
 </style>
