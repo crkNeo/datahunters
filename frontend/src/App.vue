@@ -1671,13 +1671,13 @@ watch([role, tabPerms, authReady], () => {
       <span v-if="home" class="regime">BTC 趨勢
         <b :class="btcRegime">{{ btcRegime === 'long' ? '偏多' : btcRegime === 'short' ? '偏空' : '中性' }}</b>
       </span>
-      <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openAccount" title="個人中心">{{ username }}</button> <em>{{ role }}</em>
-        <em v-if="regTime" class="regdate" title="註冊時間">註冊 {{ fmtRegDate(regTime) }}</em>
-        <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
-        <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
-        <span v-else class="qtag good" title="推播已開啟">🔔 已開</span>
-        <button class="regbtn" @click="openPwModal" title="修改密碼">🔑 密碼</button>
-        <button class="regbtn" @click="logout">登出</button>
+      <span v-if="role !== 'public'" class="userchip">
+        <button class="namebtn" @click="openAccount" title="個人中心 · 通知/密碼/安裝在此設定">
+          <span class="uc-av">{{ (username || '?').slice(0, 1).toUpperCase() }}</span>
+          <span class="uc-name">{{ username }}</span>
+          <em class="uc-role">{{ role }}</em>
+        </button>
+        <button class="regbtn uc-out" @click="logout" title="登出">登出</button>
       </span>
       <button v-else class="regbtn login" @click="loginOpen = true">登入</button>
       <span class="brand">數據看板</span>
@@ -4370,4 +4370,15 @@ footer { padding: 18px 0 30px; text-align: center; }
 .dir.long{ background:var(--c-up-bg); color:var(--c-up); }
 .dir.short{ background:var(--c-dn-bg); color:var(--c-dn); }
 .dir.neutral{ background:var(--c-surf2); color:var(--c-mut); }
+</style>
+
+<!-- ============ optimize:頂欄 userchip 清爽 pill(名字→個人中心 + 登出)============ -->
+<style>
+.topbar .userchip{ display:flex; align-items:center; gap:8px; }
+.topbar .userchip .namebtn{ display:flex; align-items:center; gap:8px; background:var(--c-surf); border:1px solid var(--c-line); border-radius:10px; padding:5px 11px 5px 6px; cursor:pointer; line-height:1; }
+.topbar .userchip .namebtn:hover{ border-color:var(--c-gold-d); }
+.uc-av{ width:24px; height:24px; border-radius:7px; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold-d)); color:#161206; font-family:var(--f-disp); font-weight:700; font-size:12px; display:grid; place-items:center; flex-shrink:0; }
+.uc-name{ font-family:var(--f-disp); font-weight:600; font-size:13px; color:var(--c-txt); }
+.uc-role{ font-family:var(--f-mono); font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--c-gold-b); background:var(--c-gold-soft); border-radius:4px; padding:1px 5px; font-style:normal; }
+.topbar .userchip .uc-out{ font-size:12px; }
 </style>
