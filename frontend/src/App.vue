@@ -3189,10 +3189,10 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
 /* 側欄/抽屜品牌頭:logo + 站名(桌機側欄與手機抽屜共用)*/
 .nav-brand{ display:flex; align-items:center; gap:9px; padding:2px 8px 13px; margin-bottom:6px;
   border-bottom:1px solid var(--c-line); cursor:pointer; }
-.nav-brand-logo{ width:46px; height:46px; object-fit:contain; flex:0 0 auto; }
-.nav-brand-name{ font-family:var(--f-disp); font-weight:800; font-size:16px; letter-spacing:.4px;
-  color:var(--c-txt); white-space:nowrap; }
-.nav-brand:hover .nav-brand-name{ color:var(--c-gold); }
+.nav-brand-logo{ width:60px; height:60px; object-fit:contain; flex:0 0 auto; }
+.nav-brand-name{ font-family:var(--f-disp); font-weight:800; font-size:17px; letter-spacing:.4px;
+  color:var(--c-gold); text-shadow:0 0 12px rgba(232,184,75,.45); white-space:nowrap; }
+.nav-brand:hover .nav-brand-name{ color:var(--c-gold-b); }
 
 /* ============ optimize Phase 1:左側欄外殼(桌機 ≥769)============ */
 @media (min-width: 769px){
