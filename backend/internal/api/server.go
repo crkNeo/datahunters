@@ -118,6 +118,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))            // 首頁整點大盤分析橫幅
+	mux.HandleFunc("/api/strategy-today", s.gate(P, s.handleStrategyToday))  // 首頁「今日策略前三名」(依角色可見範圍)
 	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta))          // 各策略類型標籤 + 風控警語旗標
 	mux.HandleFunc("/api/tab-perms", s.gate(P, s.handleTabPerms))            // 各分頁所需最低身分(給前端決定顯示哪些)
 	mux.HandleFunc("/api/tab-kinds", s.gate(P, s.handleTabKinds))            // 各分頁類型 資訊/訊號(給前端分列)
@@ -891,6 +892,17 @@ func (s *Server) handleStratConfig(w http.ResponseWriter, r *http.Request) {
 // that the strategy pages render. Admin-only fields are not exposed here.
 func (s *Server) handleStratMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.StrategyMeta())
+}
+
+// handleStrategyToday serves the home「今日策略 · 表現前三名」board: today's closed-trade
+// performance per strategy the caller's role can see, best total-PnL first, top 3.
+// Read-only aggregate over paper_trades; role resolved per request so it respects tier.
+func (s *Server) handleStrategyToday(w http.ResponseWriter, r *http.Request) {
+	rows := s.store.StrategyToday(s.roleOf(r))
+	if len(rows) > 3 {
+		rows = rows[:3]
+	}
+	writeJSON(w, map[string]any{"rows": rows})
 }
 
 // handleTabPerms serves the PUBLIC tab→minimum-role map so the nav can hide what

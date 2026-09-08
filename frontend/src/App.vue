@@ -1020,6 +1020,20 @@ const maiBody = computed(() => {
   return i > 0 ? marketAI.value.text.slice(i + 1).trim() : marketAI.value.text
 })
 
+// 首頁「今日策略 · 表現前三名」:今日各策略平倉表現(依角色可見範圍,後端已過濾+取前三)
+const stratToday = ref([])
+async function loadStrategyToday() {
+  try {
+    const res = await authFetch('/api/strategy-today')
+    if (res.ok) { const d = await res.json(); stratToday.value = (d && d.rows) || [] }
+    else stratToday.value = []
+  } catch (e) { stratToday.value = [] }
+}
+// 收益條寬度:相對本批最大絕對損益,至少留 8% 讓小值仍可見
+const stratMaxAbs = computed(() => Math.max(0.0001, ...stratToday.value.map((s) => Math.abs(s.total_pnl))))
+function stratBarW(pnl) { return Math.max(8, Math.round(Math.abs(pnl) / stratMaxAbs.value * 100)) }
+function tierLabel(t) { return t === 'vip' ? 'VIP' : t === 'member' ? '會員' : t === 'admin' ? '管理' : '' }
+
 // 板塊強弱/輪動 (public, hourly)
 
 
@@ -1270,6 +1284,7 @@ function loadAll() {
   loadNews()
   loadRobinhood()
   loadMarketAI()
+  loadStrategyToday()
   loadArticles()
   // 這裡的條件必須跟導覽列一樣用 canTab(),不能寫死 can('member')/can('vip') ——
   // 標籤顯示是後台可調的,載入卻寫死身分的話,把某個分頁調成公開之後訪客會「看得到
@@ -2018,14 +2033,24 @@ watch([role, tabPerms, authReady], () => {
       <div class="mai-live-body">{{ maiBody }}</div>
     </div>
 
-    <!-- 今日策略 · 表現前三名(彙總資料上線前先導向各策略分頁) -->
+    <!-- 今日策略 · 表現前三名:今日各策略平倉表現(後端依角色可見範圍過濾+取前三) -->
     <section class="card stratrank" v-if="home">
       <div class="mai-live-top">
         <span class="mai-live-title"><span class="mai-dot gold"></span>今日策略 · 表現前三名</span>
         <span class="mai-live-time">以平倉為主 · 依你的層級顯示</span>
       </div>
-      <div class="cmp-empty">今日策略彙總即將上線 · 各策略完整明細與進行中訊號請見左側「VIP · 策略」分頁</div>
-      <p class="bt-note">將只計今日已平倉訊號 · 依你的層級顯示可見策略 · ⚠️ 非投資建議</p>
+      <template v-if="stratToday.length">
+        <div class="cmp-cols"><span>策略</span><span>今日收益(平倉)</span><span class="r">收益</span><span class="r">勝率</span><span class="r">平倉</span></div>
+        <button v-for="(s, i) in stratToday" :key="s.tab" class="cmprow" @click="mainTab = s.tab">
+          <span class="snm"><i class="medal">{{ medal(i) }}</i>{{ s.label }}<em v-if="tierLabel(s.tier)" class="tier" :class="s.tier">{{ tierLabel(s.tier) }}</em></span>
+          <div class="bararea"><span class="track"></span><span class="fill" :class="{ neg: s.total_pnl < 0 }" :style="{ width: stratBarW(s.total_pnl) + '%' }"></span></div>
+          <span class="r cmp-pnl" :class="s.total_pnl >= 0 ? 'long' : 'short'">{{ s.total_pnl >= 0 ? '+' : '' }}{{ s.total_pnl }}%</span>
+          <span class="r">{{ Math.round(s.win_rate) }}%</span>
+          <span class="r">{{ s.closed }}</span>
+        </button>
+      </template>
+      <div v-else class="cmp-empty">今日尚無已平倉的策略訊號 · 各策略完整明細與進行中訊號請見左側「VIP · 策略」分頁</div>
+      <p class="bt-note">僅計今日已平倉訊號 · 依你的層級顯示可見策略 · ⚠️ 非投資建議</p>
     </section>
 
     <!-- nav -->
@@ -3947,8 +3972,29 @@ footer { padding: 18px 0 30px; text-align: center; }
 /* 策略前三名(彙總上線前空狀態)*/
 .stratrank .mai-dot.gold{ background:var(--c-gold); box-shadow:0 0 8px var(--c-gold); }
 .cmp-empty{ padding:18px; text-align:center; color:var(--c-mut); font-size:12.5px; border:1px dashed var(--c-line2); border-radius:var(--r-md); margin:8px 0 4px; }
+/* 策略前三名比較榜(對應 mock cmprow)*/
+.cmp-cols, .cmprow{ display:grid; grid-template-columns:minmax(140px,1.1fr) minmax(0,2fr) 64px 50px 46px; gap:12px; align-items:center; }
+.cmp-cols{ padding:6px 12px 8px; font-family:var(--f-disp); font-size:9.5px; letter-spacing:1px; text-transform:uppercase; color:var(--c-mut2); }
+.cmp-cols .r{ text-align:right; }
+.cmprow{ width:100%; text-align:left; padding:9px 12px; border-radius:9px; border:1px solid var(--c-line); background:var(--c-bg2); margin-bottom:6px; cursor:pointer; transition:background .15s, border-color .15s; }
+.cmprow:hover{ background:var(--c-surf2); border-color:var(--c-gold-d); }
+.snm{ display:flex; align-items:center; gap:8px; font-family:var(--f-disp); font-weight:600; font-size:13.5px; white-space:nowrap; min-width:0; overflow:hidden; }
+.snm .tier{ font-size:9px; font-weight:700; border-radius:5px; padding:1px 6px; font-family:var(--f-mono); letter-spacing:.5px; font-style:normal; }
+.tier.member{ background:var(--c-steel-bg); color:var(--c-steel); }
+.tier.vip{ background:var(--c-gold-soft); color:var(--c-gold-b); }
+.tier.admin{ background:var(--c-dn-bg); color:var(--c-dn); }
+.bararea{ position:relative; height:20px; }
+.bararea .track{ position:absolute; left:0; right:0; top:6px; height:8px; border-radius:5px; background:var(--c-surf2); }
+.bararea .fill{ position:absolute; left:0; top:3px; height:14px; border-radius:5px; background:linear-gradient(90deg,rgba(55,214,138,.45),var(--c-up)); box-shadow:0 0 12px -2px rgba(55,214,138,.5); }
+.bararea .fill.neg{ background:linear-gradient(90deg,rgba(255,92,108,.45),var(--c-dn)); box-shadow:0 0 12px -2px rgba(255,92,108,.5); }
+.cmprow .r{ text-align:right; font-family:var(--f-mono); font-size:12.5px; color:var(--c-mut); }
+.cmprow .r.cmp-pnl{ font-weight:700; }
 @media (max-width:1024px){ .topgrid{ grid-template-columns:1fr; } }
-@media (max-width:768px){ .rrows{ grid-template-columns:1fr; } }
+@media (max-width:768px){
+  .rrows{ grid-template-columns:1fr; }
+  .cmp-cols, .cmprow{ grid-template-columns:minmax(92px,1.2fr) minmax(0,1fr) 46px 38px 30px; gap:8px; }
+  .snm .tier{ padding:1px 4px; }
+}
 </style>
 
 <!-- ============ optimize:幣種明細免費牆(非會員/VIP 的解鎖面板,取代裸 403)============ -->
