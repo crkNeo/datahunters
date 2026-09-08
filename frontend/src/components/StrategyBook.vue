@@ -164,7 +164,7 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 </template>
 
 <style scoped>
-.pendtag { margin-left: 6px; font-size: 10px; color: #d8ad48; background: #2a2410; border-radius: 6px; padding: 1px 5px; white-space: nowrap; }
-.pendcount { color: #d8ad48; font-weight: 600; font-size: 13px; }
-.tfbadge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 1px 6px; border-radius: 5px; background: #22303f; color: #6db5ff; }
+.pendtag { margin-left: 6px; font-size: 10px; color: var(--c-gold-b); background: var(--c-gold-soft); border-radius: 6px; padding: 1px 5px; white-space: nowrap; font-family: var(--f-mono); }
+.pendcount { color: var(--c-gold-b); font-weight: 600; font-size: 13px; font-family: var(--f-mono); }
+.tfbadge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 1px 6px; border-radius: 5px; background: var(--c-steel-bg); color: var(--c-steel); font-family: var(--f-mono); }
 </style>

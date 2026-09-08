@@ -100,17 +100,17 @@ async function save(publish) {
 </template>
 
 <style scoped>
-.rrstate { font-size: 11px; padding: 2px 8px; border-radius: 6px; margin-left: 8px; font-style: normal; }
-.rrstate.on { background: #103a24; color: #2ec26b; }
-.rrstate.off { background: #2a2410; color: #f4d774; }
+.rrstate { font-size: 11px; padding: 2px 8px; border-radius: 6px; margin-left: 8px; font-style: normal; font-family: var(--f-disp); }
+.rrstate.on { background: var(--c-up-bg); color: var(--c-up); }
+.rrstate.off { background: var(--c-gold-soft); color: var(--c-gold-b); }
 .rrtext { font-family: inherit; line-height: 1.7; resize: vertical; }
 .rrfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .rrbtns { display: flex; gap: 8px; }
-.rrdirty { color: #f4d774; font-style: normal; margin-left: 6px; }
-.minibtn.warn { color: #ff9b9b; border-color: #4a2020; }
-.rrpreview { background: #14171d; border: 1px solid #2a2f3a; border-radius: 10px; padding: 14px 16px; margin-top: 8px; }
-.rrpreview h5 { margin: 0 0 10px; font-size: 15px; color: #e8eaee; }
+.rrdirty { color: var(--c-gold-b); font-style: normal; margin-left: 6px; }
+.minibtn.warn { color: var(--c-dn); border-color: var(--c-dn); }
+.rrpreview { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: 14px 16px; margin-top: 8px; }
+.rrpreview h5 { margin: 0 0 10px; font-size: 15px; color: var(--c-txt); font-family: var(--f-disp); }
 /* white-space: pre-line 讓單一換行也保留,段落之間才靠 <p> 的間距 */
-.rrpara { margin: 0 0 10px; font-size: 13px; line-height: 1.8; color: #c8ccd4; white-space: pre-line; }
+.rrpara { margin: 0 0 10px; font-size: 13px; line-height: 1.8; color: var(--c-txt); white-space: pre-line; }
 .rrpara:last-child { margin-bottom: 0; }
 </style>

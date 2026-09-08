@@ -274,7 +274,7 @@ function fmtReg(ms) {
 </template>
 
 <style scoped>
-.pwreset { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; padding: 8px 12px; background: #1c2a1c; border: 1px solid #2ea86a; border-radius: 8px; }
-.pwreset-code { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: 1px; color: #a9dd8b; background: #0f1a0f; padding: 3px 10px; border-radius: 6px; user-select: all; }
-.pwreset-hint { font-size: 11px; color: #8b909a; }
+.pwreset { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; padding: 8px 12px; background: var(--c-up-bg); border: 1px solid var(--c-up); border-radius: 8px; }
+.pwreset-code { font-family: var(--f-mono); font-size: 15px; letter-spacing: 1px; color: var(--c-up); background: var(--c-bg); padding: 3px 10px; border-radius: 6px; user-select: all; }
+.pwreset-hint { font-size: 11px; color: var(--c-mut); }
 </style>
