@@ -2837,6 +2837,42 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
 .brand, .mk-head h2, .mk-head h3, .psub, .gauge-title, .gauge-val, .rec-head, .bttl,
 .authbox h3, .welcomebox h3, .nb-title, .wc-title { font-family: var(--f-disp); }
 .mono, .rec-price, .coin, .score, .gauge-val, td.r, .om, .ignite { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* ============ optimize Phase 1:左側欄外殼(桌機 ≥769)============ */
+@media (min-width: 769px){
+  .mainnav{
+    position:fixed; left:0; top:0; bottom:0; width:var(--side-w);
+    display:flex; flex-direction:column; align-items:stretch; gap:2px;
+    overflow-y:auto; margin:0; padding:14px 10px 20px;
+    background:linear-gradient(180deg,#0c0e14,#0a0b0f);
+    border-right:1px solid var(--c-line); z-index:60;
+  }
+  .mainnav::before{
+    content:"數據看板"; display:block; font-family:var(--f-disp); font-weight:700;
+    font-size:16px; letter-spacing:.5px; color:var(--c-txt);
+    padding:4px 8px 14px; margin-bottom:6px; border-bottom:1px solid var(--c-line);
+  }
+  .mainnav .navrow{ display:flex; flex-direction:column; align-items:stretch; gap:2px; margin:8px 0 0; }
+  .mainnav .navgroup{
+    font-family:var(--f-disp); font-size:9.5px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--c-mut2); padding:8px 8px 4px; text-align:left;
+  }
+  .mainnav .navbtns{ display:flex; flex-direction:column; align-items:stretch; gap:1px; }
+  .mainnav .navbtns > button{
+    text-align:left; border-radius:9px; padding:8px 11px; font-size:13px; font-weight:500;
+    background:transparent; border:none; color:var(--c-mut); position:relative;
+  }
+  .mainnav .navbtns > button:hover{ background:#13151d; color:var(--c-txt); }
+  .mainnav .navbtns > button.active{ background:var(--c-gold-soft); color:var(--c-gold-b); font-weight:600; }
+  .mainnav .navbtns > button.active::before{
+    content:""; position:absolute; left:0; top:7px; bottom:7px; width:3px; border-radius:3px;
+    background:var(--c-gold); box-shadow:0 0 10px var(--c-gold);
+  }
+  /* 內容區讓出側欄寬度 */
+  .topbar, .wrap, .risk-bar{ margin-left:var(--side-w); }
+  .topbar{ position:sticky; top:0; z-index:20; background:rgba(10,11,15,.92); border-bottom:1px solid var(--c-line); }
+  .topbar .brand{ display:none; } /* 品牌已移到側欄頂 */
+}
 /* logo watermark: fixed, centred, low-opacity — shows through page gaps, never over card content */
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
