@@ -41,6 +41,7 @@ const role = ref('public')
 const username = ref('')
 const regTime = ref(0) // 帳號註冊時間(ms epoch),顯示在使用者名稱旁
 const loginOpen = ref(false)
+const sideOpen = ref(false) // optimize:手機側欄抽屜開關
 const loginForm = ref({ u: '', p: '' })
 const loginErr = ref('')
 const status = ref('')
@@ -1600,8 +1601,12 @@ watch([role, tabPerms, authReady], () => {
   </div>
 
 
+  <!-- optimize:手機側欄抽屜遮罩 -->
+  <div class="side-scrim" :class="{ on: sideOpen }" @click="sideOpen = false"></div>
+
   <!-- top bar -->
   <header class="topbar">
+    <button class="side-burger" @click="sideOpen = !sideOpen" aria-label="選單">☰</button>
     <div class="tickers" v-if="home">
       <span class="tk"><b>BTC</b> {{ fmtPrice(home.ticker.BTC.price) }}
         <em :class="home.ticker.BTC.chg >= 0 ? 'long' : 'short'">{{ fmtPct(home.ticker.BTC.chg) }}</em></span>
@@ -2010,7 +2015,7 @@ watch([role, tabPerms, authReady], () => {
     </div>
 
     <!-- nav -->
-    <nav class="mainnav">
+    <nav class="mainnav" :class="{ 'side-open': sideOpen }" @click="sideOpen = false">
       <!-- 分組是動態的:每顆鈕出現在「它自己被設定的身分組」那一列(inGroup),
            所以後台把某頁調成 VIP,它就會從公開列移到 VIP 列。整列空了連標題一起收掉。
            四列都會走完整份按鈕清單,只是各自只顯示屬於自己那組的 —— 這樣按鈕的
@@ -2872,6 +2877,33 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
   .topbar, .wrap, .risk-bar{ margin-left:var(--side-w); }
   .topbar{ position:sticky; top:0; z-index:20; background:rgba(10,11,15,.92); border-bottom:1px solid var(--c-line); }
   .topbar .brand{ display:none; } /* 品牌已移到側欄頂 */
+}
+
+/* ============ optimize Phase 3:手機側欄抽屜 ============ */
+.side-burger{ display:none; background:none; border:1px solid var(--c-line2); border-radius:8px;
+  color:var(--c-txt); width:34px; height:34px; font-size:15px; cursor:pointer; }
+.side-scrim{ display:none; }
+@media (max-width:768px){
+  .side-burger{ display:grid; place-items:center; }
+  .side-scrim{ position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:55; }
+  .side-scrim.on{ display:block; }
+  .mainnav{
+    position:fixed; left:0; top:0; bottom:0; width:var(--drawer-w); max-width:82vw; z-index:60;
+    overflow-y:auto; margin:0; padding:14px 10px 20px; transform:translateX(-100%); transition:transform .25s ease;
+    background:linear-gradient(180deg,#0c0e14,#0a0b0f); border-right:1px solid var(--c-line);
+    display:flex; flex-direction:column; align-items:stretch; gap:2px;
+  }
+  .mainnav.side-open{ transform:translateX(0) !important; }
+  .mainnav::before{ content:"數據看板"; display:block; font-family:var(--f-disp); font-weight:700; font-size:16px;
+    color:var(--c-txt); padding:4px 8px 14px; border-bottom:1px solid var(--c-line); margin-bottom:6px; }
+  .mainnav .navrow{ display:flex; flex-direction:column; align-items:stretch; gap:2px; margin:8px 0 0; }
+  .mainnav .navgroup{ font-family:var(--f-disp); font-size:9.5px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--c-mut2); padding:8px 8px 4px; text-align:left; }
+  .mainnav .navbtns{ display:flex; flex-direction:column; align-items:stretch; gap:1px; }
+  .mainnav .navbtns > button{ text-align:left; border-radius:9px; padding:9px 11px; font-size:13.5px;
+    background:transparent; border:none; color:var(--c-mut); }
+  .mainnav .navbtns > button.active{ background:var(--c-gold-soft); color:var(--c-gold-b); font-weight:600; }
+  .topbar{ flex-wrap:wrap; }
 }
 
 /* ============ optimize Phase 2:黑金表面 skin(全域,只動視覺屬性)============ */
