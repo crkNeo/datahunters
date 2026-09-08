@@ -659,6 +659,8 @@ async function loadStratMeta() {
   }
 }
 function stratTagsOf(name) { const m = stratMeta.value[name]; return (m && m.tags) || [] }
+// 策略標頭徽章(依分頁層級):VIP 策略 / 管理策略 / 會員策略
+function stratBadge(tab) { const r = tabNeed(tab); return r === 'vip' ? 'VIP 策略' : r === 'admin' ? '管理策略' : r === 'member' ? '會員策略' : '策略' }
 function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.show_risk) }
 // 分頁 → 策略 key。微策略分頁名本身就是 key(meanrev/bollema/pulsar…),
 // 只有雷達三本的分頁名與 book 名不同。
@@ -2420,6 +2422,7 @@ watch([role, tabPerms, authReady], () => {
         <h2>冥王星<span class="help" tabindex="0">?<span class="help-pop">‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
+      <div class="shead-row" v-if="stratTagsOf('conv').length"><span class="shead-badge">{{ stratBadge('conv') }}</span><span v-for="tg in stratTagsOf('conv')" :key="tg" class="stag2"># {{ tg }}</span></div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
       <StrategyBook
         :state="conv"
@@ -2441,6 +2444,7 @@ watch([role, tabPerms, authReady], () => {
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
+      <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
 
       <StrategyBook
@@ -2751,6 +2755,7 @@ watch([role, tabPerms, authReady], () => {
         <button v-if="can('admin')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button>
         <button v-if="can('admin')" class="clearbtn" @click="clearStrat(curPaperBook, loadPaper, true)">清已結束</button>
       </div>
+      <div class="shead-row" v-if="stratTagsOf(curPaperBook).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curPaperBook)" :key="tg" class="stag2"># {{ tg }}</span></div>
 
       <div v-if="mainTab === 'emaonly' && book && book.market && book.market.length" class="mkt-bias">
         <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">大盤(BTC / ETH)目前 <b>1 小時 EMA 趨勢</b>方向。小幣若<b>逆大盤</b>進場(例如大盤看跌卻做多小幣)風險較高、成功率較低。⚠️ 預設僅供參考;若該策略在後台開啟「<b>大盤過濾</b>」,大盤明確(BTC+ETH 同向)時只允許順向進場,中性/分歧則照策略自己。</span></span></span>
@@ -4385,4 +4390,11 @@ footer { padding: 18px 0 30px; text-align: center; }
 <style>
 .tp-cell{ font-family:var(--f-mono); color:var(--c-mut); }
 .tp-cell.hit{ color:var(--c-up); background:var(--c-up-bg); font-weight:600; }
+</style>
+
+<!-- ============ optimize:策略頁精簡標頭(VIP徽章 + #標籤)============ -->
+<style>
+.shead-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:-4px 0 14px; }
+.shead-badge{ font-family:var(--f-disp); font-weight:700; font-size:10px; letter-spacing:1px; color:#161206; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); border-radius:6px; padding:3px 9px; }
+.stag2{ font-family:var(--f-mono); font-size:11px; color:var(--c-mut); background:var(--c-bg2); border:1px solid var(--c-line); border-radius:6px; padding:2px 8px; }
 </style>
