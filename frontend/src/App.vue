@@ -3846,3 +3846,13 @@ footer { padding: 18px 0 30px; text-align: center; }
 @media (max-width:1024px){ .cards.recs2{ grid-template-columns:1fr 1fr; } }
 @media (max-width:768px){ .home-hero{ grid-template-columns:1fr; } .cards.recs2{ grid-template-columns:1fr; } }
 </style>
+
+<!-- ============ optimize:修正內容區偏移(蓋過原生 .wrap margin:auto)============ -->
+<style>
+.mainnav{ box-sizing:border-box; }  /* 側欄外寬 = var(--side-w),與內容偏移對齊 */
+@media (min-width:769px){
+  .wrap{ margin-left:var(--side-w) !important; margin-right:auto !important; max-width:1240px; }
+  .topbar{ margin-left:var(--side-w) !important; }
+  .risk-bar{ margin-left:var(--side-w) !important; }
+}
+</style>
