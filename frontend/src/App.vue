@@ -3929,8 +3929,10 @@ footer { padding: 18px 0 30px; text-align: center; }
 <style>
 /* ROW1:大盤方向 | 多空推薦 */
 .topgrid{ display:grid; grid-template-columns:minmax(250px,.8fr) minmax(0,1.35fr); gap:14px; align-items:stretch; margin-bottom:14px; }
-.topgrid > .mkt-bias.mkt-col{ flex-direction:column; align-items:flex-start; justify-content:center; gap:10px; margin:0; }
-.topgrid > .mkt-bias.mkt-col .mkt-chip{ margin:0; }
+.topgrid > .mkt-bias.mkt-col{ flex-direction:column; align-items:stretch; justify-content:center; gap:10px; margin:0; }
+/* column 模式:chip 自然高、佔滿寬 —— 覆蓋手機 media query 的 flex:1 1 130px(在直向會變成每格最少 130px 高)*/
+.topgrid > .mkt-bias.mkt-col .mkt-chip{ flex:0 0 auto; min-width:0; width:auto; margin:0; }
+.topgrid > .mkt-bias.mkt-col .mkt-label{ margin:0 0 2px; }
 .eyebrow{ font-family:var(--f-disp); font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--c-gold); font-weight:600; margin:0 0 10px; }
 .recbox{ display:flex; flex-direction:column; }
 .rrows{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
