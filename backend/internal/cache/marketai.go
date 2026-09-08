@@ -167,6 +167,12 @@ func (s *Store) marketSnapshot() string {
 		b.WriteString("\n")
 	}
 
+	// 穩定幣總供給(資金流向:淨增發=場外資金進場買力;淨縮=資金撤離)
+	if sc := s.StablecoinData(); sc.Total > 0 {
+		fmt.Fprintf(&b, "穩定幣總供給:$%.1fB(日%+.0fM、週%+.0fM、月%+.1fB)\n",
+			sc.Total/1e9, sc.DayChg/1e6, sc.WeekChg/1e6, sc.MonthChg/1e9)
+	}
+
 	if fb := s.FundingBoard(); len(fb.Rows) > 0 {
 		hi := fb.Rows[0]              // most positive (rows sorted desc)
 		lo := fb.Rows[len(fb.Rows)-1] // most negative

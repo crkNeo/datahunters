@@ -108,13 +108,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/events", s.gateTab("events", s.handleEvents))
 	mux.HandleFunc("/api/liquidations", s.gateTab("flow", s.handleLiquidations))
 	mux.HandleFunc("/api/liquidations/heat", s.gateTab("flow", s.handleLiqHeat))
-	mux.HandleFunc("/api/upbit", s.gateTab("upbit", s.handleUpbit))             // Upbit announcements (zh-TW)
-	mux.HandleFunc("/api/news", s.gateTab("news", s.handleNews))                // GDELT market headlines (zh-TW)
-	mux.HandleFunc("/api/funding", s.gateTab("funding", s.handleFunding))       // OKX funding-rate board
-	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))          // DefiLlama token-unlock board
-	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood)) // Robinhood 上架 board
-	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))       // 板塊強弱/輪動(每整點)
-	mux.HandleFunc("/api/etf", s.gateTab("etf", s.handleETF))                   // 現貨 ETF 每日淨流(Farside)
+	mux.HandleFunc("/api/upbit", s.gateTab("upbit", s.handleUpbit))               // Upbit announcements (zh-TW)
+	mux.HandleFunc("/api/news", s.gateTab("news", s.handleNews))                  // GDELT market headlines (zh-TW)
+	mux.HandleFunc("/api/funding", s.gateTab("funding", s.handleFunding))         // OKX funding-rate board
+	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))            // DefiLlama token-unlock board
+	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood))   // Robinhood 上架 board
+	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))         // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/etf", s.gateTab("capital", s.handleETF))                 // 現貨 ETF 每日淨流(Farside)
+	mux.HandleFunc("/api/stablecoins", s.gateTab("capital", s.handleStablecoins)) // 穩定幣供給/資金流(DefiLlama)
 
 	// 基礎設施 / 首頁共用資料,不屬於任何分頁,固定公開
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
@@ -969,6 +970,10 @@ func (s *Server) handleLiqHeat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleETF(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ETFData())
+}
+
+func (s *Server) handleStablecoins(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.StablecoinData())
 }
 
 // handleBTCSR serves BTC's support/resistance only — the public 戰場 draws its

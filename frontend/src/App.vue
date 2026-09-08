@@ -20,6 +20,7 @@ import FundingBoard from './components/FundingBoard.vue'
 import UnlockBoard from './components/UnlockBoard.vue'
 import LiquidationBoard from './components/LiquidationBoard.vue'
 import EtfBoard from './components/EtfBoard.vue'
+import StablecoinBoard from './components/StablecoinBoard.vue'
 import EventsBoard from './components/EventsBoard.vue'
 import UpbitBoard from './components/UpbitBoard.vue'
 import NewsBoard from './components/NewsBoard.vue'
@@ -1613,7 +1614,7 @@ const TAB_KIND_FALLBACK = {
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
-  'ranking', 'list', 'heatmap', 'events', 'flow', 'etf', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
+  'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'orderblock', 'orderblockv2', 'srmtf',
@@ -2110,7 +2111,7 @@ watch([role, tabPerms, authReady], () => {
             財經事件<em v-if="eventList.filter((e) => !e.released).length" class="navbadge">{{ eventList.filter((e) => !e.released).length }}</em>
           </button>
           <button v-if="inGroup('flow', grp[0])" :class="{ active: mainTab === 'flow' }" @click="mainTab = 'flow'">清算</button>
-          <button v-if="inGroup('etf', grp[0])" :class="{ active: mainTab === 'etf' }" @click="mainTab = 'etf'">ETF 流向</button>
+          <button v-if="inGroup('capital', grp[0])" :class="{ active: mainTab === 'capital' }" @click="mainTab = 'capital'">資金流向</button>
           <button v-if="inGroup('upbit', grp[0])" :class="{ active: mainTab === 'upbit' }" @click="mainTab = 'upbit'">
             Upbit 公告<em v-if="upbitNotices.length" class="navbadge">{{ upbitNotices.length }}</em>
           </button>
@@ -2863,8 +2864,11 @@ watch([role, tabPerms, authReady], () => {
     <!-- 清算 (liquidation feed, OKX) -->
     <LiquidationBoard v-else-if="mainTab === 'flow'" @coin="openDetail" />
 
-    <!-- ETF 流向 (美國現貨 ETF 每日淨流, Farside) -->
-    <EtfBoard v-else-if="mainTab === 'etf'" />
+    <!-- 資金流向 (宏觀資金:穩定幣供給 DefiLlama + 現貨 ETF 每日淨流 Farside) -->
+    <section v-else-if="mainTab === 'capital'">
+      <StablecoinBoard />
+      <EtfBoard />
+    </section>
 
     <!-- Upbit 公告 (韓文原文自動翻譯為繁體中文) -->
     <UpbitBoard v-else-if="mainTab === 'upbit'" :upbit-notices="upbitNotices" />

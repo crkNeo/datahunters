@@ -200,9 +200,11 @@ func main() {
 	// trading day. Flows update once daily after the US close; poll every 3h.
 	go func() {
 		store.EtfTick()
+		store.StableTick() // 穩定幣供給(資金流向);與 ETF 同屬宏觀資金,共用此輪詢
 		ticker := time.NewTicker(3 * time.Hour)
 		for range ticker.C {
 			store.EtfTick()
+			store.StableTick()
 		}
 	}()
 

@@ -20,6 +20,7 @@ import (
 	"datahunter/internal/notify"
 	"datahunter/internal/push"
 	"datahunter/internal/robinhood"
+	"datahunter/internal/stablecoin"
 	"datahunter/internal/unlock"
 	"datahunter/internal/upbit"
 )
@@ -129,6 +130,10 @@ type Store struct {
 	gdeltSeeded bool                  // first tick only seeds (no push burst of history on boot)
 	etfSeen     map[string]string     // asset → last reported ETF-flow date (dedupe: once/day)
 	etfFlows    map[string][]etf.Flow // asset → recent daily net flows, newest first (ETF 面板 + AI 用)
+
+	stableMu   sync.RWMutex       // guards the stablecoin-supply snapshot (資金流向 面板 + AI)
+	stableData stablecoin.Summary // total stablecoin mcap trend + top coins (DefiLlama)
+	stableTime time.Time
 
 	convMu       sync.Mutex    // guards the 冥王星 (動態ATR均線收斂 4H) strategy (VIP, convergence.go)
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)

@@ -37,7 +37,7 @@ var tabMeta = []struct {
 	{"heatmap", "市場熱力圖", "public", false},
 	{"events", "財經事件", "public", false},
 	{"flow", "清算", "public", false},
-	{"etf", "ETF 流向", "public", false},
+	{"capital", "資金流向", "public", false},
 	{"upbit", "Upbit 公告", "public", false},
 	{"news", "市場快訊", "public", false},
 	{"funding", "資金費率", "public", false},
