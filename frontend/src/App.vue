@@ -2635,7 +2635,7 @@ watch([role, tabPerms, authReady], () => {
           <tr v-for="r in boardRows" :key="r.coin" class="clickable" :class="{ selected: r.coin === detailCoin }" @click="openDetail(r.coin)">
             <td class="coin">{{ r.coin }}</td>
             <td :class="['r', 'score', biasClass(r.bias)]">{{ r.score }}</td>
-            <td :class="biasClass(r.bias)">{{ r.bias === 'long' ? '做多' : r.bias === 'short' ? '做空' : '觀察' }}</td>
+            <td><span class="dir" :class="biasClass(r.bias)">{{ r.bias === 'long' ? '做多' : r.bias === 'short' ? '做空' : '觀察' }}</span></td>
             <td>{{ r.quality }}</td>
             <td class="r" :class="r.okx_chg >= 0 ? 'long' : 'short'">{{ r.okx_chg?.toFixed(2) }}</td>
             <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
@@ -2830,7 +2830,7 @@ watch([role, tabPerms, authReady], () => {
     </section>
 
     <!-- 財經事件 (high-impact US economic calendar) -->
-    <EventsBoard v-else-if="mainTab === 'events'" :event-list="eventList" />
+    <EventsBoard v-else-if="mainTab === 'events'" :event-list="eventList" :risk="risk" />
 
     <!-- 清算 (liquidation feed, OKX) -->
     <LiquidationBoard v-else-if="mainTab === 'flow'" @coin="openDetail" />
@@ -4362,4 +4362,12 @@ footer { padding: 18px 0 30px; text-align: center; }
   .cm-rrow{ grid-template-columns:auto 1fr; }
   .cm-rrow .tag{ grid-column:2; justify-self:start; }
 }
+</style>
+
+<!-- ============ optimize:方向 pill token 化 + 觀察(neutral)樣式 ============ -->
+<style>
+.dir{ font-family:var(--f-mono); font-weight:600; }
+.dir.long{ background:var(--c-up-bg); color:var(--c-up); }
+.dir.short{ background:var(--c-dn-bg); color:var(--c-dn); }
+.dir.neutral{ background:var(--c-surf2); color:var(--c-mut); }
 </style>
