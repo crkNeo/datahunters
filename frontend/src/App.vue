@@ -1212,7 +1212,7 @@ function tileStyle(t, i) {
 }
 // 字級隨磚塊寬度分級;太小者隱藏文字(靠色塊 + hover 提示)
 function heatSize(r) { return r.w >= 16 ? 'big' : r.w >= 9 ? 'mid' : r.w >= 5 ? '' : r.w >= 3 ? 'sm' : 'tiny' }
-function heatHot(chg) { return Math.abs(chg) >= 15 } // 極端漲跌 → 脈動光暈
+function heatHot(chg) { return Math.abs(chg) >= 15 } // 極端漲跌 → 脈動光暈 + ▲▼
 
 // ---- formatting helpers ----
 // 止盈位相對進場的幅度。順著單子方向算,所以空單的止盈(價格更低)一樣是正數。
@@ -2683,11 +2683,12 @@ watch([role, tabPerms, authReady], () => {
         <h2>市場熱力圖<span class="help" tabindex="0">?<span class="help-pop">全市場合約的 24h 漲跌全景。<b>磚塊大小</b>=成交量排名(越大越前),<b>顏色</b>=漲跌幅(綠漲紅跌、越深越極端)。點任一磚看該幣明細。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 面積=成交量 · 綠漲紅跌</span>
       </div>
+      <!-- 熱力圖:比例式 treemap(面積=成交量),玻璃質感 + 進場/hover/極端脈動動畫 -->
       <div class="mkt-tree">
-        <button v-for="(m, i) in heatTree" :key="m.coin" class="heat-tile" :class="[heatSize(m.r), { hot: heatHot(m.chg) }]"
+        <button v-for="(m, i) in heatTree" :key="m.coin" class="heat-tile" :class="[heatSize(m.r), { hot: heatHot(m.chg), up: m.chg >= 0 }]"
           :style="tileStyle(m, i)" :title="m.coin + ' ' + fmtPct(m.chg)" @click="openDetail(m.coin)">
           <span class="ht-coin">{{ m.coin }}</span>
-          <span class="ht-chg">{{ fmtPct(m.chg) }}</span>
+          <span class="ht-chg"><em v-if="heatHot(m.chg)" class="ht-arw">{{ m.chg >= 0 ? '▲' : '▼' }}</em>{{ fmtPct(m.chg) }}</span>
         </button>
       </div>
     </section>
@@ -4485,24 +4486,38 @@ footer { padding: 18px 0 30px; text-align: center; }
 .tblwrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
 </style>
 
-<!-- ============ optimize:市場熱力圖(比例式 treemap · 面積=成交量/依漲跌上色 · 動畫)============ -->
+<!-- ============ optimize:市場熱力圖(比例式 treemap · 面積=成交量/依漲跌上色 · 玻璃質感 + 動畫)============ -->
 <style>
-.mkt-tree { position:relative; width:100%; aspect-ratio:100/62; margin-top:4px; border-radius:12px; overflow:hidden; background:var(--c-bg2); }
+.mkt-tree { position:relative; width:100%; aspect-ratio:100/62; margin-top:4px; border-radius:12px; overflow:hidden;
+  background:radial-gradient(120% 140% at 50% 0%, #14161d, #0a0b0f 70%); box-shadow:inset 0 0 40px rgba(0,0,0,.5); }
 .heat-tile { position:absolute; container-type:size; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
-  border:1.5px solid var(--c-bg); border-radius:7px; cursor:pointer; color:#fff; text-align:center; overflow:hidden; box-sizing:border-box; padding:2px;
-  transition:transform .18s cubic-bezier(.2,.8,.3,1), filter .18s, box-shadow .18s, opacity .3s;
-  animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards; animation-delay:calc(var(--i) * 16ms); }
-.heat-tile:hover { transform:scale(1.05); filter:brightness(1.22); z-index:20; box-shadow:0 6px 22px rgba(0,0,0,.5); border-color:rgba(255,255,255,.65); }
-.heat-tile.hot { animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards, heatpulse 1.9s ease-in-out calc(var(--i)*16ms + .5s) infinite; z-index:3; }
+  border:1.5px solid var(--c-bg); border-radius:8px; cursor:pointer; color:#fff; text-align:center; overflow:hidden; box-sizing:border-box; padding:2px;
+  background-blend-mode:overlay, normal; transition:transform .22s cubic-bezier(.2,.85,.3,1), filter .2s, box-shadow .22s;
+  animation:tilein .55s cubic-bezier(.34,1.35,.5,1) backwards; animation-delay:calc(var(--i) * 18ms); will-change:transform; }
+/* 玻璃高光:左上受光、底部暗角,增加立體感 */
+.heat-tile::before { content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
+  background:linear-gradient(155deg, rgba(255,255,255,.22), rgba(255,255,255,0) 42%), radial-gradient(120% 90% at 50% 120%, rgba(0,0,0,.35), transparent 70%); }
+/* hover:放大抬升 + 自身顏色光暈 + 斜向反光掃過 */
+.heat-tile:hover { transform:scale(1.06) translateZ(0); filter:brightness(1.25) saturate(1.15); z-index:20;
+  box-shadow:0 10px 30px rgba(0,0,0,.55), 0 0 22px 2px rgba(var(--glow),.6); border-color:rgba(255,255,255,.8); }
+.heat-tile::after { content:""; position:absolute; top:0; left:-120%; width:60%; height:100%; pointer-events:none;
+  background:linear-gradient(105deg, transparent, rgba(255,255,255,.38), transparent); transform:skewX(-18deg); transition:none; }
+.heat-tile:hover::after { animation:heatshine .6s ease-out; }
+.heat-tile.hot { animation:tilein .55s cubic-bezier(.34,1.35,.5,1) backwards, heatpulse 1.8s ease-in-out calc(var(--i)*18ms + .55s) infinite; z-index:3; }
 /* 字級隨磚塊自身大小自動縮放(容器查詢單位),塞不下才 ellipsis —— 不再硬切長幣名 */
-.ht-coin { max-width:96%; font-family:var(--f-disp); font-weight:700; line-height:1.04; text-shadow:0 1px 2px rgba(0,0,0,.55);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:clamp(7px, min(20cqw, 34cqh), 28px); }
-.ht-chg { max-width:96%; font-family:var(--f-mono); text-shadow:0 1px 2px rgba(0,0,0,.55); white-space:nowrap; overflow:hidden;
-  font-size:clamp(6px, min(13cqw, 24cqh), 14px); }
+.ht-coin { position:relative; max-width:96%; font-family:var(--f-disp); font-weight:800; line-height:1.04; letter-spacing:.2px;
+  text-shadow:0 1px 3px rgba(0,0,0,.6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:clamp(7px, min(20cqw, 34cqh), 28px); }
+.ht-chg { position:relative; max-width:96%; font-family:var(--f-mono); text-shadow:0 1px 3px rgba(0,0,0,.6); white-space:nowrap; overflow:hidden;
+  display:inline-flex; align-items:center; gap:2px; font-size:clamp(6px, min(13cqw, 24cqh), 14px); }
+.ht-arw { font-style:normal; font-size:.85em; animation:arwbob 1.1s ease-in-out infinite; }
+.heat-tile.hot.up .ht-arw { color:#d6ffe9; } .heat-tile.hot:not(.up) .ht-arw { color:#ffdfe3; }
 .heat-tile.sm .ht-chg { display:none; }
 .heat-tile.tiny .ht-coin, .heat-tile.tiny .ht-chg { display:none; }
-@keyframes tilein { from { opacity:0; transform:scale(.55); } to { opacity:1; transform:scale(1); } }
-@keyframes heatpulse { 0%,100% { box-shadow:0 0 0 0 rgba(var(--glow),0); } 50% { box-shadow:0 0 15px 1px rgba(var(--glow),.85); } }
+@keyframes tilein { 0% { opacity:0; transform:scale(.4); } 100% { opacity:1; transform:scale(1); } }
+@keyframes heatshine { from { left:-120%; } to { left:130%; } }
+@keyframes arwbob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-2px); } }
+@keyframes heatpulse { 0%,100% { box-shadow:0 0 0 0 rgba(var(--glow),0), inset 0 0 0 0 rgba(var(--glow),0); }
+  50% { box-shadow:0 0 18px 2px rgba(var(--glow),.9), inset 0 0 10px rgba(var(--glow),.35); } }
 @media (max-width:768px){ .mkt-tree { aspect-ratio:100/108; } }
-@media (prefers-reduced-motion:reduce){ .heat-tile { animation:none; } .heat-tile.hot { animation:none; } }
+@media (prefers-reduced-motion:reduce){ .heat-tile, .heat-tile.hot, .ht-arw { animation:none; } .heat-tile:hover::after { animation:none; } }
 </style>
