@@ -9,3 +9,4 @@ datahunter.db-shm
 # env / secrets
 .env
 server.run.log
+bin/
