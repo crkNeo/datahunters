@@ -4488,20 +4488,21 @@ footer { padding: 18px 0 30px; text-align: center; }
 <!-- ============ optimize:市場熱力圖(比例式 treemap · 面積=成交量/依漲跌上色 · 動畫)============ -->
 <style>
 .mkt-tree { position:relative; width:100%; aspect-ratio:100/62; margin-top:4px; border-radius:12px; overflow:hidden; background:var(--c-bg2); }
-.heat-tile { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
-  border:1.5px solid var(--c-bg); border-radius:7px; cursor:pointer; color:#fff; text-align:center; overflow:hidden; box-sizing:border-box;
+.heat-tile { position:absolute; container-type:size; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  border:1.5px solid var(--c-bg); border-radius:7px; cursor:pointer; color:#fff; text-align:center; overflow:hidden; box-sizing:border-box; padding:2px;
   transition:transform .18s cubic-bezier(.2,.8,.3,1), filter .18s, box-shadow .18s, opacity .3s;
   animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards; animation-delay:calc(var(--i) * 16ms); }
 .heat-tile:hover { transform:scale(1.05); filter:brightness(1.22); z-index:20; box-shadow:0 6px 22px rgba(0,0,0,.5); border-color:rgba(255,255,255,.65); }
 .heat-tile.hot { animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards, heatpulse 1.9s ease-in-out calc(var(--i)*16ms + .5s) infinite; z-index:3; }
-.ht-coin { font-family:var(--f-disp); font-weight:700; font-size:12px; line-height:1.05; text-shadow:0 1px 2px rgba(0,0,0,.5); white-space:nowrap; }
-.ht-chg { font-family:var(--f-mono); font-size:10px; text-shadow:0 1px 2px rgba(0,0,0,.5); white-space:nowrap; }
-.heat-tile.big .ht-coin { font-size:24px; } .heat-tile.big .ht-chg { font-size:14px; }
-.heat-tile.mid .ht-coin { font-size:16px; } .heat-tile.mid .ht-chg { font-size:11px; }
-.heat-tile.sm .ht-coin { font-size:9.5px; } .heat-tile.sm .ht-chg { display:none; }
+/* 字級隨磚塊自身大小自動縮放(容器查詢單位),塞不下才 ellipsis —— 不再硬切長幣名 */
+.ht-coin { max-width:96%; font-family:var(--f-disp); font-weight:700; line-height:1.04; text-shadow:0 1px 2px rgba(0,0,0,.55);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:clamp(7px, min(20cqw, 34cqh), 28px); }
+.ht-chg { max-width:96%; font-family:var(--f-mono); text-shadow:0 1px 2px rgba(0,0,0,.55); white-space:nowrap; overflow:hidden;
+  font-size:clamp(6px, min(13cqw, 24cqh), 14px); }
+.heat-tile.sm .ht-chg { display:none; }
 .heat-tile.tiny .ht-coin, .heat-tile.tiny .ht-chg { display:none; }
 @keyframes tilein { from { opacity:0; transform:scale(.55); } to { opacity:1; transform:scale(1); } }
 @keyframes heatpulse { 0%,100% { box-shadow:0 0 0 0 rgba(var(--glow),0); } 50% { box-shadow:0 0 15px 1px rgba(var(--glow),.85); } }
-@media (max-width:768px){ .mkt-tree { aspect-ratio:100/108; } .heat-tile.big .ht-coin { font-size:18px; } .heat-tile.mid .ht-coin { font-size:13px; } }
+@media (max-width:768px){ .mkt-tree { aspect-ratio:100/108; } }
 @media (prefers-reduced-motion:reduce){ .heat-tile { animation:none; } .heat-tile.hot { animation:none; } }
 </style>
