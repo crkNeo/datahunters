@@ -1911,7 +1911,59 @@ watch([role, tabPerms, authReady], () => {
   </div>
 
   <div class="wrap">
-    <!-- optimize:多空交戰 + 山寨季指數 並排(8:2)-->
+    <!-- optimize:首頁依 mock(homeA2opt)重排 —— ROW1 大盤方向 | 多空推薦 top-3 -->
+    <div class="topgrid" v-if="marketDir || home">
+      <!-- 大盤方向:BTC/ETH 1h EMA;兩者同向才明確(策略可在後台開「大盤過濾」順此方向進場) -->
+      <div v-if="marketDir" class="mkt-bias mkt-home mkt-col">
+        <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">BTC 與 ETH 的 <b>1 小時 EMA 趨勢</b>(EMA5/20/50)。<b>兩者同向</b>才算明確(看漲/看跌),否則視為中性。策略若在後台開啟「<b>大盤過濾</b>」,大盤明確時只允許順大盤方向進場;中性或分歧時照策略自己。</span></span></span>
+        <span class="mkt-chip mkt-main" :class="marketDir.dir === 'neutral' ? 'na' : marketDir.dir">
+          <b class="mkt-coin">綜合</b><span class="mkt-dir">{{ dirTxt(marketDir.dir) }}</span>
+        </span>
+        <span class="mkt-chip" :class="marketDir.btc === 'neutral' ? 'na' : marketDir.btc">
+          <b class="mkt-coin">BTC</b><span class="mkt-dir">{{ dirTxt(marketDir.btc) }}</span>
+        </span>
+        <span class="mkt-chip" :class="marketDir.eth === 'neutral' ? 'na' : marketDir.eth">
+          <b class="mkt-coin">ETH</b><span class="mkt-dir">{{ dirTxt(marketDir.eth) }}</span>
+        </span>
+      </div>
+
+      <!-- 多空推薦(順 BTC 趨勢):做多 / 做空 各 top-3(點擊看明細) -->
+      <section class="card recbox" v-if="home">
+        <p class="eyebrow">多空推薦 · 順 BTC 趨勢</p>
+        <div class="rrows">
+          <div class="rrcol">
+            <div class="rc-hd"><span class="led long"></span>做多</div>
+            <button v-for="(r, i) in filteredLongRecs.slice(0, 3)" :key="r.coin" class="rrow" :class="{ feat: r.featured }" @click="openDetail(r.coin)">
+              <span class="reccoin">
+                <i class="medal">{{ medal(i) }}</i>{{ r.coin }}
+                <em v-if="isHighQuality(boardOf(r.coin))" class="qtag hq" title="OI 收縮 + 費率極端(樣本外最佳組)">★優質</em>
+                <em v-else-if="oiContracting(boardOf(r.coin))" class="qtag good" title="OI 收縮(衰竭/平倉,訊號較可靠)">OI↓</em>
+                <em v-else class="qtag warn" title="OI 擴張(新倉湧入,追高風險)">OI↑</em>
+              </span>
+              <span class="bars"><i v-for="n in 5" :key="n" class="bar" :class="{ long: n <= r.strength }"></i></span>
+              <span class="recchg" :class="r.chg >= 0 ? 'long' : 'short'">{{ fmtPct(r.chg) }}</span>
+            </button>
+            <p v-if="!filteredLongRecs.length" class="rec-empty">{{ regimeFilter && btcChg < 0 ? 'BTC 偏空 · 已過濾' : '目前無做多訊號' }}</p>
+          </div>
+          <div class="rrcol">
+            <div class="rc-hd"><span class="led short"></span>做空</div>
+            <button v-for="(r, i) in filteredShortRecs.slice(0, 3)" :key="r.coin" class="rrow" :class="{ feat: r.featured }" @click="openDetail(r.coin)">
+              <span class="reccoin">
+                <i class="medal">{{ medal(i) }}</i>{{ r.coin }}
+                <em v-if="isHighQuality(boardOf(r.coin))" class="qtag hq" title="OI 收縮 + 費率極端(樣本外最佳組)">★優質</em>
+                <em v-else-if="oiContracting(boardOf(r.coin))" class="qtag good" title="OI 收縮(衰竭/平倉,訊號較可靠)">OI↓</em>
+                <em v-else class="qtag warn" title="OI 擴張(新倉湧入,追高風險)">OI↑</em>
+              </span>
+              <span class="bars"><i v-for="n in 5" :key="n" class="bar" :class="{ short: n <= r.strength }"></i></span>
+              <span class="recchg" :class="r.chg >= 0 ? 'long' : 'short'">{{ fmtPct(r.chg) }}</span>
+            </button>
+            <p v-if="!filteredShortRecs.length" class="rec-empty">{{ regimeFilter && btcChg > 0 ? 'BTC 偏多 · 已過濾' : '目前無做空訊號' }}</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- HERO 帶:多空交戰 | 山寨季指數 -->
     <div class="home-hero">
       <BattleField />
       <section class="card gauge" v-if="home">
@@ -1945,21 +1997,7 @@ watch([role, tabPerms, authReady], () => {
       </section>
     </div>
 
-    <!-- 大盤方向:BTC/ETH 1h EMA;兩者同向才明確(策略可在後台開「大盤過濾」順此方向進場) -->
-    <div v-if="marketDir" class="mkt-bias mkt-home">
-      <span class="mkt-label">大盤方向<span class="help" tabindex="0">?<span class="help-pop">BTC 與 ETH 的 <b>1 小時 EMA 趨勢</b>(EMA5/20/50)。<b>兩者同向</b>才算明確(看漲/看跌),否則視為中性。策略若在後台開啟「<b>大盤過濾</b>」,大盤明確時只允許順大盤方向進場;中性或分歧時照策略自己。</span></span></span>
-      <span class="mkt-chip mkt-main" :class="marketDir.dir === 'neutral' ? 'na' : marketDir.dir">
-        <b class="mkt-coin">綜合</b><span class="mkt-dir">{{ dirTxt(marketDir.dir) }}</span>
-      </span>
-      <span class="mkt-chip" :class="marketDir.btc === 'neutral' ? 'na' : marketDir.btc">
-        <b class="mkt-coin">BTC</b><span class="mkt-dir">{{ dirTxt(marketDir.btc) }}</span>
-      </span>
-      <span class="mkt-chip" :class="marketDir.eth === 'neutral' ? 'na' : marketDir.eth">
-        <b class="mkt-coin">ETH</b><span class="mkt-dir">{{ dirTxt(marketDir.eth) }}</span>
-      </span>
-    </div>
-
-    <!-- 整點大盤分析 (live message, above the recs) -->
+    <!-- 整點大盤分析 (live message) -->
     <div v-if="marketAI && marketAI.text" class="mai-live">
       <div class="mai-live-top">
         <span class="mai-live-title"><span class="mai-dot"></span>整點大盤分析</span>
@@ -1969,51 +2007,15 @@ watch([role, tabPerms, authReady], () => {
       <div class="mai-live-body">{{ maiBody }}</div>
     </div>
 
-    <!-- optimize:做多 / 做空 並排(5:5)-->
-    <div class="cards recs2" v-if="home">
-      <!-- 做多推薦 -->
-      <section class="card rec">
-        <div class="rec-head"><span class="led long"></span>做多推薦</div>
-        <div class="rec-cols"><span>幣種</span><span>價格</span><span>推薦指數</span><span class="r">漲跌幅</span></div>
-        <button v-for="(r, i) in filteredLongRecs" :key="r.coin" class="rec-row" :class="{ featured: r.featured }" @click="openDetail(r.coin)">
-          <span class="rec-coin">
-            <i class="medal">{{ medal(i) }}</i>{{ r.coin }}
-            <em v-if="r.featured" class="hot">★ 強力</em>
-            <em v-if="isHighQuality(boardOf(r.coin))" class="qtag hq" title="OI 收縮 + 費率極端(樣本外最佳組)">★優質</em>
-            <em v-else-if="oiContracting(boardOf(r.coin))" class="qtag good" title="OI 收縮(衰竭/平倉,訊號較可靠)">OI↓</em>
-            <em v-else class="qtag warn" title="OI 擴張(新倉湧入,追高風險)">OI↑</em>
-          </span>
-          <span class="rec-price">{{ fmtPrice(r.price) }}</span>
-          <span class="bars">
-            <i v-for="n in 5" :key="n" class="bar" :class="{ on: n <= r.strength, long: n <= r.strength }"></i>
-          </span>
-          <span class="r" :class="r.chg >= 0 ? 'long' : 'short'">{{ fmtPct(r.chg) }}</span>
-        </button>
-        <p v-if="!filteredLongRecs.length" class="empty">{{ regimeFilter && btcChg < 0 ? 'BTC 偏空 · 已過濾做多訊號' : '目前無做多訊號' }}</p>
-      </section>
-
-      <!-- 做空推薦 -->
-      <section class="card rec">
-        <div class="rec-head"><span class="led short"></span>做空推薦</div>
-        <div class="rec-cols"><span>幣種</span><span>價格</span><span>推薦指數</span><span class="r">漲跌幅</span></div>
-        <button v-for="(r, i) in filteredShortRecs" :key="r.coin" class="rec-row" :class="{ 'featured short-feat': r.featured }" @click="openDetail(r.coin)">
-          <span class="rec-coin">
-            <i class="medal">{{ medal(i) }}</i>{{ r.coin }}
-            <em v-if="r.featured" class="hot short-hot">★ 強力</em>
-            <em v-if="isHighQuality(boardOf(r.coin))" class="qtag hq" title="OI 收縮 + 費率極端(樣本外最佳組)">★優質</em>
-            <em v-else-if="oiContracting(boardOf(r.coin))" class="qtag good" title="OI 收縮(衰竭/平倉,訊號較可靠)">OI↓</em>
-            <em v-else class="qtag warn" title="OI 擴張(新倉湧入,追高風險)">OI↑</em>
-          </span>
-          <span class="rec-price">{{ fmtPrice(r.price) }}</span>
-          <span class="bars">
-            <i v-for="n in 5" :key="n" class="bar" :class="{ on: n <= r.strength, short: n <= r.strength }"></i>
-          </span>
-          <span class="r" :class="r.chg >= 0 ? 'long' : 'short'">{{ fmtPct(r.chg) }}</span>
-        </button>
-        <p v-if="!filteredShortRecs.length" class="empty">{{ regimeFilter && btcChg > 0 ? 'BTC 偏多 · 已過濾做空訊號' : '目前無做空訊號' }}</p>
-      </section>
-
-    </div>
+    <!-- 今日策略 · 表現前三名(彙總資料上線前先導向各策略分頁) -->
+    <section class="card stratrank" v-if="home">
+      <div class="mai-live-top">
+        <span class="mai-live-title"><span class="mai-dot gold"></span>今日策略 · 表現前三名</span>
+        <span class="mai-live-time">以平倉為主 · 依你的層級顯示</span>
+      </div>
+      <div class="cmp-empty">今日策略彙總即將上線 · 各策略完整明細與進行中訊號請見左側「VIP · 策略」分頁</div>
+      <p class="bt-note">將只計今日已平倉訊號 · 依你的層級顯示可見策略 · ⚠️ 非投資建議</p>
+    </section>
 
     <!-- nav -->
     <nav class="mainnav" :class="{ 'side-open': sideOpen }" @click="sideOpen = false">
@@ -3891,4 +3893,28 @@ footer { padding: 18px 0 30px; text-align: center; }
 /* 確認框 */
 .cfm-box{ background:var(--c-surf); border:1px solid var(--c-line2); border-radius:var(--r-xl); }
 .cfm-ok{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; border:none; font-family:var(--f-disp); font-weight:700; }
+</style>
+
+<!-- ============ optimize:首頁依 mock 重排(topgrid / 多空推薦 top-3 / 策略前三名)============ -->
+<style>
+/* ROW1:大盤方向 | 多空推薦 */
+.topgrid{ display:grid; grid-template-columns:minmax(250px,.8fr) minmax(0,1.35fr); gap:14px; align-items:stretch; margin-bottom:14px; }
+.topgrid > .mkt-bias.mkt-col{ flex-direction:column; align-items:flex-start; justify-content:center; gap:10px; margin:0; }
+.topgrid > .mkt-bias.mkt-col .mkt-chip{ margin:0; }
+.eyebrow{ font-family:var(--f-disp); font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--c-gold); font-weight:600; margin:0 0 10px; }
+.recbox{ display:flex; flex-direction:column; }
+.rrows{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+.rc-hd{ display:flex; align-items:center; gap:7px; font-family:var(--f-disp); font-weight:700; font-size:12.5px; margin-bottom:9px; }
+.rrow{ display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:9px; align-items:center; width:100%; text-align:left;
+  padding:7px 10px; border-radius:8px; background:var(--c-bg2); border:1px solid var(--c-line); margin-bottom:6px; cursor:pointer; transition:background .15s,border-color .15s; }
+.rrow:hover{ background:var(--c-surf2); border-color:var(--c-line2); }
+.rrow.feat{ border-color:var(--c-gold-d); background:linear-gradient(90deg,rgba(232,184,75,.08),var(--c-bg2) 60%); }
+.reccoin{ display:flex; align-items:center; gap:6px; font-family:var(--f-disp); font-weight:600; font-size:12.5px; min-width:0; overflow:hidden; white-space:nowrap; }
+.recchg{ font-family:var(--f-mono); font-size:12px; text-align:right; min-width:48px; }
+.rec-empty{ font-size:11.5px; color:var(--c-mut2); padding:8px 10px; }
+/* 策略前三名(彙總上線前空狀態)*/
+.stratrank .mai-dot.gold{ background:var(--c-gold); box-shadow:0 0 8px var(--c-gold); }
+.cmp-empty{ padding:18px; text-align:center; color:var(--c-mut); font-size:12.5px; border:1px dashed var(--c-line2); border-radius:var(--r-md); margin:8px 0 4px; }
+@media (max-width:1024px){ .topgrid{ grid-template-columns:1fr; } }
+@media (max-width:768px){ .rrows{ grid-template-columns:1fr; } }
 </style>
