@@ -1045,6 +1045,12 @@ async function loadStrategyToday() {
 const stratMaxAbs = computed(() => Math.max(0.0001, ...stratToday.value.map((s) => Math.abs(s.total_pnl))))
 function stratBarW(pnl) { return Math.max(8, Math.round(Math.abs(pnl) / stratMaxAbs.value * 100)) }
 function tierLabel(t) { return t === 'vip' ? 'VIP' : t === 'member' ? '會員' : t === 'admin' ? '管理' : '' }
+// 前三名績效人人可見;點進策略頁才需權限 —— 沒權限就提示登入(而非硬跳進被擋的頁)
+function openStrat(s) {
+  if (canTab(s.tab)) { mainTab.value = s.tab; return }
+  if (!authReady.value || role.value === 'public') { loginOpen.value = true; showToast('登入後即可查看「' + s.label + '」策略詳情', 'warn'); return }
+  showToast('此策略需「' + tierLabel(s.tier) + '」以上權限', 'warn')
+}
 
 // 板塊強弱/輪動 (public, hourly)
 
@@ -2119,20 +2125,20 @@ watch([role, tabPerms, authReady], () => {
     <section class="card stratrank" v-if="home">
       <div class="mai-live-top">
         <span class="mai-live-title"><span class="mai-dot gold"></span>今日策略 · 表現前三名</span>
-        <span class="mai-live-time">以平倉為主 · 依你的層級顯示</span>
+        <span class="mai-live-time">以平倉為主 · 全策略排名</span>
       </div>
       <template v-if="stratToday.length">
         <div class="cmp-cols"><span>策略</span><span>今日收益(平倉)</span><span class="r">收益</span><span class="r">勝率</span><span class="r">平倉</span></div>
-        <button v-for="(s, i) in stratToday" :key="s.tab" class="cmprow" @click="mainTab = s.tab">
-          <span class="snm"><i class="medal">{{ medal(i) }}</i>{{ s.label }}<em v-if="tierLabel(s.tier)" class="tier" :class="s.tier">{{ tierLabel(s.tier) }}</em></span>
+        <button v-for="(s, i) in stratToday" :key="s.tab" class="cmprow" :class="{ locked: !canTab(s.tab) }" @click="openStrat(s)">
+          <span class="snm"><i class="medal">{{ medal(i) }}</i>{{ s.label }}<em v-if="tierLabel(s.tier)" class="tier" :class="s.tier">{{ tierLabel(s.tier) }}</em><i v-if="!canTab(s.tab)" class="lock" title="進入此策略頁需權限">🔒</i></span>
           <div class="bararea"><span class="track"></span><span class="fill" :class="{ neg: s.total_pnl < 0 }" :style="{ width: stratBarW(s.total_pnl) + '%' }"></span></div>
           <span class="r cmp-pnl" :class="s.total_pnl >= 0 ? 'long' : 'short'">{{ s.total_pnl >= 0 ? '+' : '' }}{{ s.total_pnl }}%</span>
           <span class="r">{{ Math.round(s.win_rate) }}%</span>
           <span class="r">{{ s.closed }}</span>
         </button>
       </template>
-      <div v-else class="cmp-empty">今日尚無已平倉的策略訊號 · 各策略完整明細與進行中訊號請見左側「VIP · 策略」分頁</div>
-      <p class="bt-note">僅計今日已平倉訊號 · 依你的層級顯示可見策略 · ⚠️ 非投資建議</p>
+      <div v-else class="cmp-empty">今日尚無已平倉的策略訊號 · 各策略完整明細與進行中訊號請見左側「策略」分頁</div>
+      <p class="bt-note">僅計今日已平倉訊號 · 績效公開,進入策略頁需對應權限 · ⚠️ 非投資建議</p>
     </section>
     </template>
     <!-- /總覽 -->
@@ -4266,6 +4272,8 @@ footer { padding: 18px 0 30px; text-align: center; }
 .cmprow{ width:100%; text-align:left; padding:9px 12px; border-radius:9px; border:1px solid var(--c-line); background:var(--c-bg2); margin-bottom:6px; cursor:pointer; transition:background .15s, border-color .15s; }
 .cmprow:hover{ background:var(--c-surf2); border-color:var(--c-gold-d); }
 .snm{ display:flex; align-items:center; gap:8px; font-family:var(--f-disp); font-weight:600; font-size:13.5px; white-space:nowrap; min-width:0; overflow:hidden; }
+.snm .lock{ font-size:10px; font-style:normal; opacity:.75; }
+.cmprow.locked{ opacity:.9; }
 .snm .tier{ font-size:9px; font-weight:700; border-radius:5px; padding:1px 6px; font-family:var(--f-mono); letter-spacing:.5px; font-style:normal; }
 .tier.member{ background:var(--c-steel-bg); color:var(--c-steel); }
 .tier.vip{ background:var(--c-gold-soft); color:var(--c-gold-b); }

@@ -898,10 +898,11 @@ func (s *Server) handleStratMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStrategyToday serves the home「今日策略 · 表現前三名」board: today's closed-trade
-// performance per strategy the caller's role can see, best total-PnL first, top 3.
-// Read-only aggregate over paper_trades; role resolved per request so it respects tier.
+// performance across ALL strategies, best total-PnL first, top 3 — shown to everyone
+// (incl. logged-out) as a teaser. Each row carries its tier; entering the strategy page
+// itself is still gated by gateTab. Read-only aggregate over paper_trades.
 func (s *Server) handleStrategyToday(w http.ResponseWriter, r *http.Request) {
-	rows := s.store.StrategyToday(s.roleOf(r))
+	rows := s.store.StrategyToday() // 前三名績效公開(不分角色);進策略頁才由 gateTab 擋
 	if len(rows) > 3 {
 		rows = rows[:3]
 	}

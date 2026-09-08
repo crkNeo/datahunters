@@ -3,8 +3,6 @@ package cache
 import (
 	"sort"
 	"time"
-
-	"datahunter/internal/auth"
 )
 
 // strategy_today.go —— 首頁「今日策略 · 表現前三名」彙總。
@@ -50,9 +48,12 @@ func tabLabel(tab string) string {
 	return tab
 }
 
-// StrategyToday 回「今日(本機午夜→現在)已平倉」各策略的表現,依 role 可見範圍過濾,
-// 依今日累計損益由高到低排序;今日沒有平倉的策略不列入。呼叫端自行取前三。
-func (s *Store) StrategyToday(role string) []StratTodayRow {
+// StrategyToday 回「今日(本機午夜→現在)已平倉」各策略的表現,依今日累計損益由高到低
+// 排序;今日沒有平倉的策略不列入。呼叫端自行取前三。
+//
+// 這裡「不」依角色過濾 —— 首頁前三名的績效數字對未登入者也公開(當作導流展示);
+// 每列仍帶該策略的最低可見角色 Tier,前端可標記鎖頭,真正進到策略頁時才由 gateTab 擋。
+func (s *Store) StrategyToday() []StratTodayRow {
 	if s.db == nil {
 		return []StratTodayRow{}
 	}
@@ -67,9 +68,6 @@ func (s *Store) StrategyToday(role string) []StratTodayRow {
 	for _, tk := range stratTabKey {
 		tab, key := tk[0], tk[1]
 		tier := s.TabRole(tab)
-		if !auth.AtLeast(role, tier) {
-			continue // 使用者層級看不到這個策略 → 不列入
-		}
 		st := s.strategyHistFull(key, winMs).stats
 		if st.Closed == 0 {
 			continue // 今日沒有平倉
