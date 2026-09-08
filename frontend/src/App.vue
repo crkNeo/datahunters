@@ -3220,7 +3220,7 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
     background:var(--c-gold); box-shadow:0 0 10px var(--c-gold);
   }
   /* 內容區讓出側欄寬度 */
-  .topbar, .wrap, .risk-bar{ margin-left:var(--side-w); }
+  .topbar, .wrap, .risk-bar, .ddbanner, .riskbar{ margin-left:var(--side-w); }
   .topbar{ position:sticky; top:0; z-index:20; background:rgba(10,11,15,.92); border-bottom:1px solid var(--c-line); }
   .topbar .brand{ display:none; } /* 品牌已移到側欄頂 */
 }
@@ -4196,7 +4196,8 @@ footer { padding: 18px 0 30px; text-align: center; }
 @media (min-width:769px){
   .wrap{ margin-left:var(--side-w) !important; margin-right:auto !important; max-width:1240px; }
   .topbar{ margin-left:var(--side-w) !important; }
-  .risk-bar{ margin-left:var(--side-w) !important; }
+  /* 頂部跑馬燈警示條與風險列也是滿版,必須讓開側欄,否則左段被固定側欄蓋住 */
+  .ddbanner, .riskbar{ margin-left:var(--side-w) !important; }
 }
 </style>
 
