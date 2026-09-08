@@ -1155,6 +1155,15 @@ const market = computed(() => {
   // 'vol' already sorted by backend
   return m
 })
+// 市場熱力圖:依成交量排序取前 48,色塊依漲跌上色、前幾大放大(treemap 感)
+const listView = ref('table') // table | heat
+const heatTiles = computed(() => (home.value ? [...home.value.market].slice(0, 48) : []))
+function heatStyle(chg) {
+  const a = Math.min(0.82, 0.14 + Math.abs(chg) / 12) // |漲跌| 越大越飽和
+  const c = chg >= 0 ? '55,214,138' : '255,92,108'
+  return { background: `rgba(${c},${a})`, borderColor: `rgba(${c},${Math.min(1, a + 0.2)})` }
+}
+function heatCls(i) { return i < 3 ? 'big' : i < 9 ? 'wide' : '' }
 
 // ---- formatting helpers ----
 // 止盈位相對進場的幅度。順著單子方向算,所以空單的止盈(價格更低)一樣是正數。
@@ -2597,11 +2606,20 @@ watch([role, tabPerms, authReady], () => {
         <span class="mk-count">共 {{ home.total }} 個合約，顯示前 {{ home.market.length }}</span>
       </div>
       <div class="sorttabs">
-        <button :class="{ active: marketSort === 'vol' }" @click="marketSort = 'vol'">依成交量</button>
-        <button :class="{ active: marketSort === 'gainers' }" @click="marketSort = 'gainers'">漲幅榜</button>
-        <button :class="{ active: marketSort === 'losers' }" @click="marketSort = 'losers'">跌幅榜</button>
+        <button v-if="listView === 'table'" :class="{ active: marketSort === 'vol' }" @click="marketSort = 'vol'">依成交量</button>
+        <button v-if="listView === 'table'" :class="{ active: marketSort === 'gainers' }" @click="marketSort = 'gainers'">漲幅榜</button>
+        <button v-if="listView === 'table'" :class="{ active: marketSort === 'losers' }" @click="marketSort = 'losers'">跌幅榜</button>
+        <button class="tf-sort" :class="{ active: listView === 'table' }" @click="listView = 'table'">📋 表格</button>
+        <button class="tf-sort" :class="{ active: listView === 'heat' }" @click="listView = 'heat'">🟩 熱力圖</button>
       </div>
-      <table class="grid market">
+      <!-- 市場熱力圖:色塊依 24h 漲跌上色、依成交量大小排,點開幣種明細 -->
+      <div v-if="listView === 'heat'" class="mkt-heat">
+        <button v-for="(m, i) in heatTiles" :key="m.coin" class="heat-tile" :class="heatCls(i)" :style="heatStyle(m.chg)" @click="openDetail(m.coin)">
+          <span class="ht-coin">{{ m.coin }}</span>
+          <span class="ht-chg">{{ fmtPct(m.chg) }}</span>
+        </button>
+      </div>
+      <table v-else class="grid market">
         <thead>
           <tr><th class="rank">#</th><th>幣種</th><th class="r">價格</th><th class="r">漲跌幅</th><th class="r">24H 成交量</th></tr>
         </thead>
@@ -4402,4 +4420,18 @@ footer { padding: 18px 0 30px; text-align: center; }
 <!-- ============ optimize:表格容器可橫向捲動(桌機寬表不撐破頁面)============ -->
 <style>
 .tblwrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+</style>
+
+<!-- ============ optimize:市場熱力圖(幣種一覧 · 依漲跌上色/成交量大小)============ -->
+<style>
+.mkt-heat { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); grid-auto-rows:60px; gap:6px; grid-auto-flow:dense; margin-top:4px; }
+.heat-tile { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; border:1px solid transparent; border-radius:9px; padding:8px 10px; cursor:pointer; color:#fff; text-align:left; overflow:hidden; transition:transform .1s, filter .1s; }
+.heat-tile:hover { transform:translateY(-2px); filter:brightness(1.12); }
+.heat-tile.big { grid-column:span 2; grid-row:span 2; }
+.heat-tile.wide { grid-column:span 2; }
+.ht-coin { font-family:var(--f-disp); font-weight:700; font-size:14px; text-shadow:0 1px 2px rgba(0,0,0,.45); }
+.heat-tile.big .ht-coin { font-size:21px; }
+.ht-chg { font-family:var(--f-mono); font-size:12px; text-shadow:0 1px 2px rgba(0,0,0,.45); }
+.heat-tile.big .ht-chg { font-size:16px; }
+@media (max-width:768px){ .mkt-heat { grid-template-columns:repeat(auto-fill,minmax(76px,1fr)); grid-auto-rows:54px; } .heat-tile.big .ht-coin { font-size:17px; } }
 </style>
