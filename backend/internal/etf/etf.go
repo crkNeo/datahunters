@@ -30,33 +30,45 @@ type Flow struct {
 
 // FetchFlow scrapes the latest daily net flow for asset ("BTC" or "ETH").
 func FetchFlow(asset string) (Flow, error) {
+	s, err := FetchSeries(asset, 1)
+	if err != nil {
+		return Flow{}, err
+	}
+	return s[0], nil
+}
+
+// FetchSeries scrapes the last n daily net flows for asset ("BTC" or "ETH"),
+// newest first. Days that haven't settled yet (no number) are skipped, so a
+// pending freshest row doesn't leave a hole. Used by the ETF panel + AI context.
+func FetchSeries(asset string, n int) ([]Flow, error) {
 	u := "https://farside.co.uk/btc/"
 	if asset == "ETH" {
 		u = "https://farside.co.uk/eth/"
 	}
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
-		return Flow{}, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	resp, err := client.Do(req)
 	if err != nil {
-		return Flow{}, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Flow{}, err
+		return nil, err
 	}
 	html := strings.ReplaceAll(string(body), "\n", " ")
 	locs := dateRe.FindAllStringIndex(html, -1)
 	if len(locs) == 0 {
-		return Flow{}, errParse
+		return nil, errParse
 	}
-	// Each date row ends with a "Total" (cumulative) column; the last decimal
-	// value BEFORE that "Total" is the day's net total. Walk the newest few dates
-	// backward until one yields a number (the freshest day may still be pending).
-	for i := len(locs) - 1; i >= 0 && i >= len(locs)-6; i-- {
+	// Each date row ends with a "Total" (cumulative) column; the last decimal value
+	// BEFORE that "Total" is the day's net total. Walk newest→oldest, collecting up
+	// to n rows that yield a number (skip pending/holiday rows with none).
+	out := make([]Flow, 0, n)
+	for i := len(locs) - 1; i >= 0 && len(out) < n; i-- {
 		start := locs[i][1]
 		end := len(html)
 		if i+1 < len(locs) {
@@ -70,9 +82,20 @@ func FetchFlow(asset string) (Flow, error) {
 		if len(nums) == 0 {
 			continue
 		}
-		return Flow{Asset: asset, Date: html[locs[i][0]:locs[i][1]], NetM: parseNum(nums[len(nums)-1])}, nil
+		net := parseNum(nums[len(nums)-1])
+		// Farside renders the current (not-yet-settled) day as a 0.0 total. Multi-
+		// billion-AUM BTC/ETH ETFs practically never net exactly zero, so a 0.0 is
+		// the pending placeholder — skip it so "latest" is the last SETTLED day
+		// instead of a misleading 0 (this was the "常看到 0" report).
+		if net == 0 {
+			continue
+		}
+		out = append(out, Flow{Asset: asset, Date: html[locs[i][0]:locs[i][1]], NetM: net})
 	}
-	return Flow{}, errParse
+	if len(out) == 0 {
+		return nil, errParse
+	}
+	return out, nil
 }
 
 // parseNum turns a Farside cell ("1,234.5" / "(24.9)") into a float (()=negative).

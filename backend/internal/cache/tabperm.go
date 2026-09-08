@@ -34,8 +34,10 @@ var tabMeta = []struct {
 	// 「清算」是 flow 不是 liq),否則前端查不到、會退回備援值。
 	{"ranking", "綜合排行", "public", false},
 	{"list", "幣種一覽", "public", false},
+	{"heatmap", "市場熱力圖", "public", false},
 	{"events", "財經事件", "public", false},
 	{"flow", "清算", "public", false},
+	{"etf", "ETF 流向", "public", false},
 	{"upbit", "Upbit 公告", "public", false},
 	{"news", "市場快訊", "public", false},
 	{"funding", "資金費率", "public", false},

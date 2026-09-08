@@ -161,12 +161,14 @@ func (s *Store) GdeltTick() {
 func (s *Store) EtfTick() {
 	anyOK := false
 	for _, asset := range []string{"BTC", "ETH"} {
-		f, err := etf.FetchFlow(asset)
-		if err != nil || f.Date == "" {
+		series, err := etf.FetchSeries(asset, 14)
+		if err != nil || len(series) == 0 || series[0].Date == "" {
 			continue
 		}
 		anyOK = true
+		f := series[0] // newest day
 		s.gdeltMu.Lock()
+		s.etfFlows[asset] = series      // 面板 + AI 都吃這份即時值,不再是模型自己編
 		if s.etfSeen[asset] == f.Date { // already reported this day
 			s.gdeltMu.Unlock()
 			continue
@@ -207,6 +209,54 @@ func etfNewsItem(f etf.Flow) NewsItem {
 		Country:  "US",
 		Time:     time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+// ETFDay is one asset's daily net flow for the panel (US$m; negative = outflow).
+type ETFDay struct {
+	Date string  `json:"date"`
+	NetM float64 `json:"net_m"`
+}
+
+// ETFAsset is one asset's ETF-flow summary: latest day + recent history + sums.
+type ETFAsset struct {
+	Asset   string   `json:"asset"`
+	Latest  ETFDay   `json:"latest"`
+	Sum5    float64  `json:"sum5"`    // 近 5 日淨流合計
+	Sum14   float64  `json:"sum14"`   // 近 14 日淨流合計
+	History []ETFDay `json:"history"` // 舊→新(畫長條/走勢用)
+}
+
+// ETFFlow is the /api/etf payload: BTC + ETH spot-ETF net flows.
+type ETFFlow struct {
+	Assets    []ETFAsset `json:"assets"`
+	Source    string     `json:"source"`
+	UpdatedAt string     `json:"updated_at"`
+}
+
+// ETFData assembles the stored ETF series into the panel payload.
+func (s *Store) ETFData() ETFFlow {
+	s.gdeltMu.RLock()
+	defer s.gdeltMu.RUnlock()
+	out := ETFFlow{Assets: []ETFAsset{}, Source: "Farside Investors", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	for _, asset := range []string{"BTC", "ETH"} {
+		series := s.etfFlows[asset] // newest first
+		if len(series) == 0 {
+			continue
+		}
+		a := ETFAsset{Asset: asset, Latest: ETFDay{Date: series[0].Date, NetM: series[0].NetM}, History: []ETFDay{}}
+		for i, f := range series {
+			if i < 5 {
+				a.Sum5 += f.NetM
+			}
+			a.Sum14 += f.NetM
+		}
+		a.Sum5, a.Sum14 = round2(a.Sum5), round2(a.Sum14)
+		for i := len(series) - 1; i >= 0; i-- { // 舊→新
+			a.History = append(a.History, ETFDay{Date: series[i].Date, NetM: series[i].NetM})
+		}
+		out.Assets = append(out.Assets, a)
+	}
+	return out
 }
 
 // News returns the recent market-moving headlines (newest first).

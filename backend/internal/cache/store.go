@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"datahunter/internal/auth"
+	"datahunter/internal/etf"
 	"datahunter/internal/exchange"
 	"datahunter/internal/gdelt"
 	"datahunter/internal/marketai"
@@ -121,12 +122,13 @@ type Store struct {
 	srmBar1h int64      // last processed closed 1h bar Ts
 	srmBar4h int64      // last processed closed 4h bar Ts
 
-	gdeltW      *gdelt.Watcher    // GDELT market-news watcher (free, no key)
-	gdeltMu     sync.RWMutex      // guards the news feed + dedupe set
-	gdeltFeed   []NewsItem        // recent market-moving headlines (newest first), titles zh-TW
-	gdeltSeen   map[string]bool   // seen article URLs (dedupe; bounded)
-	gdeltSeeded bool              // first tick only seeds (no push burst of history on boot)
-	etfSeen     map[string]string // asset → last reported ETF-flow date (dedupe: once/day)
+	gdeltW      *gdelt.Watcher        // GDELT market-news watcher (free, no key)
+	gdeltMu     sync.RWMutex          // guards the news feed + dedupe set
+	gdeltFeed   []NewsItem            // recent market-moving headlines (newest first), titles zh-TW
+	gdeltSeen   map[string]bool       // seen article URLs (dedupe; bounded)
+	gdeltSeeded bool                  // first tick only seeds (no push burst of history on boot)
+	etfSeen     map[string]string     // asset → last reported ETF-flow date (dedupe: once/day)
+	etfFlows    map[string][]etf.Flow // asset → recent daily net flows, newest first (ETF 面板 + AI 用)
 
 	convMu       sync.Mutex    // guards the 冥王星 (動態ATR均線收斂 4H) strategy (VIP, convergence.go)
 	convTrades   []*PaperTrade // simulated convergence trades (long+short)
@@ -223,6 +225,7 @@ func NewStore(coins []string) *Store {
 		tabPerms:          map[string]string{},
 		gdeltSeen:         map[string]bool{},
 		etfSeen:           map[string]string{},
+		etfFlows:          map[string][]etf.Flow{},
 		rlFails:           map[string]int{},
 		rlDown:            map[string]bool{},
 		homeCache:         newTTLCache(15 * time.Second),

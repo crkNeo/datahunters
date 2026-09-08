@@ -155,6 +155,18 @@ func (s *Store) marketSnapshot() string {
 	liq := s.Liquidations()
 	fmt.Fprintf(&b, "近1h清算:多單爆 $%.1fM、空單爆 $%.1fM\n", liq.LongUSD1h/1e6, liq.ShortUSD1h/1e6)
 
+	// 現貨 ETF 淨流(Farside 真實值,取代模型自行臆測的數字)
+	if etf := s.ETFData(); len(etf.Assets) > 0 {
+		b.WriteString("現貨ETF淨流(Farside):")
+		for i, a := range etf.Assets {
+			if i > 0 {
+				b.WriteString("、")
+			}
+			fmt.Fprintf(&b, "%s 最新%s%+.1fM(近5日%+.1fM)", a.Asset, a.Latest.Date, a.Latest.NetM, a.Sum5)
+		}
+		b.WriteString("\n")
+	}
+
 	if fb := s.FundingBoard(); len(fb.Rows) > 0 {
 		hi := fb.Rows[0]              // most positive (rows sorted desc)
 		lo := fb.Rows[len(fb.Rows)-1] // most negative

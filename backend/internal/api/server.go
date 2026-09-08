@@ -114,6 +114,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))          // DefiLlama token-unlock board
 	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))       // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/etf", s.gateTab("etf", s.handleETF))                   // 現貨 ETF 每日淨流(Farside)
 
 	// 基礎設施 / 首頁共用資料,不屬於任何分頁,固定公開
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
@@ -147,17 +148,17 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
-	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                   // 冥王星 (動態ATR均線收斂 4H)
-	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                // 多週期支壓 (1H+4H 提示)
-	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))          // 爆量脈搏面板
-	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))             // 脈衝星策略
-	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))       // 脈衝星v3 (ATR + runner)
-	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))       // 脈衝星v5 (= v1, 固定% TP)
-	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))       // 脈衝星v6 (v3 + 確認棒)
+	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                         // 冥王星 (動態ATR均線收斂 4H)
+	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                      // 多週期支壓 (1H+4H 提示)
+	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
+	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))                   // 脈衝星策略
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星v3 (ATR + runner)
+	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))             // 脈衝星v5 (= v1, 固定% TP)
+	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))             // 脈衝星v6 (v3 + 確認棒)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
-	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                            // 策略「已結束」DB 分頁(依 book 動態鑑權)
-	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))           // 訊號紀錄 DB 分頁
+	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
+	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
@@ -750,8 +751,8 @@ func (s *Server) handleOrderBlockV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SMCV2State())
 }
 
-func atoi(s string) int      { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }
-func atoi64(s string) int64  { n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64); return n }
+func atoi(s string) int     { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }
+func atoi64(s string) int64 { n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64); return n }
 
 // handleStratHistory serves one page of a strategy's CLOSED history straight from
 // MySQL (unbounded, time-filtered), with stats aggregated over the full range.
@@ -964,6 +965,10 @@ func (s *Server) handleLiquidations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLiqHeat(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	writeJSON(w, s.store.LiquidationHeat(q.Get("coin"), q.Get("window")))
+}
+
+func (s *Server) handleETF(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.ETFData())
 }
 
 // handleBTCSR serves BTC's support/resistance only — the public 戰場 draws its
