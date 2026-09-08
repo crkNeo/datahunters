@@ -3189,8 +3189,7 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
 /* 側欄/抽屜品牌頭:logo + 站名(桌機側欄與手機抽屜共用)*/
 .nav-brand{ display:flex; align-items:center; gap:9px; padding:2px 8px 13px; margin-bottom:6px;
   border-bottom:1px solid var(--c-line); cursor:pointer; }
-.nav-brand-logo{ width:30px; height:30px; border-radius:7px; object-fit:contain; flex:0 0 auto;
-  background:rgba(232,184,75,.08); padding:3px; box-shadow:0 0 0 1px var(--c-line); }
+.nav-brand-logo{ width:46px; height:46px; object-fit:contain; flex:0 0 auto; }
 .nav-brand-name{ font-family:var(--f-disp); font-weight:800; font-size:16px; letter-spacing:.4px;
   color:var(--c-txt); white-space:nowrap; }
 .nav-brand:hover .nav-brand-name{ color:var(--c-gold); }
