@@ -27,9 +27,9 @@ function go(p) {
 
 <style scoped>
 .pager { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
-.pgbtn { min-width: 34px; height: 30px; padding: 0 8px; border-radius: 7px; background: #1b1e25; border: 1px solid #2f3540; color: #c8ccd4; font-size: 14px; font-weight: 700; cursor: pointer; }
+.pgbtn { min-width: 34px; height: 30px; padding: 0 8px; border-radius: 7px; background: var(--c-surf2); border: 1px solid var(--c-line); color: var(--c-txt); font-size: 14px; font-weight: 700; font-family: var(--f-mono); cursor: pointer; }
 .pgbtn:disabled { opacity: .35; cursor: default; }
-.pgbtn:not(:disabled):hover { background: #262b34; border-color: #3a4150; }
-.pginfo { font-size: 12.5px; color: #9aa0aa; padding: 0 4px; }
-.pginfo b { color: #e8eaed; }
+.pgbtn:not(:disabled):hover { background: var(--c-surf); border-color: var(--c-gold-d); color: var(--c-gold-b); }
+.pginfo { font-size: 12.5px; color: var(--c-mut); padding: 0 4px; }
+.pginfo b { color: var(--c-gold-b); }
 </style>
