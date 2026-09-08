@@ -405,6 +405,9 @@ async function loadReferral() {
   } catch (e) { /* secondary */ }
 }
 function openReferral() { refShow.value = true; loadReferral(); loadRefRules(); loadVIPStatus() }
+// 個人中心(新版頁,取代舊「我的推廣」modal):切到 account 分頁並載入推廣/VIP/規則資料
+const accountTab = ref('ref') // ref=推廣中心 / vip=會員資格 / set=帳戶設定
+function openAccount() { mainTab.value = 'account'; accountTab.value = 'ref'; loadReferral(); loadRefRules(); loadVIPStatus() }
 
 // ---- 申請 VIP(會員在「我的推廣」內)----
 const vipStatus = ref(null)   // { status: 'pending'|'approved'|'rejected'|'' }
@@ -1654,7 +1657,7 @@ watch([role, tabPerms, authReady], () => {
       <button class="regbtn" :class="{ on: qualityFilter }" @click="toggleQuality" title="只保留 OI 收縮(衰竭/平倉)時的訊號;樣本外驗證有效">
         OI收縮過濾 {{ qualityFilter ? '✓' : '✕' }}
       </button>
-      <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openReferral" title="我的推廣">{{ username }}</button> <em>{{ role }}</em>
+      <span v-if="role !== 'public'" class="userchip"><button class="namebtn" @click="openAccount" title="個人中心">{{ username }}</button> <em>{{ role }}</em>
         <em v-if="regTime" class="regdate" title="註冊時間">註冊 {{ fmtRegDate(regTime) }}</em>
         <button v-if="canInstall" class="regbtn" @click="installApp" title="安裝為 App">📲 安裝</button>
         <button v-if="notifState !== 'on'" class="regbtn" @click="enableNotifications" title="開啟推播通知">🔔 通知</button>
@@ -2152,6 +2155,128 @@ watch([role, tabPerms, authReady], () => {
       </div>
       </template>
     </nav>
+
+    <!-- 個人中心(新版,依 account.html mock:個人摘要 + 推廣中心/會員資格/帳戶設定 三子分頁)-->
+    <section v-if="mainTab === 'account'" class="account">
+      <div class="acc-head"><h1>個人中心</h1><span class="sub">推廣 · 會員資格 · 帳戶設定</span></div>
+
+      <!-- 個人資料摘要 -->
+      <div class="psum">
+        <div class="bigav">{{ (username || '?').slice(0, 1).toUpperCase() }}</div>
+        <div class="psum-id">
+          <div class="nm">{{ username }} <span class="acc-badge">{{ role === 'vip' ? 'VIP 會員' : role === 'admin' ? '管理員' : '一般會員' }}</span></div>
+          <div class="acc-meta">註冊 {{ fmtRegDate(regTime) || '—' }}<template v-if="refData"> · 推薦碼 {{ refData.code || '—' }} · 推薦 {{ refData.total }} 人</template></div>
+        </div>
+        <div class="acc-quick">
+          <button class="qbtn" @click="openPwModal">🔑 修改密碼</button>
+          <button class="qbtn danger" @click="logout">登出</button>
+        </div>
+      </div>
+
+      <!-- 子分頁 -->
+      <div class="subtabs">
+        <button class="subtab" :class="{ on: accountTab === 'ref' }" @click="accountTab = 'ref'">推廣中心</button>
+        <button class="subtab" :class="{ on: accountTab === 'vip' }" @click="accountTab = 'vip'">會員資格</button>
+        <button class="subtab" :class="{ on: accountTab === 'set' }" @click="accountTab = 'set'">帳戶設定</button>
+      </div>
+
+      <!-- 推廣中心 -->
+      <div v-show="accountTab === 'ref'">
+        <div v-if="refRules.text" class="acc-rulerow"><button class="rulebtn" @click="refRulesShow = true">📋 推廣規則與獎勵制度</button></div>
+        <template v-if="refData">
+          <div class="card">
+            <p class="eyebrow">我的推薦碼</p>
+            <div class="codebox">
+              <div><div class="cb-lb">分享此碼 / 連結給好友註冊</div><div class="cb-code">{{ refData.code || '—' }}</div></div>
+              <button class="cb-cp" @click="copyText(refUrl)">複製連結</button>
+            </div>
+            <div class="acc-refstats">
+              <div class="rstat"><div class="k">總推薦人數</div><div class="v">{{ refData.total }}</div></div>
+              <div class="rstat"><div class="k">合格人數</div><div class="v ok">{{ refData.qualified }}</div></div>
+              <div class="rstat"><div class="k">已申請獎勵</div><div class="v">{{ refData.applied }} 次</div></div>
+            </div>
+            <div class="rewardbar">
+              <div><div class="rb-t">🎁 推薦獎勵</div><div class="rb-d">已累積 <b class="long">{{ refData.qualified }}</b> 位合格好友 · 每 {{ refData.per_tier }} 位換 1 次額度 · 本月 {{ refData.month_used }}/{{ refData.month_cap }}</div></div>
+              <div class="rb-btns">
+                <button class="acc-apply" :disabled="!refData.can_usdt || refBusy" @click="applyReward('usdt')">申請 {{ refData.usdt_amt }} USDT</button>
+                <button class="acc-apply merch" :disabled="!refData.can_merch || refBusy" @click="applyReward('merch')">BITUNIX 周邊<span v-if="refData.merch_total > 0" class="refstock">剩 {{ refData.merch_left }}</span></button>
+              </div>
+            </div>
+            <p v-if="refData.usdt_why" class="refwhy">30 USDT:{{ refData.usdt_why }}</p>
+            <p v-if="refData.merch_why" class="refwhy">周邊:{{ refData.merch_why }}</p>
+          </div>
+
+          <div v-if="refData.rewards.length" class="card">
+            <p class="eyebrow">申請紀錄</p>
+            <div class="tblwrap"><table class="acc-tbl">
+              <thead><tr><th>獎勵</th><th>次別</th><th class="r">狀態</th></tr></thead>
+              <tbody>
+                <tr v-for="w in refData.rewards" :key="w.id">
+                  <td>{{ w.kind === 'merch' ? '🎁 BITUNIX 周邊' : ('💵 ' + refData.usdt_amt + ' USDT') }}</td>
+                  <td class="mut">第 {{ w.tier }} 次 · 合格 {{ w.qualified }} 位</td>
+                  <td class="r"><span class="acc-tag" :class="w.status === 'approved' ? 'ok' : 'pend'">{{ w.status === 'approved' ? '✅ 已通過' : '⏳ 審核中' }}</span></td>
+                </tr>
+              </tbody>
+            </table></div>
+          </div>
+
+          <div class="card">
+            <p class="eyebrow">推廣名單</p>
+            <div v-if="!refData.records.length" class="cmp-empty">還沒有人使用你的推薦碼</div>
+            <div v-else class="tblwrap"><table class="acc-tbl">
+              <thead><tr><th>用戶</th><th>時間</th><th class="r">是否合格</th></tr></thead>
+              <tbody>
+                <tr v-for="(r, i) in refData.records" :key="i">
+                  <td class="mono">{{ r.username }}</td>
+                  <td class="mut">{{ fmtClock(r.created) }}</td>
+                  <td class="r"><span class="acc-tag" :class="r.ok ? 'ok' : 'pend'">{{ r.ok ? '✅ 合格' : '未達成' }}</span></td>
+                </tr>
+              </tbody>
+            </table></div>
+          </div>
+        </template>
+        <div v-else class="cmp-empty">載入中…</div>
+      </div>
+
+      <!-- 會員資格 -->
+      <div v-show="accountTab === 'vip'">
+        <div class="card">
+          <p class="eyebrow">目前資格</p>
+          <div class="vipcard">
+            <div class="vip-ring" :class="{ plain: !can('vip') }">{{ role === 'vip' ? 'VIP' : role === 'admin' ? 'ADM' : '一般' }}</div>
+            <div class="vip-info">
+              <div class="vip-t">{{ role === 'vip' ? '您已是 VIP 會員 🎉' : role === 'admin' ? '管理員帳號' : '一般會員' }}</div>
+              <div class="vip-d">{{ can('vip') ? '可使用全部 VIP 策略與即時交易提醒 · 有效中' : '升級 VIP 後可解鎖全部 VIP 策略與即時提醒' }}</div>
+            </div>
+            <template v-if="role === 'member'">
+              <span v-if="vipStatus && vipStatus.status === 'pending'" class="acc-apply done">⭐ 審核中…</span>
+              <span v-else-if="vipStatus && vipStatus.status === 'approved'" class="acc-apply done">✅ 已通過</span>
+              <button v-else class="acc-apply on" @click="vipShow = true">⭐ 申請 VIP{{ vipStatus && vipStatus.status === 'rejected' ? '(可重新申請)' : '' }}</button>
+            </template>
+            <span v-else-if="role === 'vip'" class="acc-apply done">✅ 您已是VIP會員!</span>
+          </div>
+        </div>
+        <div class="card">
+          <p class="eyebrow">VIP 會員續用資格</p>
+          <ul class="acc-rules">
+            <li>① 維持使用我們推薦碼的 <b>Bitunix 帳戶</b>,且帳戶保持活躍。</li>
+            <li>② 每月達成 <b>指定交易量</b> 或維持 <b>300U 以上</b> 入金額度。</li>
+            <li>③ 未達成續用資格者,VIP 權限將於次月調整為一般會員。</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 帳戶設定 -->
+      <div v-show="accountTab === 'set'">
+        <div class="card">
+          <p class="eyebrow">帳戶設定</p>
+          <div class="srow"><div class="si">🔔</div><div class="st">推播通知<small>整點分析、進場訊號即時推播</small></div><div class="ac"><button class="acc-sbtn" :class="{ done: notifState === 'on' }" :disabled="notifState === 'on'" @click="enableNotifications">{{ notifState === 'on' ? '已開啟' : '開啟' }}</button></div></div>
+          <div v-if="canInstall" class="srow"><div class="si">📲</div><div class="st">安裝為 App<small>加到主畫面,像 App 一樣開啟</small></div><div class="ac"><button class="acc-sbtn" @click="installApp">安裝</button></div></div>
+          <div class="srow"><div class="si">🔑</div><div class="st">修改密碼<small>6–16 碼,含大小寫 + 數字 + 特殊符號</small></div><div class="ac"><button class="acc-sbtn" @click="openPwModal">修改</button></div></div>
+          <div class="srow"><div class="si">🚪</div><div class="st">登出<small>目前登入:{{ username }}</small></div><div class="ac"><button class="acc-sbtn danger" @click="logout">登出</button></div></div>
+        </div>
+      </div>
+    </section>
 
     <!-- 綜合排行 Top 10 (public, scores only) -->
     <section v-if="mainTab === 'ranking'">
@@ -4048,4 +4173,85 @@ footer { padding: 18px 0 30px; text-align: center; }
   box-shadow:0 0 18px -4px rgba(232,184,75,.5); }
 .lw-cta:hover{ filter:brightness(1.08); }
 .lw-note{ margin-top:4px; font-size:10.5px; color:var(--c-mut2); max-width:280px; line-height:1.6; }
+</style>
+
+<!-- ============ optimize:個人中心頁(依 account.html mock)============ -->
+<style>
+.account{ max-width:1080px; }
+.acc-head{ display:flex; align-items:baseline; gap:11px; margin-bottom:16px; }
+.acc-head h1{ font-family:var(--f-disp); font-weight:700; font-size:20px; margin:0; }
+.acc-head .sub{ color:var(--c-mut); font-size:12.5px; }
+/* 個人資料摘要 */
+.psum{ display:flex; align-items:center; gap:16px; background:linear-gradient(150deg,rgba(232,184,75,.08),var(--c-surf) 55%); border:1px solid var(--c-gold-d); border-radius:16px; padding:18px 20px; margin-bottom:16px; }
+.psum .bigav{ width:56px; height:56px; border-radius:16px; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold-d)); display:grid; place-items:center; color:#161206; font-family:var(--f-disp); font-weight:700; font-size:24px; box-shadow:0 0 20px rgba(232,184,75,.4); flex-shrink:0; }
+.psum .nm{ font-family:var(--f-disp); font-weight:700; font-size:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.acc-badge{ font-family:var(--f-disp); font-size:10px; letter-spacing:2px; color:#161206; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); border-radius:6px; padding:2px 9px; }
+.acc-meta{ font-size:12px; color:var(--c-mut); font-family:var(--f-mono); margin-top:3px; }
+.acc-quick{ margin-left:auto; display:flex; gap:8px; }
+.qbtn{ font-size:12.5px; color:var(--c-mut); background:var(--c-bg2); border:1px solid var(--c-line); border-radius:9px; padding:7px 13px; cursor:pointer; }
+.qbtn:hover{ color:var(--c-txt); border-color:var(--c-line2); }
+.qbtn.danger{ color:var(--c-dn); border-color:rgba(255,92,108,.3); }
+/* 子分頁 */
+.subtabs{ display:flex; gap:4px; border-bottom:1px solid var(--c-line); margin-bottom:18px; flex-wrap:wrap; }
+.subtab{ font-family:var(--f-disp); font-weight:600; font-size:14px; color:var(--c-mut); padding:10px 16px; border:none; border-bottom:2px solid transparent; margin-bottom:-1px; background:none; cursor:pointer; }
+.subtab:hover{ color:var(--c-txt); }
+.subtab.on{ color:var(--c-gold-b); border-bottom-color:var(--c-gold); }
+.acc-rulerow{ display:flex; justify-content:flex-end; margin-bottom:12px; }
+.rulebtn{ font-size:12.5px; color:var(--c-gold-b); background:var(--c-gold-soft); border:1px solid var(--c-gold-d); border-radius:9px; padding:8px 14px; font-weight:600; cursor:pointer; }
+.rulebtn:hover{ background:rgba(232,184,75,.16); }
+/* 推薦碼 */
+.codebox{ display:flex; align-items:center; gap:14px; background:var(--c-bg2); border:1px dashed var(--c-gold-d); border-radius:12px; padding:16px 18px; flex-wrap:wrap; }
+.cb-lb{ font-size:12px; color:var(--c-mut); }
+.cb-code{ font-family:var(--f-mono); font-weight:600; font-size:26px; letter-spacing:3px; color:var(--c-gold-b); }
+.cb-cp{ margin-left:auto; background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; font-weight:700; border:none; border-radius:10px; padding:9px 16px; font-size:13px; cursor:pointer; }
+.acc-refstats{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:14px; }
+.acc-refstats .rstat{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:12px; padding:14px 16px; }
+.acc-refstats .k{ font-size:11.5px; color:var(--c-mut); margin-bottom:6px; }
+.acc-refstats .v{ font-family:var(--f-mono); font-weight:700; font-size:24px; }
+.acc-refstats .v.ok{ color:var(--c-up); }
+.rewardbar{ display:flex; align-items:center; gap:14px; margin-top:14px; padding:14px 16px; border-radius:12px; background:linear-gradient(150deg,rgba(232,184,75,.09),var(--c-bg2) 60%); border:1px solid var(--c-gold-d); flex-wrap:wrap; }
+.rb-t{ font-family:var(--f-disp); font-weight:700; font-size:14px; }
+.rb-d{ font-size:12px; color:var(--c-mut); margin-top:3px; }
+.rb-btns{ margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+.acc-apply{ background:linear-gradient(135deg,var(--c-gold-b),var(--c-gold)); color:#161206; font-family:var(--f-disp); font-weight:700; border:none; border-radius:10px; padding:10px 18px; font-size:13.5px; white-space:nowrap; cursor:pointer; }
+.acc-apply.merch{ background:var(--c-gold-soft); color:var(--c-gold-b); border:1px solid var(--c-gold-d); }
+.acc-apply:disabled{ opacity:.5; cursor:not-allowed; }
+.acc-apply.done{ background:var(--c-up-bg); color:var(--c-up); border:1px solid rgba(55,214,138,.4); font-weight:700; padding:10px 18px; border-radius:10px; cursor:default; }
+.acc-apply.on{ box-shadow:0 0 18px -4px rgba(232,184,75,.5); }
+/* 表格 */
+.acc-tbl{ width:100%; border-collapse:collapse; font-size:13px; margin-top:2px; }
+.acc-tbl th{ font-family:var(--f-disp); font-weight:600; font-size:10px; letter-spacing:1px; color:var(--c-mut); text-align:left; padding:9px 12px; border-bottom:1px solid var(--c-line2); text-transform:uppercase; }
+.acc-tbl td{ padding:11px 12px; border-bottom:1px solid var(--c-line); }
+.acc-tbl th.r, .acc-tbl td.r{ text-align:right; }
+.acc-tbl td.mut{ color:var(--c-mut); }
+.acc-tag{ font-size:11px; font-weight:600; border-radius:6px; padding:2px 9px; font-family:var(--f-mono); }
+.acc-tag.ok{ background:var(--c-up-bg); color:var(--c-up); }
+.acc-tag.pend{ background:var(--c-surf2); color:var(--c-mut); }
+/* 會員資格 */
+.vipcard{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.vip-ring{ width:70px; height:70px; border-radius:50%; border:3px solid var(--c-gold); display:grid; place-items:center; font-family:var(--f-disp); font-weight:700; font-size:20px; color:var(--c-gold-b); box-shadow:0 0 22px -4px rgba(232,184,75,.5); flex-shrink:0; }
+.vip-ring.plain{ border-color:var(--c-line2); color:var(--c-mut); box-shadow:none; font-size:15px; }
+.vip-t{ font-family:var(--f-disp); font-weight:700; font-size:18px; }
+.vip-d{ font-size:12.5px; color:var(--c-mut); margin-top:3px; }
+.vipcard .acc-apply{ margin-left:auto; font-size:15px; padding:12px 22px; border-radius:12px; }
+.acc-rules{ margin:6px 0 0; padding-left:0; list-style:none; }
+.acc-rules li{ font-size:13px; color:var(--c-mut); margin:7px 0; line-height:1.6; }
+.acc-rules li b{ color:var(--c-txt); }
+/* 帳戶設定 */
+.srow{ display:flex; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--c-line); }
+.srow:last-child{ border-bottom:0; }
+.srow .si{ width:36px; height:36px; border-radius:10px; background:var(--c-bg2); border:1px solid var(--c-line); display:grid; place-items:center; font-size:16px; flex-shrink:0; }
+.srow .st{ font-weight:600; font-size:14px; }
+.srow .st small{ display:block; color:var(--c-mut); font-size:11.5px; font-weight:400; }
+.srow .ac{ margin-left:auto; }
+.acc-sbtn{ font-size:13px; color:var(--c-txt); background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:9px; padding:8px 15px; cursor:pointer; }
+.acc-sbtn:hover{ border-color:var(--c-gold-d); }
+.acc-sbtn.done{ color:var(--c-up); border-color:rgba(55,214,138,.4); cursor:default; }
+.acc-sbtn.danger{ color:var(--c-dn); border-color:rgba(255,92,108,.35); }
+@media (max-width:768px){
+  .acc-refstats{ grid-template-columns:1fr; }
+  .acc-quick{ margin-left:0; width:100%; }
+  .rb-btns{ margin-left:0; }
+  .vipcard .acc-apply{ margin-left:0; width:100%; text-align:center; }
+}
 </style>
