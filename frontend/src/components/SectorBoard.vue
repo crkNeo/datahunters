@@ -77,7 +77,7 @@ defineExpose({ load })
     <button class="tf-sort" :class="{ on: sectorVw }" @click="sectorVw = true" title="用成交量加權(大市值主導)">量權</button>
   </div>
   <table v-if="sectorRows.length" class="grid">
-    <thead><tr><th>板塊</th><th class="sec-strength">強弱</th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
+    <thead><tr><th>板塊</th><th class="sec-strength">強弱<span class="help" tabindex="0">?<span class="help-pop">長條寬度 = 該板塊<b>平均 24h 漲跌</b>相對「本批最強板塊」的比例(最強者滿格,其餘按比例縮短);<b>綠</b>=平均上漲、<b>紅</b>=下跌。會跟著上方 <b>等權 / 量權</b> 切換(等權=板塊內每檔一票;量權=成交量加權,大幣主導)。純比較各板塊相對強弱,非絕對數值。</span></span></th><th class="r">平均24h</th><th class="r">相對BTC</th><th class="r" title="板塊內上漲檔數占比">上漲比例</th><th class="r" title="相對BTC 較上小時的變化">本小時輪動</th><th class="r">檔數</th></tr></thead>
     <tbody>
       <template v-for="r in sectorRows" :key="r.sector">
         <tr class="clickable" @click="sectorOpen = sectorOpen === r.sector ? '' : r.sector">
