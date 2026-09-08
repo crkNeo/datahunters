@@ -408,6 +408,11 @@ function openReferral() { refShow.value = true; loadReferral(); loadRefRules(); 
 // 個人中心(新版頁,取代舊「我的推廣」modal):切到 account 分頁並載入推廣/VIP/規則資料
 const accountTab = ref('ref') // ref=推廣中心 / vip=會員資格 / set=帳戶設定
 function openAccount() { mainTab.value = 'account'; accountTab.value = 'ref'; loadReferral(); loadRefRules(); loadVIPStatus() }
+// 直接用網址 /account 或重整進來時(未經 openAccount),補載推廣/VIP/規則資料。
+// 同時看 role:直連時 auth 尚未解析(role=public),等 role 解析為會員後再載。
+watch([mainTab, role], ([t, r]) => {
+  if (t === 'account' && r !== 'public' && !refData.value) { loadReferral(); loadRefRules(); loadVIPStatus() }
+})
 
 // ---- 申請 VIP(會員在「我的推廣」內)----
 const vipStatus = ref(null)   // { status: 'pending'|'approved'|'rejected'|'' }
