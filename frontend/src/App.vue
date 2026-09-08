@@ -2781,7 +2781,7 @@ watch([role, tabPerms, authReady], () => {
 
       <h3 class="psub" v-if="bookF">進行中 ({{ bookF.open.length }})</h3>
       <table v-if="bookF && bookF.open.length" class="grid">
-        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th v-if="bookF && bookF.stats.multi_tp">進度</th><th class="r" title="當前資金費率">費率</th><th class="r">止盈</th><th class="r">止損</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="can('admin')" class="r">操作</th></tr></thead>
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大漲幅</th><th v-if="mainTab !== 'emaonly'" title="動能是否還在(雷達分數+CVD);⚠️贏單常因已漲一段而顯示轉弱,僅供參考">動能</th><th class="r" title="當前資金費率">費率</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th class="r">進場時間</th><th class="r">持倉</th><th v-if="can('admin')" class="r">操作</th></tr></thead>
         <tbody>
           <tr v-for="t in bookF.open" :key="t.coin + t.open_time" class="clickable" @click="openDetail(t.coin)">
             <td class="coin">{{ t.coin }}</td>
@@ -2791,13 +2791,11 @@ watch([role, tabPerms, authReady], () => {
             <td class="r" :class="t.pnl_pct >= 0 ? 'long' : 'short'"><b>{{ fmtPct(t.pnl_pct) }}</b></td>
             <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
             <td v-if="mainTab !== 'emaonly'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
-            <td v-if="bookF && bookF.stats.multi_tp" class="tsmall" :title="t.tp1 ? ('TP1 ' + fmtPrice(t.tp1) + ' · TP2 ' + fmtPrice(t.tp2) + ' · TP3 ' + fmtPrice(t.tp)) : ''">
-              <template v-if="t.tp1"><span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }}</span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }}</span><span class="tsmall"> 剩{{ Math.round((1 - (t.filled || 0)) * 100) }}%</span></template>
-              <span v-else class="tsmall">單一</span>
-            </td>
             <td class="r tsmall">{{ fmtFund(t.cur_funding) }}</td>
-            <td class="r long">{{ fmtPrice(t.tp) }} <small>({{ fmtPct(pnlAt(t, t.tp)) }})</small></td>
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 1 }">{{ t.tp1 ? fmtPrice(t.tp1) : '—' }}</td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 2 }">{{ t.tp2 ? fmtPrice(t.tp2) : '—' }}</td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 3 }">{{ fmtPrice(t.tp) }}</td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
             <td v-if="can('admin')" class="r"><button class="exitbtn" @click.stop="mainTab === 'emaonly' ? manualExit(t) : manualExitStrat(curPaperBook, t.id, loadPaper)">手動出場</button></td>
@@ -4381,4 +4379,10 @@ footer { padding: 18px 0 30px; text-align: center; }
 .uc-name{ font-family:var(--f-disp); font-weight:600; font-size:13px; color:var(--c-txt); }
 .uc-role{ font-family:var(--f-mono); font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--c-gold-b); background:var(--c-gold-soft); border-radius:4px; padding:1px 5px; font-style:normal; }
 .topbar .userchip .uc-out{ font-size:12px; }
+</style>
+
+<!-- ============ optimize:進行中止盈欄(inline 策略頁,達成變綠)============ -->
+<style>
+.tp-cell{ font-family:var(--f-mono); color:var(--c-mut); }
+.tp-cell.hit{ color:var(--c-up); background:var(--c-up-bg); font-weight:600; }
 </style>

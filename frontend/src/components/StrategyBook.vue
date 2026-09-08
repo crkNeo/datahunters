@@ -62,6 +62,20 @@ const hasTf = computed(() =>
   [...(props.state?.open || []), ...(hist.value.rows || [])].some((t) => t.tf)
 )
 const tfLabel = (tf) => (tf || '').toUpperCase()
+
+// 進行中「狀態」欄(依 strategy.html mock:達 TP1 / 達 TP2 / 達最終 / 持倉中 / 待觸發)
+function tpStatus(t) {
+  if (t.status === 'pending') return '待觸發'
+  const legs = t.legs || 0
+  if (legs >= 3) return '達最終'
+  if (legs >= 2) return '達 TP2'
+  if (legs >= 1) return '達 TP1'
+  return '持倉中'
+}
+function tpStatusCls(t) {
+  if (t.status === 'pending') return 'pend'
+  return (t.legs || 0) >= 1 ? 'tp' : 'run'
+}
 </script>
 
 <template>
@@ -99,43 +113,32 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
     </div>
 
     <h3 class="psub" v-if="state && state.open.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
-    <table v-if="state && state.open.length" class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">損益%</th><th class="r">最大漲幅</th><th>進度</th><th class="r">止損</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+    <p v-if="state && state.open.length" class="tp-legend">綠色 = 已觸及止盈</p>
+    <div v-if="state && state.open.length" class="tblwrap">
+    <table class="grid">
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
-          <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span><span v-if="t.status === 'pending'" class="pendtag" title="價格觸發器已佈防,尚未成交(等待回踩至觸發價)">⏳待觸發</span></td>
+          <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ fmtPrice(t.cur) }}</td>
           <td class="r" :class="t.status === 'pending' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
             <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
           <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-          <td class="tsmall">
-            <template v-if="t.status === 'pending'">
-              <span class="tsmall">等回踩至 {{ fmtPrice(t.entry) }} 才進場 · 目標 {{ fmtPrice(t.tp) }}</span>
-            </template>
-            <template v-else-if="t.tp1 && t.tp2 && t.tp3">
-              <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp3) }} <i class="tppct">{{ lvlPct(t, t.tp3) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 4 }">TP4 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
-            </template>
-            <template v-else-if="t.tp1 && t.tp2">
-              <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 2 }">TP2 {{ fmtPrice(t.tp2) }} <i class="tppct">{{ lvlPct(t, t.tp2) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP3 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
-            </template>
-            <template v-else-if="t.tp1">
-              <span class="tppill" :class="{ hit: t.legs >= 1 }">TP1 {{ fmtPrice(t.tp1) }} <i class="tppct">{{ lvlPct(t, t.tp1) }}</i></span><span class="tppill" :class="{ hit: t.legs >= 3 }">TP2 {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span><span class="tsmall"> 剩 {{ Math.round((1 - (t.filled || 0)) * 100) }}%</span>
-            </template>
-            <template v-else>
-              <span class="tsmall">單一 · {{ fmtPrice(t.tp) }} <i class="tppct">{{ lvlPct(t, t.tp) }}</i></span>
-              <span v-if="t.be_hit" class="betag" :title="'價格曾觸及保本位 ' + fmtPrice(t.be_price) + ';止盈止損維持不變'">🛡 已達保本位 {{ fmtPrice(t.be_price) }}</span>
-            </template>
-          </td>
           <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }">{{ t.tp1 ? fmtPrice(t.tp1) : '—' }}</td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }">{{ t.tp2 ? fmtPrice(t.tp2) : '—' }}</td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }">{{ fmtPrice(t.tp) }}</td>
+          <td><span class="stag" :class="tpStatusCls(t)">{{ tpStatus(t) }}</span></td>
           <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           <td v-if="canExit" class="r"><button v-if="t.status !== 'pending'" class="exitbtn" @click.stop="$emit('exit', t.id)">手動出場</button><small v-else class="tsmall">—</small></td>
         </tr>
       </tbody>
     </table>
+    </div>
 
     <h3 class="psub" v-if="hist.total">已結束 ({{ hist.total }})</h3>
     <table v-if="hist.rows.length" class="grid">
@@ -167,4 +170,13 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 .pendtag { margin-left: 6px; font-size: 10px; color: var(--c-gold-b); background: var(--c-gold-soft); border-radius: 6px; padding: 1px 5px; white-space: nowrap; font-family: var(--f-mono); }
 .pendcount { color: var(--c-gold-b); font-weight: 600; font-size: 13px; font-family: var(--f-mono); }
 .tfbadge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 1px 6px; border-radius: 5px; background: var(--c-steel-bg); color: var(--c-steel); font-family: var(--f-mono); }
+/* 進行中止盈欄(依 strategy.html mock:止盈價為主,達成該段變綠)*/
+.tp-legend { font-size: 11px; color: var(--c-mut2); margin: 0 0 8px; }
+.tp-cell { font-family: var(--f-mono); color: var(--c-mut); }
+.tp-cell.hit { color: var(--c-up); background: var(--c-up-bg); font-weight: 600; }
+/* 狀態 tag */
+.stag { font-size: 11px; font-weight: 600; border-radius: 6px; padding: 2px 8px; font-family: var(--f-mono); white-space: nowrap; }
+.stag.tp { background: var(--c-up-bg); color: var(--c-up); }
+.stag.run { background: var(--c-surf2); color: var(--c-mut); }
+.stag.pend { background: var(--c-gold-soft); color: var(--c-gold-b); }
 </style>
