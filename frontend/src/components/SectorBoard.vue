@@ -8,6 +8,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { authFetch } from '../lib/api'
 import { fmtPct, fundClock } from '../lib/format'
 
+defineEmits(['coin']) // 點成員幣種 → 開幣種明細(交由 App.vue 的 openDetail)
+
 const sectors = ref(null)
 async function load() {
   try {
@@ -93,7 +95,7 @@ defineExpose({ load })
           <td colspan="7">
             <div class="sec-detail-lbl">板塊成員(24h 由強到弱)</div>
             <div class="sec-sublist">
-              <div v-for="c in r.coins" :key="c.coin" class="sec-subrow">
+              <div v-for="c in r.coins" :key="c.coin" class="sec-subrow clickable" @click.stop="$emit('coin', c.coin)">
                 <span class="sec-sub-coin">{{ c.coin }}</span>
                 <span class="sec-sub-chg" :class="c.chg >= 0 ? 'long' : 'short'">{{ fmtPct(c.chg) }}</span>
               </div>
@@ -117,7 +119,8 @@ defineExpose({ load })
 /* 展開:板塊成員逐條下拉列(一行一檔:幣種左、漲跌右)*/
 .sec-detail-lbl { display: block; font-size: 11px; color: var(--c-mut2); margin: 2px 0 8px; }
 .sec-sublist { display: flex; flex-direction: column; max-width: 460px; }
-.sec-subrow { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; font-family: var(--f-mono); font-size: 12.5px; border-bottom: 1px solid var(--c-line); }
+.sec-subrow { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; font-family: var(--f-mono); font-size: 12.5px; border-bottom: 1px solid var(--c-line); cursor: pointer; border-radius: 6px; transition: background .12s; }
+.sec-subrow:hover { background: var(--c-surf2); }
 .sec-subrow:last-child { border-bottom: 0; }
 .sec-sub-coin { font-family: var(--f-disp); font-weight: 600; color: var(--c-txt); }
 @media (max-width: 768px) { .sec-strength { display: none; } .sec-sublist { max-width: 100%; } }

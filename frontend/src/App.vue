@@ -2306,7 +2306,7 @@ watch([role, tabPerms, authReady], () => {
           <table class="grid">
             <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr></thead>
             <tbody>
-              <tr v-for="(r, i) in ranking.long" :key="r.coin">
+              <tr v-for="(r, i) in ranking.long" :key="r.coin" class="clickable" @click="openDetail(r.coin)">
                 <td class="rank">{{ i + 1 }}</td><td class="coin">{{ r.coin }}</td>
                 <td class="r score long"><b>{{ r.score }}</b></td>
                 <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
@@ -2320,7 +2320,7 @@ watch([role, tabPerms, authReady], () => {
           <table class="grid">
             <thead><tr><th>#</th><th>幣種</th><th class="r">綜合分</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr></thead>
             <tbody>
-              <tr v-for="(r, i) in ranking.short" :key="r.coin">
+              <tr v-for="(r, i) in ranking.short" :key="r.coin" class="clickable" @click="openDetail(r.coin)">
                 <td class="rank">{{ i + 1 }}</td><td class="coin">{{ r.coin }}</td>
                 <td class="r score short"><b>{{ r.score }}</b></td>
                 <td class="r" :class="r.oi_chg_1h >= 0 ? 'long' : 'short'">{{ r.oi_chg_1h?.toFixed(2) }}</td>
@@ -2854,7 +2854,7 @@ watch([role, tabPerms, authReady], () => {
     <RobinhoodBoard v-else-if="mainTab === 'robinhood'" :robinhood="robinhood" />
 
     <!-- 板塊強弱/輪動 (hourly) -->
-    <SectorBoard v-else-if="mainTab === 'sectors'" ref="sectorBoard" />
+    <SectorBoard v-else-if="mainTab === 'sectors'" ref="sectorBoard" @coin="openDetail" />
 
     <!-- 文章專欄 (Feature 3) -->
     <section v-else-if="mainTab === 'articles'">
