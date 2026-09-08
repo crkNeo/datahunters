@@ -1157,14 +1157,62 @@ const market = computed(() => {
   // 'vol' already sorted by backend
   return m
 })
-// 市場熱力圖:依成交量排序取前 48,色塊依漲跌上色、前幾大放大(treemap 感)
+// 市場熱力圖:依成交量排序取前 48(資料/判定不變),改用比例式 treemap 呈現。
 const heatTiles = computed(() => (home.value ? [...home.value.market].slice(0, 48) : []))
-function heatStyle(chg) {
-  const a = Math.min(0.82, 0.14 + Math.abs(chg) / 12) // |漲跌| 越大越飽和
-  const c = chg >= 0 ? '55,214,138' : '255,92,108'
-  return { background: `rgba(${c},${a})`, borderColor: `rgba(${c},${Math.min(1, a + 0.2)})` }
+// squarified treemap:磚塊面積 ∝ 成交量,盡量接近方形。虛擬畫布 100×62,回傳各磚 %。
+function squarify(values, W, H) {
+  const total = values.reduce((a, b) => a + b, 0) || 1
+  const areas = values.map((v) => (v / total) * (W * H))
+  const rects = []
+  let x = 0, y = 0, w = W, h = H, i = 0
+  const worst = (row, side) => {
+    const s = row.reduce((a, b) => a + b, 0), mx = Math.max(...row), mn = Math.min(...row)
+    return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn))
+  }
+  while (i < areas.length) {
+    const side = Math.min(w, h)
+    let row = [], best = Infinity, j = i
+    while (j < areas.length) {
+      const test = row.concat(areas[j])
+      const wst = worst(test, side)
+      if (row.length && wst > best) break
+      row = test; best = wst; j++
+    }
+    const sum = row.reduce((a, b) => a + b, 0)
+    if (w >= h) {
+      const cw = sum / h; let cy = y
+      for (const a of row) { const rh = a / cw; rects.push({ x, y: cy, w: cw, h: rh }); cy += rh }
+      x += cw; w -= cw
+    } else {
+      const rh = sum / w; let cx = x
+      for (const a of row) { const rw = a / rh; rects.push({ x: cx, y, w: rw, h: rh }); cx += rw }
+      y += rh; h -= rh
+    }
+    i = j
+  }
+  return rects
 }
-function heatCls(i) { return i < 3 ? 'big' : i < 9 ? 'wide' : '' }
+const HEAT_H = 62 // 虛擬畫布高(寬固定 100),= 容器 aspect-ratio
+const heatTree = computed(() => {
+  const t = heatTiles.value
+  if (!t.length) return []
+  const rects = squarify(t.map((x) => Math.max(1, x.vol || 1)), 100, HEAT_H)
+  return t.map((x, i) => ({ ...x, r: rects[i] || { x: 0, y: 0, w: 0, h: 0 } }))
+})
+// 磚塊定位 + 依漲跌上色(飽和度隨 |漲跌| 增強 —— 與原本相同的色彩判定)
+function tileStyle(t, i) {
+  const r = t.r
+  const a = Math.min(0.82, 0.14 + Math.abs(t.chg) / 12)
+  const c = t.chg >= 0 ? '55,214,138' : '255,92,108'
+  return {
+    left: r.x + '%', width: r.w + '%',
+    top: (r.y / HEAT_H * 100) + '%', height: (r.h / HEAT_H * 100) + '%',
+    background: `rgba(${c},${a})`, '--glow': c, '--i': i,
+  }
+}
+// 字級隨磚塊寬度分級;太小者隱藏文字(靠色塊 + hover 提示)
+function heatSize(r) { return r.w >= 16 ? 'big' : r.w >= 9 ? 'mid' : r.w >= 5 ? '' : r.w >= 3 ? 'sm' : 'tiny' }
+function heatHot(chg) { return Math.abs(chg) >= 15 } // 極端漲跌 → 脈動光暈
 
 // ---- formatting helpers ----
 // 止盈位相對進場的幅度。順著單子方向算,所以空單的止盈(價格更低)一樣是正數。
@@ -2633,10 +2681,11 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="mainTab === 'heatmap' && home">
       <div class="mk-head">
         <h2>市場熱力圖<span class="help" tabindex="0">?<span class="help-pop">全市場合約的 24h 漲跌全景。<b>磚塊大小</b>=成交量排名(越大越前),<b>顏色</b>=漲跌幅(綠漲紅跌、越深越極端)。點任一磚看該幣明細。⚠️ 僅供參考,非投資建議。</span></span></h2>
-        <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 綠漲紅跌</span>
+        <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 面積=成交量 · 綠漲紅跌</span>
       </div>
-      <div class="mkt-heat">
-        <button v-for="(m, i) in heatTiles" :key="m.coin" class="heat-tile" :class="heatCls(i)" :style="heatStyle(m.chg)" @click="openDetail(m.coin)">
+      <div class="mkt-tree">
+        <button v-for="(m, i) in heatTree" :key="m.coin" class="heat-tile" :class="[heatSize(m.r), { hot: heatHot(m.chg) }]"
+          :style="tileStyle(m, i)" :title="m.coin + ' ' + fmtPct(m.chg)" @click="openDetail(m.coin)">
           <span class="ht-coin">{{ m.coin }}</span>
           <span class="ht-chg">{{ fmtPct(m.chg) }}</span>
         </button>
@@ -4436,16 +4485,23 @@ footer { padding: 18px 0 30px; text-align: center; }
 .tblwrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
 </style>
 
-<!-- ============ optimize:市場熱力圖(幣種一覧 · 依漲跌上色/成交量大小)============ -->
+<!-- ============ optimize:市場熱力圖(比例式 treemap · 面積=成交量/依漲跌上色 · 動畫)============ -->
 <style>
-.mkt-heat { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); grid-auto-rows:60px; gap:6px; grid-auto-flow:dense; margin-top:4px; }
-.heat-tile { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; border:1px solid transparent; border-radius:9px; padding:8px 10px; cursor:pointer; color:#fff; text-align:left; overflow:hidden; transition:transform .1s, filter .1s; }
-.heat-tile:hover { transform:translateY(-2px); filter:brightness(1.12); }
-.heat-tile.big { grid-column:span 2; grid-row:span 2; }
-.heat-tile.wide { grid-column:span 2; }
-.ht-coin { font-family:var(--f-disp); font-weight:700; font-size:14px; text-shadow:0 1px 2px rgba(0,0,0,.45); }
-.heat-tile.big .ht-coin { font-size:21px; }
-.ht-chg { font-family:var(--f-mono); font-size:12px; text-shadow:0 1px 2px rgba(0,0,0,.45); }
-.heat-tile.big .ht-chg { font-size:16px; }
-@media (max-width:768px){ .mkt-heat { grid-template-columns:repeat(auto-fill,minmax(76px,1fr)); grid-auto-rows:54px; } .heat-tile.big .ht-coin { font-size:17px; } }
+.mkt-tree { position:relative; width:100%; aspect-ratio:100/62; margin-top:4px; border-radius:12px; overflow:hidden; background:var(--c-bg2); }
+.heat-tile { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  border:1.5px solid var(--c-bg); border-radius:7px; cursor:pointer; color:#fff; text-align:center; overflow:hidden; box-sizing:border-box;
+  transition:transform .18s cubic-bezier(.2,.8,.3,1), filter .18s, box-shadow .18s, opacity .3s;
+  animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards; animation-delay:calc(var(--i) * 16ms); }
+.heat-tile:hover { transform:scale(1.05); filter:brightness(1.22); z-index:20; box-shadow:0 6px 22px rgba(0,0,0,.5); border-color:rgba(255,255,255,.65); }
+.heat-tile.hot { animation:tilein .5s cubic-bezier(.2,.8,.3,1) backwards, heatpulse 1.9s ease-in-out calc(var(--i)*16ms + .5s) infinite; z-index:3; }
+.ht-coin { font-family:var(--f-disp); font-weight:700; font-size:12px; line-height:1.05; text-shadow:0 1px 2px rgba(0,0,0,.5); white-space:nowrap; }
+.ht-chg { font-family:var(--f-mono); font-size:10px; text-shadow:0 1px 2px rgba(0,0,0,.5); white-space:nowrap; }
+.heat-tile.big .ht-coin { font-size:24px; } .heat-tile.big .ht-chg { font-size:14px; }
+.heat-tile.mid .ht-coin { font-size:16px; } .heat-tile.mid .ht-chg { font-size:11px; }
+.heat-tile.sm .ht-coin { font-size:9.5px; } .heat-tile.sm .ht-chg { display:none; }
+.heat-tile.tiny .ht-coin, .heat-tile.tiny .ht-chg { display:none; }
+@keyframes tilein { from { opacity:0; transform:scale(.55); } to { opacity:1; transform:scale(1); } }
+@keyframes heatpulse { 0%,100% { box-shadow:0 0 0 0 rgba(var(--glow),0); } 50% { box-shadow:0 0 15px 1px rgba(var(--glow),.85); } }
+@media (max-width:768px){ .mkt-tree { aspect-ratio:100/108; } .heat-tile.big .ht-coin { font-size:18px; } .heat-tile.mid .ht-coin { font-size:13px; } }
+@media (prefers-reduced-motion:reduce){ .heat-tile { animation:none; } .heat-tile.hot { animation:none; } }
 </style>
