@@ -1646,16 +1646,38 @@ function kindOf(tab) {
 function canTab(tab) {
   return can(tabNeed(tab))
 }
-// 導覽點擊:能看就進去(並跑該頁的載入副作用);不能看就依身分跳提示,不硬進被擋的頁。
+// 導覽點擊:能看就進去(並跑該頁的載入副作用);不能看就依身分處理:
+//  · 未登入 → 開登入視窗
+//  · 會員點 VIP「策略」頁 → 進去看免費牆 teaser(進行中持倉:幣種/入場價/方向)
+//  · 會員點 VIP「資訊」頁(或其他)→ 直接跳「申請 VIP」modal
 function navTo(tab, after) {
   if (canTab(tab)) { mainTab.value = tab; if (typeof after === 'function') after(); return }
   if (!authReady.value || role.value === 'public') {
     loginOpen.value = true
     showToast('登入後即可查看「' + (tabName(tab) || '此頁') + '」', 'warn')
+    return
+  }
+  if (tabNeed(tab) === 'vip' && kindOf(tab) === 'signal') {
+    mainTab.value = tab // 進頁 → 由 teaserView 顯示免費牆預覽(watch 會自動抓 teaser)
   } else {
-    showToast('「' + (tabName(tab) || '此頁') + '」需「' + tierLabel(tabNeed(tab)) + '」以上權限', 'warn')
+    showToast('「' + (tabName(tab) || '此頁') + '」為 VIP 內容,升級後即可解鎖', 'warn')
+    openReferral()
   }
 }
+// VIP 策略免費牆:目前分頁是「VIP 策略」但本人無權限 → 顯示 teaser(而非空白/硬擋)
+const teaserView = computed(() => !canTab(mainTab.value) && tabNeed(mainTab.value) === 'vip' && kindOf(mainTab.value) === 'signal')
+const stratTeaser = ref(null) // { book, open:[{coin,dir,entry}], count }
+async function loadStratTeaser(tab) {
+  stratTeaser.value = null
+  try {
+    const res = await authFetch('/api/strat-teaser?book=' + encodeURIComponent(tab))
+    if (res.ok) stratTeaser.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+// 進到(或深連到)VIP 策略免費牆時自動抓精簡預覽
+watch([mainTab, teaserView], () => {
+  if (teaserView.value && (!stratTeaser.value || stratTeaser.value.book !== mainTab.value)) loadStratTeaser(mainTab.value)
+})
 // 分頁中文名(給提示訊息用)
 const TAB_NAMES = {
   ranking: '綜合排行', list: '幣種一覽', heatmap: '市場熱力圖', events: '財經事件', flow: '清算',
@@ -1718,7 +1740,8 @@ watch([role, tabPerms, authReady], () => {
   // 但那一刻 role 仍是 public。若此時就踢回首頁,會連帶把網址改成 /,route 參數消失,
   // 等 loadMe() 回來也救不回去 —— 使用者就莫名其妙停在首頁。
   if (!authReady.value) return
-  if (!canTab(mainTab.value)) mainTab.value = 'ranking'
+  // 例外:會員深連/停留在 VIP 策略頁時保留(顯示免費牆 teaser),不踢回首頁。
+  if (!canTab(mainTab.value) && !teaserView.value) mainTab.value = 'ranking'
 })
 </script>
 
@@ -2507,6 +2530,36 @@ watch([role, tabPerms, authReady], () => {
       <p class="loginhint" style="margin-top:12px">此為觀察面板:純感測器輸出,不含品質閘門、不下單。點列可看該幣詳情。</p>
     </section>
 
+    <!-- VIP 策略免費牆:會員可見「進行中持倉」精簡預覽(幣種/入場價/方向),其餘鎖住 -->
+    <section v-else-if="teaserView" class="strat-teaser">
+      <div class="mk-head">
+        <h2>{{ tabName(mainTab) }}<span class="tier vip stt-tier">VIP</span></h2>
+        <span class="mk-count" v-if="stratTeaser">進行中 {{ stratTeaser.count }} 單 · 免費預覽</span>
+      </div>
+      <div class="stt-banner">
+        <span class="stt-lock">🔒</span>
+        <div class="stt-btxt">
+          <b>此為 VIP 策略</b> —— 免費會員可先看到「進行中的單」有哪些幣、方向與入場價;
+          止盈/止損、即時損益、勝率與歷史等完整明細,升級 VIP 後解鎖。
+        </div>
+        <button class="stt-cta" @click="openReferral()">⭐ 升級 VIP 解鎖完整策略</button>
+      </div>
+      <table v-if="stratTeaser && stratTeaser.open.length" class="grid stt-table">
+        <thead><tr><th>幣種</th><th>方向</th><th class="r">入場價</th><th class="r stt-blur-h">止盈 / 止損</th><th class="r stt-blur-h">即時損益</th></tr></thead>
+        <tbody>
+          <tr v-for="(t, i) in stratTeaser.open" :key="i">
+            <td class="coin">{{ t.coin }}</td>
+            <td><span class="dir" :class="t.dir === 'long' ? 'short' : 'long'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+            <td class="r mono">{{ fmtPrice(t.entry) }}</td>
+            <td class="r stt-blur">●●●● / ●●●●</td>
+            <td class="r stt-blur">＋●●.●%</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else-if="stratTeaser" class="cmp-empty">目前此策略沒有進行中的單 · 升級 VIP 可看完整歷史與即時訊號</p>
+      <p v-else class="loading">載入預覽中…</p>
+    </section>
+
     <!-- 冥王星 (動態ATR 4H 均線收斂) · VIP -->
     <section v-else-if="mainTab === 'conv' && canTab('conv')">
       <div class="mk-head">
@@ -2855,7 +2908,7 @@ watch([role, tabPerms, authReady], () => {
 
     <!-- 訊號追蹤 (paper-trading from radar signals) -->
     <!-- 訊號紀錄 (when score crossed ±20) -->
-    <section v-else-if="mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly'">
+    <section v-else-if="(mainTab === 'paper' || mainTab === 'gamble' || mainTab === 'emaonly') && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ mainTab === 'gamble' ? '超新星' : mainTab === 'emaonly' ? '銀河' : '星軌' }}<span class="help" tabindex="0">?<span class="help-pop"><template v-if="mainTab === 'gamble'">‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%。TP1 平 40%→止損移保本、TP2 平 30%→止損移 TP1、TP3(最終)平剩餘。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else-if="mainTab === 'emaonly'">‼️此訊號為順勢策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40%」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template><template v-else>‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」</template></span></span></h2>
         <span class="mk-count" v-if="book">每 60 秒監控 · 自動止盈止損</span>
@@ -4559,4 +4612,20 @@ footer { padding: 18px 0 30px; text-align: center; }
   50% { box-shadow:0 0 18px 2px rgba(var(--glow),.9), inset 0 0 10px rgba(var(--glow),.35); } }
 @media (max-width:768px){ .mkt-tree { aspect-ratio:100/108; } }
 @media (prefers-reduced-motion:reduce){ .heat-tile, .heat-tile.hot, .ht-arw { animation:none; } .heat-tile:hover::after { animation:none; } }
+</style>
+
+<!-- ============ optimize:VIP 策略免費牆 teaser(會員可見進行中持倉:幣種/入場價/方向)============ -->
+<style>
+.strat-teaser .stt-tier{ margin-left:8px; font-size:10px; font-weight:700; border-radius:5px; padding:2px 7px; font-family:var(--f-mono); letter-spacing:.5px; }
+.stt-banner{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; background:linear-gradient(120deg, var(--c-gold-soft), rgba(232,184,75,.04));
+  border:1px solid var(--c-gold-d); border-radius:var(--r-lg); padding:14px 16px; margin-bottom:14px; }
+.stt-lock{ font-size:24px; flex:0 0 auto; }
+.stt-btxt{ flex:1 1 320px; font-size:12.5px; color:var(--c-txt); line-height:1.6; }
+.stt-btxt b{ color:var(--c-gold-b); }
+.stt-cta{ flex:0 0 auto; background:var(--c-gold); color:#1a1408; border:none; border-radius:9px; padding:10px 16px;
+  font-family:var(--f-disp); font-weight:800; font-size:13px; cursor:pointer; box-shadow:0 4px 14px rgba(232,184,75,.3); transition:filter .15s, transform .15s; }
+.stt-cta:hover{ filter:brightness(1.08); transform:translateY(-1px); }
+.stt-table .stt-blur{ filter:blur(5px); opacity:.7; user-select:none; font-family:var(--f-mono); }
+.stt-table .stt-blur-h{ opacity:.5; }
+.stt-table tbody tr, .stt-table tbody tr{ pointer-events:none; }
 </style>

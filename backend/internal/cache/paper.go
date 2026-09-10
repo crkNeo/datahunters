@@ -785,6 +785,46 @@ func (b *paperBook) state() PaperState {
 func (s *Store) Paper() PaperState  { return s.serve(s.paperMain, 55) }
 func (s *Store) Gamble() PaperState { return s.serve(s.paperGamble, 50) }
 
+// TeaseRow 是免費牆 teaser 的一列:只露「幣種 / 方向 / 入場價」,不含止盈止損/損益等。
+type TeaseRow struct {
+	Coin  string  `json:"coin"`
+	Dir   string  `json:"dir"` // long | short
+	Entry float64 `json:"entry"`
+}
+
+// StratTeaserData 是 /api/strat-teaser 的回應:某 VIP 策略「進行中」持倉的精簡預覽,
+// 給尚未升級的會員看到有哪些單(幣種/入場價/方向),完整明細仍需 VIP。
+type StratTeaserData struct {
+	Locked bool       `json:"locked"`
+	Book   string     `json:"book"`
+	Open   []TeaseRow `json:"open"`  // 進行中持倉(僅三欄)
+	Count  int        `json:"count"` // 進行中總數
+}
+
+// StratTeaser 回某策略書進行中持倉的精簡預覽(只露幣種/方向/入場價)。
+func (s *Store) StratTeaser(book string) StratTeaserData {
+	var open []*PaperTrade
+	switch book {
+	case "paper":
+		open = s.Paper().Open
+	case "gamble":
+		open = s.Gamble().Open
+	case "emaonly":
+		open = s.EMAOnly().Open
+	case "conv":
+		open = s.ConvState().Open
+	}
+	out := StratTeaserData{Locked: true, Book: book, Open: []TeaseRow{}}
+	for _, t := range open {
+		if t == nil {
+			continue
+		}
+		out.Open = append(out.Open, TeaseRow{Coin: t.Coin, Dir: t.Dir, Entry: t.Entry})
+	}
+	out.Count = len(out.Open)
+	return out
+}
+
 // ExportTrades returns a book's full trade history for CSV export, oldest-first.
 // Prefers SQLite (complete history) and falls back to the in-memory book (whose
 // closed list is capped) if persistence is off or empty. book is one of

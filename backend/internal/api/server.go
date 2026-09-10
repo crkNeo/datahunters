@@ -122,6 +122,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/risk", s.gate(P, s.handleRisk))
 	mux.HandleFunc("/api/market-ai", s.gate(P, s.handleMarketAI))            // 首頁整點大盤分析橫幅
 	mux.HandleFunc("/api/strategy-today", s.gate(P, s.handleStrategyToday))  // 首頁「今日策略前三名」(依角色可見範圍)
+	mux.HandleFunc("/api/strat-teaser", s.gate(M, s.handleStratTeaser))      // VIP 策略免費牆:會員可見進行中持倉精簡預覽
 	mux.HandleFunc("/api/strat-meta", s.gate(P, s.handleStratMeta))          // 各策略類型標籤 + 風控警語旗標
 	mux.HandleFunc("/api/tab-perms", s.gate(P, s.handleTabPerms))            // 各分頁所需最低身分(給前端決定顯示哪些)
 	mux.HandleFunc("/api/tab-kinds", s.gate(P, s.handleTabKinds))            // 各分頁類型 資訊/訊號(給前端分列)
@@ -907,6 +908,19 @@ func (s *Server) handleStrategyToday(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:3]
 	}
 	writeJSON(w, map[string]any{"rows": rows})
+}
+
+// handleStratTeaser serves the免費牆 preview for a VIP strategy book: open positions'
+// coin/direction/entry only. Member-gated (public gets 403 → login), so an insufficient
+// member sees which trades exist without the full VIP detail.
+func (s *Server) handleStratTeaser(w http.ResponseWriter, r *http.Request) {
+	book := r.URL.Query().Get("book")
+	switch book {
+	case "paper", "gamble", "emaonly", "conv":
+		writeJSON(w, s.store.StratTeaser(book))
+	default:
+		http.Error(w, "unknown book", http.StatusBadRequest)
+	}
 }
 
 // handleTabPerms serves the PUBLIC tab→minimum-role map so the nav can hide what
