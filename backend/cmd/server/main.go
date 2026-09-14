@@ -226,6 +226,8 @@ func main() {
 			store.PulsarV3MarkTick()
 			store.PulsarV5MarkTick()
 			store.PulsarV6MarkTick()
+			store.PulsarV7MarkTick()
+			store.PulsarV8MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
@@ -252,12 +254,16 @@ func main() {
 		store.PulsarV3Tick()
 		store.PulsarV5Tick()
 		store.PulsarV6Tick()
+		store.PulsarV7Tick()
+		store.PulsarV8Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
 			store.PulsarV5Tick()
 			store.PulsarV6Tick()
+			store.PulsarV7Tick()
+			store.PulsarV8Tick()
 		}
 	}()
 	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。

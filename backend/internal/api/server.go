@@ -145,17 +145,19 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
-	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                   // 冥王星 (動態ATR均線收斂 4H)
-	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                // 多週期支壓 (1H+4H 提示)
-	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))          // 爆量脈搏面板
-	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))             // 脈衝星策略
-	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))       // 脈衝星v3 (ATR + runner)
-	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))       // 脈衝星v5 (= v1, 固定% TP)
-	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))       // 脈衝星v6 (v3 + 確認棒)
+	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                         // 冥王星 (動態ATR均線收斂 4H)
+	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                      // 多週期支壓 (1H+4H 提示)
+	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
+	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))                   // 脈衝星策略
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星v3 (ATR + runner)
+	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))             // 脈衝星v5 (= v1, 固定% TP)
+	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))             // 脈衝星v6 (v3 + 確認棒)
+	mux.HandleFunc("/api/pulsarv7", s.gateTab("pulsarv7", s.handlePulsarV7))             // 脈衝星v7 (v3 + 最小R)
+	mux.HandleFunc("/api/pulsarv8", s.gateTab("pulsarv8", s.handlePulsarV8))             // 脈衝星v8 (v7 + 更強爆量)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
-	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                            // 策略「已結束」DB 分頁(依 book 動態鑑權)
-	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))           // 訊號紀錄 DB 分頁
+	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
+	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
 	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
@@ -739,6 +741,16 @@ func (s *Server) handlePulsarV6(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV6State())
 }
 
+// handlePulsarV7 serves the 脈衝星v7 (v3 + 最小止損距離) tracker.
+func (s *Server) handlePulsarV7(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV7State())
+}
+
+// handlePulsarV8 serves the 脈衝星v8 (v7 + 更強爆量) tracker.
+func (s *Server) handlePulsarV8(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV8State())
+}
+
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.
 func (s *Server) handleOrderBlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SMCState())
@@ -748,8 +760,8 @@ func (s *Server) handleOrderBlockV2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SMCV2State())
 }
 
-func atoi(s string) int      { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }
-func atoi64(s string) int64  { n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64); return n }
+func atoi(s string) int     { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }
+func atoi64(s string) int64 { n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64); return n }
 
 // handleStratHistory serves one page of a strategy's CLOSED history straight from
 // MySQL (unbounded, time-filtered), with stats aggregated over the full range.
