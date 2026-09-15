@@ -2849,7 +2849,7 @@ watch([role, tabPerms, authReady], () => {
         <h2>多空推薦</h2>
         <span class="mk-count">{{ signals.length }} 個可進場訊號（評分 ≥ 20 / ≤ −20）<template v-if="regimeFilter"> · 順 BTC 趨勢</template><template v-if="qualityFilter"> · OI 收縮</template></span>
       </div>
-      <table v-if="signals.length" class="grid">
+      <table v-if="signals.length" class="grid signals-grid">
         <thead>
           <tr><th>幣種</th><th>方向</th><th class="r">評分</th><th>推薦指數</th><th>品質</th><th class="r">OI 1h%</th><th class="r">CVD%</th></tr>
         </thead>
@@ -4755,4 +4755,21 @@ footer { padding: 18px 0 30px; text-align: center; }
 .reviewproof.empty{ color:var(--c-mut2); }
 .vplabel{ background:rgba(0,0,0,.62); color:var(--c-txt); }
 .vpnone{ color:var(--c-mut2); }
+</style>
+
+<!-- ============ optimize:手機資訊表格壓縮到不用左右滑(font/padding 縮 + 隱藏次要欄)============ -->
+<style>
+@media (max-width:640px){
+  /* 表格內容壓縮:字級/內距縮小,讓多數表在 375 寬直接塞得下,不必左右滑 */
+  .grid{ font-size:11px; }
+  .grid th, .grid td{ padding:6px 6px; }
+  .grid th{ font-size:10.5px; }
+  .grid .coin{ font-size:11.5px; }
+  .grid .chip{ padding:1px 5px; font-size:10px; }
+  .grid td.vol, .grid .tsmall{ font-size:10px; }
+  .grid th.rank, .grid td.rank{ width:22px; padding-left:2px; padding-right:2px; }
+  /* 7 欄的寬表(OI 儀表板 / 多空推薦):手機隱藏次要的「品質」欄,其餘就塞得下 */
+  .oi-sortable th:nth-child(4), .oi-sortable td:nth-child(4){ display:none; }        /* OI:品質 */
+  .signals-grid th:nth-child(5), .signals-grid td:nth-child(5){ display:none; }       /* 多空推薦:品質 */
+}
 </style>
