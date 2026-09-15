@@ -72,9 +72,9 @@ async function resetStratCfg(st) {
   if (res.ok) { loadStratStates(); emit('changed') }
 }
 
-// 手風琴:預設全折疊,點標題才展開該策略(可同時展開多個)。
-const expanded = ref({})
-function toggleExpand(name) { expanded.value[name] = !expanded.value[name] }
+// 手風琴:預設全折疊,一次只展開一個(展開新的會收合前一個)。
+const openStrat = ref('')
+function toggleExpand(name) { openStrat.value = openStrat.value === name ? '' : name }
 const EXIT_CN = { split: '分批止盈', breakeven: '保本', single: '單段' }
 
 onMounted(() => loadStratStates(true)) // 首次載入不出訊息
@@ -85,7 +85,7 @@ defineExpose({ load: loadStratStates })
 <section class="card adminbox">
   <h3 class="psub">策略開關 <button class="minibtn" :disabled="stratBusy" @click="loadStratStates()">{{ stratBusy ? '刷新中…' : '刷新' }}</button></h3>
   <div class="strat-list">
-    <div v-for="st in stratStates" :key="st.name" class="strat-item" :class="{ open: expanded[st.name] }">
+    <div v-for="st in stratStates" :key="st.name" class="strat-item" :class="{ open: openStrat === st.name }">
       <!-- 折疊列:點整條展開;右側開關 stop 掉不觸發展開 -->
       <div class="strat-head" @click="toggleExpand(st.name)">
         <span class="strat-caret">▸</span>
@@ -96,7 +96,7 @@ defineExpose({ load: loadStratStates })
         </button>
         <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
       </div>
-      <div v-show="expanded[st.name]" class="strat-body">
+      <div v-show="openStrat === st.name" class="strat-body">
       <div class="stratcfg-line">
         <span class="stratcfg-k">類型</span>
         <button v-for="tg in STRAT_TAGS" :key="tg" class="tagchip" :class="{ on: (st.tags || []).includes(tg) }" @click="toggleStratTag(st, tg)">{{ tg }}</button>
