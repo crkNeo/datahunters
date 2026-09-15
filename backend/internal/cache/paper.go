@@ -94,6 +94,7 @@ type PaperStats struct {
 	WinRate  float64 `json:"win_rate"`
 	AvgPnl   float64 `json:"avg_pnl"`
 	TotalPnl float64 `json:"total_pnl"`
+	Payoff   float64 `json:"payoff"` // 賺賠比 = 平均獲利 ÷ 平均虧損(無虧損=99.99;無獲利=0)
 	// 分批止盈 funnel + profit factor (0 when the book isn't multi-TP).
 	ProfitFactor float64 `json:"profit_factor"` // 總獲利 ÷ 總虧損
 	Tp1          int     `json:"tp1"`           // closed trades that reached TP1 (Legs≥1)
@@ -781,8 +782,25 @@ func (b *paperBook) state() PaperState {
 		} else if grossWin > 0 {
 			st.Stats.ProfitFactor = 99.99
 		}
+		st.Stats.Payoff = payoffOf(grossWin, grossLoss, st.Stats.Wins, st.Stats.Losses)
 	}
 	return st
+}
+
+// payoffOf 賺賠比 = 平均獲利 ÷ 平均虧損。無虧損(全贏)回 99.99;無獲利回 0。
+func payoffOf(grossWin, grossLoss float64, wins, losses int) float64 {
+	if wins == 0 {
+		return 0
+	}
+	if losses == 0 || grossLoss <= 0 {
+		return 99.99
+	}
+	avgWin := grossWin / float64(wins)
+	avgLoss := grossLoss / float64(losses)
+	if avgLoss <= 0 {
+		return 99.99
+	}
+	return round2(avgWin / avgLoss)
 }
 
 // Paper = disciplined; Gamble = loose; Premium = aligned + funding-fuel control.

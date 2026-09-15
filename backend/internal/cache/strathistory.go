@@ -137,6 +137,7 @@ func computeClosedStats(all []*PaperTrade, multiTP bool) PaperStats {
 		} else if gW > 0 {
 			st.ProfitFactor = 99.99
 		}
+		st.Payoff = payoffOf(gW, gL, st.Wins, st.Losses)
 	}
 	return st
 }

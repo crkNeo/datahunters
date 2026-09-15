@@ -938,6 +938,8 @@ function filterBook(b) {
       win_rate: n ? +((wins / n) * 100).toFixed(2) : 0,
       avg_pnl: n ? +(sum / n).toFixed(2) : 0,
       total_pnl: +sum.toFixed(2),
+      // 賺賠比 = 平均獲利 ÷ 平均虧損(無虧損=99.99;無獲利=0)
+      payoff: wins === 0 ? 0 : ((n - wins) > 0 && gL > 0 ? +((gW / wins) / (gL / (n - wins))).toFixed(2) : 99.99),
       multi_tp: !!(b.stats && b.stats.multi_tp),
       profit_factor: gL > 0 ? +(gW / gL).toFixed(2) : (gW > 0 ? 99.99 : 0),
       tp1, tp2, tp3,
@@ -2973,7 +2975,7 @@ watch([role, tabPerms, authReady], () => {
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
         <div class="pstat"><div class="stat-k">勝率</div><div class="stat-v" :class="paperHist.stats.win_rate >= 50 ? 'long' : 'short'">{{ paperHist.stats.win_rate }}%</div></div>
-        <div class="pstat"><div class="stat-k">平均損益</div><div class="stat-v" :class="paperHist.stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(paperHist.stats.avg_pnl) }}</div></div>
+        <div class="pstat"><div class="stat-k">賺賠比<span class="help" tabindex="0">?<span class="help-pop">平均每次<b>賺</b>的 ÷ 平均每次<b>賠</b>的。&gt;1 代表贏的單平均比輸的單大;和勝率一起看更準(低勝率+高賺賠比也能賺)。</span></span></div><div class="stat-v" :class="(paperHist.stats.payoff || 0) >= 1 ? 'long' : 'short'">{{ paperHist.stats.payoff >= 99.99 ? '∞' : (paperHist.stats.payoff || 0).toFixed(2) }}</div></div>
         <div class="pstat"><div class="stat-k">累計損益</div><div class="stat-v" :class="paperHist.stats.total_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(paperHist.stats.total_pnl) }}</div></div>
       </div>
       <div v-if="paperHist.stats.multi_tp && paperHist.stats.closed" class="tpfunnel">
@@ -4316,7 +4318,9 @@ footer { padding: 18px 0 30px; text-align: center; }
 <style>
 .mainnav{ box-sizing:border-box; }  /* 側欄外寬 = var(--side-w),與內容偏移對齊 */
 @media (min-width:769px){
-  .wrap{ margin-left:var(--side-w) !important; margin-right:auto !important; max-width:1240px; }
+  /* 內容自適應撐寬:上限拉高到 1680(原 1240 會在寬螢幕右側留一大塊空白),
+     窄於上限時 100% 填滿側欄右側;超寬螢幕才留少量邊距,避免內容過度拉伸。 */
+  .wrap{ margin-left:var(--side-w) !important; margin-right:auto !important; max-width:1680px; padding-right:28px; }
   .topbar{ margin-left:var(--side-w) !important; }
   /* 頂部跑馬燈警示條與風險列也是滿版,必須讓開側欄,否則左段被固定側欄蓋住 */
   .ddbanner, .riskbar{ margin-left:var(--side-w) !important; }

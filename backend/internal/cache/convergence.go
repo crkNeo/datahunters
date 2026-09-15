@@ -356,6 +356,7 @@ func (s *Store) ConvState() PaperState {
 		} else if grossWin > 0 {
 			st.Stats.ProfitFactor = 99.99
 		}
+		st.Stats.Payoff = payoffOf(grossWin, grossLoss, st.Stats.Wins, st.Stats.Losses)
 	}
 	return st
 }

@@ -92,9 +92,9 @@ function tpStatusCls(t) {
           <div class="stat-k">勝率</div>
           <div class="stat-v" :class="stats.win_rate >= 50 ? 'long' : 'short'">{{ stats.win_rate }}%</div>
         </div>
-        <div v-else-if="k === 'avg'" class="pstat">
-          <div class="stat-k">平均損益</div>
-          <div class="stat-v" :class="stats.avg_pnl >= 0 ? 'long' : 'short'">{{ fmtPct(stats.avg_pnl) }}</div>
+        <div v-else-if="k === 'avg' || k === 'payoff'" class="pstat">
+          <div class="stat-k">賺賠比<span class="help" tabindex="0">?<span class="help-pop">平均每次<b>賺</b>的 ÷ 平均每次<b>賠</b>的。&gt;1 代表贏的單平均比輸的單大;和勝率一起看更準(低勝率+高賺賠比也能賺)。</span></span></div>
+          <div class="stat-v" :class="(stats.payoff || 0) >= 1 ? 'long' : 'short'">{{ stats.payoff >= 99.99 ? '∞' : (stats.payoff || 0).toFixed(2) }}</div>
         </div>
         <div v-else-if="k === 'total'" class="pstat">
           <div class="stat-k">累計損益</div>
