@@ -4748,4 +4748,11 @@ footer { padding: 18px 0 30px; text-align: center; }
 /* ---- 頁尾說明改為 note 卡 ---- */
 .loginhint{ color:var(--c-mut2); font-size:11.5px; line-height:1.75; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); padding:12px 14px; margin-top:16px; }
 .loginhint b{ color:var(--c-mut); }
+
+/* ---- 審核卡(VIP 申請 / 用戶註冊待審核)token 化 ---- */
+.reviewcard{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); padding:12px; }
+.reviewproof, .vipproof{ background:var(--c-bg); border:1px solid var(--c-line2); }
+.reviewproof.empty{ color:var(--c-mut2); }
+.vplabel{ background:rgba(0,0,0,.62); color:var(--c-txt); }
+.vpnone{ color:var(--c-mut2); }
 </style>
