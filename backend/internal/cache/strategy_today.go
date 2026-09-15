@@ -51,8 +51,9 @@ func tabLabel(tab string) string {
 // StrategyToday 回「今日(本機午夜→現在)已平倉」各策略的表現,依今日累計損益由高到低
 // 排序;今日沒有平倉的策略不列入。呼叫端自行取前三。
 //
-// 這裡「不」依角色過濾 —— 首頁前三名的績效數字對未登入者也公開(當作導流展示);
-// 每列仍帶該策略的最低可見角色 Tier,前端可標記鎖頭,真正進到策略頁時才由 gateTab 擋。
+// 績效數字對未登入者也公開(當作導流展示),每列帶最低可見角色 Tier 讓前端標鎖頭;
+// 但「僅管理員」可見的觀察書(火星/海王星/脈衝星家族/訂單塊…)不列入前三名——那些是
+// 內部實驗策略,不對外展示。用即時 TabRole 判斷,之後若把某本開放給 VIP 就會自動回來。
 func (s *Store) StrategyToday() []StratTodayRow {
 	if s.db == nil {
 		return []StratTodayRow{}
@@ -68,6 +69,9 @@ func (s *Store) StrategyToday() []StratTodayRow {
 	for _, tk := range stratTabKey {
 		tab, key := tk[0], tk[1]
 		tier := s.TabRole(tab)
+		if tier == "admin" {
+			continue // 僅管理員可見的觀察書不進首頁前三名
+		}
 		st := s.strategyHistFull(key, winMs).stats
 		if st.Closed == 0 {
 			continue // 今日沒有平倉
