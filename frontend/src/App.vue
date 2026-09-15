@@ -4760,10 +4760,12 @@ footer { padding: 18px 0 30px; text-align: center; }
 <!-- ============ optimize:手機資訊表格壓縮到不用左右滑(font/padding 縮 + 隱藏次要欄)============ -->
 <style>
 @media (max-width:640px){
-  /* 表格內容壓縮:字級/內距縮小,讓多數表在 375 寬直接塞得下,不必左右滑 */
-  .grid{ font-size:11px; }
-  .grid th, .grid td{ padding:6px 6px; }
-  .grid th{ font-size:10.5px; }
+  /* 關鍵:蓋掉舊的 display:block(那會讓表格縮成內容寬、靠左、右邊空一塊)。
+     改回 display:table + width:100% → 欄位自動撐滿分配;內容太寬則以換行避免溢出。 */
+  .grid{ display:table; width:100%; table-layout:auto; overflow:visible; white-space:normal; font-size:11px; }
+  .grid th{ white-space:nowrap; }
+  .grid td{ padding:6px 6px; }
+  .grid th{ padding:6px 6px; font-size:10.5px; }
   .grid .coin{ font-size:11.5px; }
   .grid .chip{ padding:1px 5px; font-size:10px; }
   .grid td.vol, .grid .tsmall{ font-size:10px; }
