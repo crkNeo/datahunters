@@ -1189,8 +1189,12 @@ const market = computed(() => {
   // 'vol' already sorted by backend
   return m
 })
-// 市場熱力圖:依成交量排序取前 48(資料/判定不變),改用比例式 treemap 呈現。
-const heatTiles = computed(() => (home.value ? [...home.value.market].slice(0, 48) : []))
+// 市場熱力圖:依成交量排序取前 N(桌機 48、手機 24,免得磚塊被切成細條)。
+const heatNarrow = ref(typeof window !== 'undefined' && window.innerWidth <= 640)
+function onHeatResize() { heatNarrow.value = window.innerWidth <= 640 }
+onMounted(() => window.addEventListener('resize', onHeatResize, { passive: true }))
+onUnmounted(() => window.removeEventListener('resize', onHeatResize))
+const heatTiles = computed(() => (home.value ? [...home.value.market].slice(0, heatNarrow.value ? 24 : 48) : []))
 // squarified treemap:磚塊面積 ∝ 成交量,盡量接近方形。虛擬畫布 100×62,回傳各磚 %。
 function squarify(values, W, H) {
   const total = values.reduce((a, b) => a + b, 0) || 1
@@ -1228,7 +1232,8 @@ const HEAT_H = 62 // 虛擬畫布高(寬固定 100),= 容器 aspect-ratio
 const heatTree = computed(() => {
   const t = heatTiles.value
   if (!t.length) return []
-  const rects = squarify(t.map((x) => Math.max(1, x.vol || 1)), 100, HEAT_H)
+  // 面積用 √成交量 阻尼:BTC/ETH 不會吃掉整版、小幣也不會被切成細條(更均衡好讀)。
+  const rects = squarify(t.map((x) => Math.sqrt(Math.max(1, x.vol || 1))), 100, HEAT_H)
   return t.map((x, i) => ({ ...x, r: rects[i] || { x: 0, y: 0, w: 0, h: 0 } }))
 })
 // 磚塊定位 + 依漲跌上色(飽和度隨 |漲跌| 增強 —— 與原本相同的色彩判定)
@@ -2799,7 +2804,7 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="mainTab === 'heatmap' && home">
       <div class="mk-head">
         <h2>市場熱力圖<span class="help" tabindex="0">?<span class="help-pop">全市場合約的 24h 漲跌全景。<b>磚塊大小</b>=成交量排名(越大越前),<b>顏色</b>=漲跌幅(綠漲紅跌、越深越極端)。點任一磚看該幣明細。⚠️ 僅供參考,非投資建議。</span></span></h2>
-        <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 面積=成交量 · 綠漲紅跌</span>
+        <span class="mk-count">依成交量前 {{ heatTiles.length }} 檔 · 面積依成交量 · 綠漲紅跌</span>
       </div>
       <!-- 熱力圖:比例式 treemap(面積=成交量),玻璃質感 + 進場/hover/極端脈動動畫 -->
       <div class="mkt-tree">
