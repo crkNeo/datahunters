@@ -4663,3 +4663,48 @@ footer { padding: 18px 0 30px; text-align: center; }
 .stt-table .stt-blur-h{ opacity:.5; }
 .stt-table tbody tr, .stt-table tbody tr{ pointer-events:none; }
 </style>
+
+<!-- ============ optimize:後台 admin 黑金皮膚(置檔尾覆蓋舊藍色/灰卡)============ -->
+<style>
+/* 子分頁 pill:藍→金 */
+.adminnav{ gap:8px; margin:12px 0 16px; }
+.adminnav button{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); border-radius:9px; padding:7px 14px; font-size:13px; font-weight:600; transition:all .14s; }
+.adminnav button:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
+.adminnav button.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:700; box-shadow:0 0 0 1px rgba(232,184,75,.15); }
+/* 訊息列:藍→金左框 */
+.admin-msg{ background:var(--c-surf); border:1px solid var(--c-line); border-left:3px solid var(--c-gold); border-radius:var(--r-md); color:var(--c-txt); }
+/* 策略設定卡片:灰→surface,hover 微金框 */
+.stratcfg{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); padding:12px 13px; transition:border-color .14s; }
+.stratcfg:hover{ border-color:var(--c-line2); }
+.stratcfg-k, .cfg-k{ color:var(--c-mut); }
+.stratcfg-hint{ color:var(--c-mut2); }
+.stratcfg-hint.warn{ color:var(--c-gold-b); }
+/* 數字/文字輸入:灰→token,focus 金 */
+.stratcfg-num{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; }
+.stratcfg-num:focus{ outline:none; border-color:var(--c-gold); }
+.authin:focus{ outline:none; border-color:var(--c-gold); }
+/* 出場模式 roleopt 分段:藍→金選中 */
+.roleopt{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); border-radius:7px; padding:4px 10px; transition:all .12s; }
+.roleopt:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
+.roleopt.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:700; }
+.roleopt.dim{ opacity:.45; cursor:not-allowed; }
+/* 類型 tagchip:選中金色(與整體選取一致)*/
+.tagchip{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); transition:all .12s; }
+.tagchip:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
+.tagchip.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:600; }
+/* 開關 toggle:綠=開(語意保留,token 化)*/
+.toggle{ background:var(--c-line2); }
+.toggle.on{ background:var(--c-up); }
+/* mini 按鈕:灰→token,hover 微金 */
+.minibtn{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; transition:all .12s; }
+.minibtn:hover{ border-color:var(--c-gold-d); }
+.minibtn.del, .minibtn.warn{ color:var(--c-dn); border-color:rgba(255,92,108,.4); }
+/* 主要按鈕(登入公告等)藍→金 */
+.loginbtn{ background:var(--c-gold); border:1px solid var(--c-gold); color:#1a1408; font-weight:800; border-radius:9px; transition:filter .14s; }
+.loginbtn:hover{ filter:brightness(1.07); }
+.loginhint{ color:var(--c-mut2); }
+/* 核准(綠)/拒絕(紅)語意保留但 token 化 */
+.okbtn{ background:var(--c-up-bg); color:var(--c-up); border:1px solid rgba(55,214,138,.4); }
+.nobtn, .delbtn{ background:var(--c-dn-bg); color:var(--c-dn); border:1px solid rgba(255,92,108,.4); }
+.delbtn:hover{ background:rgba(255,92,108,.18); }
+</style>
