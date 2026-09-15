@@ -4664,47 +4664,79 @@ footer { padding: 18px 0 30px; text-align: center; }
 .stt-table tbody tr, .stt-table tbody tr{ pointer-events:none; }
 </style>
 
-<!-- ============ optimize:後台 admin 黑金皮膚(置檔尾覆蓋舊藍色/灰卡)============ -->
+<!-- ============ optimize:後台 admin 版型重構(黑金 · 重排 layout,非沿用舊版)============ -->
 <style>
-/* 子分頁 pill:藍→金 */
-.adminnav{ gap:8px; margin:12px 0 16px; }
-.adminnav button{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); border-radius:9px; padding:7px 14px; font-size:13px; font-weight:600; transition:all .14s; }
+/* ---- 子分頁 pill:金色分頁 ---- */
+.adminnav{ gap:8px; margin:14px 0 18px; }
+.adminnav button{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); border-radius:10px; padding:8px 16px; font-size:13px; font-weight:600; transition:all .14s; }
 .adminnav button:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
-.adminnav button.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:700; box-shadow:0 0 0 1px rgba(232,184,75,.15); }
-/* 訊息列:藍→金左框 */
-.admin-msg{ background:var(--c-surf); border:1px solid var(--c-line); border-left:3px solid var(--c-gold); border-radius:var(--r-md); color:var(--c-txt); }
-/* 策略設定卡片:灰→surface,hover 微金框 */
-.stratcfg{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); padding:12px 13px; transition:border-color .14s; }
-.stratcfg:hover{ border-color:var(--c-line2); }
-.stratcfg-k, .cfg-k{ color:var(--c-mut); }
+.adminnav button.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:700; box-shadow:0 0 0 1px rgba(232,184,75,.18); }
+.admin-msg{ background:var(--c-surf); border:1px solid var(--c-line); border-left:3px solid var(--c-gold); border-radius:var(--r-md); color:var(--c-txt); padding:10px 14px; }
+
+/* ---- 面板卡:統一內距 + 邊到邊卡頭(金色左標)---- */
+.card.adminbox{ background:var(--c-surf); border:1px solid var(--c-line); border-radius:var(--r-lg); padding:16px 18px 18px; margin-bottom:16px; }
+.adminbox > .psub{ margin:-16px -18px 16px; padding:14px 18px; border-bottom:1px solid var(--c-line); font-family:var(--f-disp); font-weight:700; font-size:15px; display:flex; align-items:center; gap:10px; }
+.adminbox > .psub::before{ content:""; width:3px; height:15px; border-radius:2px; background:var(--c-gold); flex:0 0 auto; }
+.adminbox > .psub .minibtn{ margin-left:auto; }
+.adminbox > h4.cfg-sub{ margin:20px -18px 12px; padding:14px 18px 0; border-top:1px solid var(--c-line); font-family:var(--f-disp); font-weight:700; font-size:13.5px; color:var(--c-gold-b); display:flex; align-items:center; gap:10px; }
+
+/* ---- 設定列:label 固定寬 + 細分隔線,像設定清單 ---- */
+.cfg-row{ display:flex; align-items:center; gap:12px; margin:0; padding:12px 2px; border-bottom:1px solid var(--c-line); flex-wrap:wrap; }
+.cfg-row:last-of-type{ border-bottom:0; }
+.cfg-k{ width:120px; min-width:120px; color:var(--c-mut); font-size:12.5px; }
+.authin{ background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:var(--r-md); color:var(--c-txt); padding:8px 11px; font-size:13px; }
+.authin:focus{ outline:none; border-color:var(--c-gold); }
+.cfg-social{ display:flex; align-items:center; gap:8px; padding:9px 0; border-bottom:1px solid var(--c-line); }
+.cfg-social select{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:8px; padding:7px 9px; font-size:12.5px; }
+.ae-addrow{ display:flex; gap:10px; margin-top:16px; }
+.cfg-logo, .cfg-qr{ border:1px solid var(--c-line2); border-radius:8px; background:var(--c-bg2); padding:3px; }
+
+/* ---- 標籤權限:設定清單列 ---- */
+.tabperms{ display:flex; flex-direction:column; }
+.tabperm-row{ display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--c-line); flex-wrap:wrap; }
+.tabperm-row:last-child{ border-bottom:0; }
+.tabperm-name{ width:130px; min-width:130px; font-family:var(--f-disp); font-weight:600; font-size:13px; color:var(--c-txt); }
+.tabperm-opts{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.tabperm-sep{ color:var(--c-mut2); margin:0 3px; }
+
+/* ---- 策略設定:每策略一張卡(卡頭帶 + 分隔設定列)---- */
+.strat-toggles{ grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:14px; margin:6px 0 4px; }
+.stratcfg{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-lg); padding:0; overflow:hidden; transition:border-color .14s, box-shadow .14s; }
+.stratcfg:hover{ border-color:var(--c-gold-d); box-shadow:0 4px 16px rgba(0,0,0,.3); }
+.stratcfg > .strat-row{ padding:12px 14px; border-bottom:1px solid var(--c-line); background:var(--c-surf); }
+.strat-name{ font-family:var(--f-disp); font-weight:700; font-size:15px; flex:1; color:var(--c-txt); }
+.strat-status.long{ color:var(--c-up); } .strat-status.short{ color:var(--c-mut2); }
+.stratcfg-line{ padding:9px 14px; margin:0; border-bottom:1px solid rgba(255,255,255,.035); align-items:center; }
+.stratcfg-line:last-child{ border-bottom:0; padding-bottom:12px; }
+.stratcfg-k{ min-width:66px; color:var(--c-mut); font-size:11.5px; }
+.stratcfg-num{ background:var(--c-surf2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; }
+.stratcfg-num:focus{ outline:none; border-color:var(--c-gold); }
 .stratcfg-hint{ color:var(--c-mut2); }
 .stratcfg-hint.warn{ color:var(--c-gold-b); }
-/* 數字/文字輸入:灰→token,focus 金 */
-.stratcfg-num{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; }
-.stratcfg-num:focus{ outline:none; border-color:var(--c-gold); }
-.authin:focus{ outline:none; border-color:var(--c-gold); }
-/* 出場模式 roleopt 分段:藍→金選中 */
+.stratcfg-chk{ color:var(--c-txt); }
+
+/* ---- 選取狀態一律金色(原藍)---- */
 .roleopt{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); border-radius:7px; padding:4px 10px; transition:all .12s; }
 .roleopt:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
 .roleopt.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:700; }
 .roleopt.dim{ opacity:.45; cursor:not-allowed; }
-/* 類型 tagchip:選中金色(與整體選取一致)*/
 .tagchip{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-mut); transition:all .12s; }
 .tagchip:hover{ color:var(--c-txt); border-color:var(--c-gold-d); }
 .tagchip.on{ background:var(--c-gold-soft); border-color:var(--c-gold); color:var(--c-gold-b); font-weight:600; }
-/* 開關 toggle:綠=開(語意保留,token 化)*/
-.toggle{ background:var(--c-line2); }
-.toggle.on{ background:var(--c-up); }
-/* mini 按鈕:灰→token,hover 微金 */
+.toggle{ background:var(--c-line2); } .toggle.on{ background:var(--c-up); }
+
+/* ---- 按鈕 ---- */
 .minibtn{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; transition:all .12s; }
 .minibtn:hover{ border-color:var(--c-gold-d); }
 .minibtn.del, .minibtn.warn{ color:var(--c-dn); border-color:rgba(255,92,108,.4); }
-/* 主要按鈕(登入公告等)藍→金 */
-.loginbtn{ background:var(--c-gold); border:1px solid var(--c-gold); color:#1a1408; font-weight:800; border-radius:9px; transition:filter .14s; }
+.loginbtn{ background:var(--c-gold); border:1px solid var(--c-gold); color:#1a1408; font-weight:800; border-radius:9px; padding:9px 16px; transition:filter .14s; }
 .loginbtn:hover{ filter:brightness(1.07); }
-.loginhint{ color:var(--c-mut2); }
-/* 核准(綠)/拒絕(紅)語意保留但 token 化 */
+.regbtn{ border-radius:9px; }
 .okbtn{ background:var(--c-up-bg); color:var(--c-up); border:1px solid rgba(55,214,138,.4); }
 .nobtn, .delbtn{ background:var(--c-dn-bg); color:var(--c-dn); border:1px solid rgba(255,92,108,.4); }
 .delbtn:hover{ background:rgba(255,92,108,.18); }
+
+/* ---- 頁尾說明改為 note 卡 ---- */
+.loginhint{ color:var(--c-mut2); font-size:11.5px; line-height:1.75; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); padding:12px 14px; margin-top:16px; }
+.loginhint b{ color:var(--c-mut); }
 </style>
