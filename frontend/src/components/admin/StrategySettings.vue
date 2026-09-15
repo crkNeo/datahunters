@@ -72,6 +72,11 @@ async function resetStratCfg(st) {
   if (res.ok) { loadStratStates(); emit('changed') }
 }
 
+// 手風琴:預設全折疊,點標題才展開該策略(可同時展開多個)。
+const expanded = ref({})
+function toggleExpand(name) { expanded.value[name] = !expanded.value[name] }
+const EXIT_CN = { split: '分批止盈', breakeven: '保本', single: '單段' }
+
 onMounted(() => loadStratStates(true)) // 首次載入不出訊息
 defineExpose({ load: loadStratStates })
 </script>
@@ -79,15 +84,19 @@ defineExpose({ load: loadStratStates })
 <template>
 <section class="card adminbox">
   <h3 class="psub">策略開關 <button class="minibtn" :disabled="stratBusy" @click="loadStratStates()">{{ stratBusy ? '刷新中…' : '刷新' }}</button></h3>
-  <div class="strat-toggles">
-    <div v-for="st in stratStates" :key="st.name" class="stratcfg">
-      <div class="strat-row">
+  <div class="strat-list">
+    <div v-for="st in stratStates" :key="st.name" class="strat-item" :class="{ open: expanded[st.name] }">
+      <!-- 折疊列:點整條展開;右側開關 stop 掉不觸發展開 -->
+      <div class="strat-head" @click="toggleExpand(st.name)">
+        <span class="strat-caret">▸</span>
         <span class="strat-name">{{ st.label }}</span>
-        <button class="toggle" :class="{ on: st.enabled }" @click="toggleStrat(st)">
+        <span class="strat-headsum">{{ (st.tags || []).join('·') }}{{ (st.tags || []).length ? ' · ' : '' }}{{ EXIT_CN[st.exit_mode] || '單段' }}<template v-if="st.max_sl_pct"> · 止損≤{{ st.max_sl_pct }}%</template></span>
+        <button class="toggle" :class="{ on: st.enabled }" @click.stop="toggleStrat(st)">
           <span class="toggle-knob"></span>
         </button>
         <span class="strat-status" :class="st.enabled ? 'long' : 'short'">{{ st.enabled ? '開啟' : '關閉' }}</span>
       </div>
+      <div v-show="expanded[st.name]" class="strat-body">
       <div class="stratcfg-line">
         <span class="stratcfg-k">類型</span>
         <button v-for="tg in STRAT_TAGS" :key="tg" class="tagchip" :class="{ on: (st.tags || []).includes(tg) }" @click="toggleStratTag(st, tg)">{{ tg }}</button>
@@ -166,11 +175,12 @@ defineExpose({ load: loadStratStates })
         <label class="stratcfg-chk"><input v-model="st.stock_filter" type="checkbox" /> 股票代幣過濾</label>
         <span class="stratcfg-hint">開:不進代幣化股票/商品(NVDA/TSLA/XAG…)的單,只做加密幣</span>
       </div>
-      <div class="stratcfg-line">
+      <div class="stratcfg-line stratcfg-foot">
         <label class="stratcfg-chk"><input v-model="st.show_risk" type="checkbox" /> 顯示風控建議</label>
         <button class="minibtn" @click="saveStratCfg(st)">儲存</button>
         <button class="minibtn" @click="resetStratCfg(st)" title="丟掉所有覆寫,回到程式內建的回測值">恢復預設</button>
       </div>
+      </div><!-- /strat-body -->
     </div>
   </div>
   <p class="loginhint">

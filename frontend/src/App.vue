@@ -4699,17 +4699,26 @@ footer { padding: 18px 0 30px; text-align: center; }
 .tabperm-opts{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
 .tabperm-sep{ color:var(--c-mut2); margin:0 3px; }
 
-/* ---- 策略設定:每策略一張卡(卡頭帶 + 分隔設定列)---- */
-.strat-toggles{ grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:14px; margin:6px 0 4px; }
-.stratcfg{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-lg); padding:0; overflow:hidden; transition:border-color .14s, box-shadow .14s; }
-.stratcfg:hover{ border-color:var(--c-gold-d); box-shadow:0 4px 16px rgba(0,0,0,.3); }
-.stratcfg > .strat-row{ padding:12px 14px; border-bottom:1px solid var(--c-line); background:var(--c-surf); }
-.strat-name{ font-family:var(--f-disp); font-weight:700; font-size:15px; flex:1; color:var(--c-txt); }
+/* ---- 策略設定:單排手風琴清單(預設全折疊,要調的才展開)---- */
+.strat-list{ display:flex; flex-direction:column; gap:8px; margin:6px 0 2px; }
+.strat-item{ background:var(--c-bg2); border:1px solid var(--c-line); border-radius:var(--r-md); overflow:hidden; transition:border-color .14s; }
+.strat-item.open{ border-color:var(--c-gold-d); }
+.strat-head{ display:flex; align-items:center; gap:11px; padding:11px 14px; cursor:pointer; user-select:none; transition:background .12s; }
+.strat-head:hover{ background:var(--c-surf); }
+.strat-caret{ color:var(--c-mut2); font-size:11px; width:11px; flex:0 0 auto; transition:transform .16s, color .16s; }
+.strat-item.open .strat-caret{ transform:rotate(90deg); color:var(--c-gold); }
+.strat-name{ font-family:var(--f-disp); font-weight:700; font-size:14.5px; color:var(--c-txt); flex:0 0 auto; }
+.strat-headsum{ flex:1; min-width:0; color:var(--c-mut2); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.strat-status{ font-size:11px; font-weight:700; flex:0 0 auto; }
 .strat-status.long{ color:var(--c-up); } .strat-status.short{ color:var(--c-mut2); }
-.stratcfg-line{ padding:9px 14px; margin:0; border-bottom:1px solid rgba(255,255,255,.035); align-items:center; }
-.stratcfg-line:last-child{ border-bottom:0; padding-bottom:12px; }
+.strat-body{ border-top:1px solid var(--c-line); background:var(--c-surf); padding:2px 0; }
+.stratcfg-line{ padding:9px 16px; margin:0; border-bottom:1px solid rgba(255,255,255,.035); align-items:center; }
+.stratcfg-line:last-child{ border-bottom:0; }
+.stratcfg-foot{ border-top:1px solid var(--c-line); margin-top:2px; padding-top:12px; }
+.stratcfg-foot .minibtn{ margin-left:6px; }
+.stratcfg-foot .minibtn:first-of-type{ margin-left:auto; }
 .stratcfg-k{ min-width:66px; color:var(--c-mut); font-size:11.5px; }
-.stratcfg-num{ background:var(--c-surf2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; }
+.stratcfg-num{ background:var(--c-bg2); border:1px solid var(--c-line2); color:var(--c-txt); border-radius:7px; }
 .stratcfg-num:focus{ outline:none; border-color:var(--c-gold); }
 .stratcfg-hint{ color:var(--c-mut2); }
 .stratcfg-hint.warn{ color:var(--c-gold-b); }
