@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "pulsar", "pulsarv3", "pulsarv5", "pulsarv6", "orderblock", "orderblockv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "meanrev", "bollema", "pulsar", "pulsarv3", "pulsarv5", "pulsarv6", "pulsarv7", "pulsarv8", "orderblock", "orderblockv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -94,6 +94,9 @@ var stratDefaults = map[string]StratCfg{
 	"pulsarv5": {Tags: []string{"爆量", "埋伏", "多單", "固定%"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 	// 脈衝星v6:= v3 + 確認棒進場,比例/追尾同 v3(50/25/25 + trailAfterTP2)。
 	"pulsarv6": {Tags: []string{"爆量", "埋伏", "多單", "確認棒"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
+	// 脈衝星v7/v8:v3 家族(50/25/25 + 追尾);v7=最小R,v8=v7+更強爆量。
+	"pulsarv7": {Tags: []string{"爆量", "埋伏", "多單", "最小R"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
+	"pulsarv8": {Tags: []string{"爆量", "埋伏", "多單", "真暴漲"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
 	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
 	// 訂單塊(v1):三段斐波止盈 0.618/1.13/1.618,分批 40/30/30,止損 fib−0.13;進場區 0.142-0.382;1h/4h。
@@ -483,6 +486,14 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV6Book.mu.Lock()
 		done = closeIn(s.pulsarV6Book.trades)
 		s.pulsarV6Book.mu.Unlock()
+	case "pulsarv7":
+		s.pulsarV7Book.mu.Lock()
+		done = closeIn(s.pulsarV7Book.trades)
+		s.pulsarV7Book.mu.Unlock()
+	case "pulsarv8":
+		s.pulsarV8Book.mu.Lock()
+		done = closeIn(s.pulsarV8Book.trades)
+		s.pulsarV8Book.mu.Unlock()
 	case "orderblock", "orderblockv2": // 兩週期都找(1h/4h)
 		books := s.smcBooks
 		if book == "orderblockv2" {

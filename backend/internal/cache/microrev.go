@@ -481,6 +481,50 @@ func confirmSurgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float
 	return "long", entry, sl, roundPx(entry + 5*stopDist), true
 }
 
+// v7/v8 進場加嚴常數。數據依據:v3 的利潤幾乎全來自「寬止損(高波動、已在動)」的怪物單;
+// 窄止損(<3%)那半數是低波動咬合、33% 一進場就秒回調、幾乎不產怪物。
+const (
+	minRPct       = 3.0 // v7/v8:最小止損距離(原始 R = (entry−sl)/entry),擋掉低波動咬合單
+	strongVolMult = 4.0 // v8:近6根需有一根量 ≥ 此倍數×截尾基線(比 v3 的 2.5× 更兇,鎖定真暴漲)
+)
+
+// surgeV7Signal — 脈衝星v7:= v3,但多一道「最小止損距離」門檻(原始 R ≥ minRPct%)。
+// 只做「本來就有真波動」的幣,砍掉爆量卻死盤的咬合單(秒回調重災區)。只做多。
+func surgeV7Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	d, e, s, t, ok0 := surgeV3Signal(cs)
+	if !ok0 || e <= 0 {
+		return
+	}
+	if (e-s)/e*100 < minRPct { // 止損太近 = 低波動咬合 → 不進場
+		return
+	}
+	return d, e, s, t, true
+}
+
+// surgeV8Signal — 脈衝星v8:= v7(最小R)+ 更強爆量門檻。近6根要有一根量 ≥ strongVolMult×
+// 截尾基線(v3 只要 2.5×),鎖定「真暴漲」等級的爆量,不做溫吞的量增。只做多。
+func surgeV8Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	d, e, s, t, ok0 := surgeV7Signal(cs)
+	if !ok0 {
+		return
+	}
+	base := trimmedBaseVol(cs)
+	if base <= 0 {
+		return
+	}
+	n := len(cs)
+	peak := 0.0
+	for i := n - 6; i < n; i++ {
+		if i >= 0 && cs[i].Volume > peak {
+			peak = cs[i].Volume
+		}
+	}
+	if peak < strongVolMult*base { // 爆量不夠兇 = 不是真暴漲 → 不進場
+		return
+	}
+	return d, e, s, t, true
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -850,6 +894,10 @@ func (s *Store) PulsarV5Tick()     { s.microTick(s.pulsarV5Book) }
 func (s *Store) PulsarV5MarkTick() { s.microMarkTick(s.pulsarV5Book) }
 func (s *Store) PulsarV6Tick()     { s.microTick(s.pulsarV6Book) }
 func (s *Store) PulsarV6MarkTick() { s.microMarkTick(s.pulsarV6Book) }
+func (s *Store) PulsarV7Tick()     { s.microTick(s.pulsarV7Book) }
+func (s *Store) PulsarV7MarkTick() { s.microMarkTick(s.pulsarV7Book) }
+func (s *Store) PulsarV8Tick()     { s.microTick(s.pulsarV8Book) }
+func (s *Store) PulsarV8MarkTick() { s.microMarkTick(s.pulsarV8Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -935,6 +983,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV6Book.mu.Lock()
 		s.pulsarV6Book.trades = keepIf(s.pulsarV6Book.trades, closedOnly)
 		s.pulsarV6Book.mu.Unlock()
+	case "pulsarv7":
+		s.pulsarV7Book.mu.Lock()
+		s.pulsarV7Book.trades = keepIf(s.pulsarV7Book.trades, closedOnly)
+		s.pulsarV7Book.mu.Unlock()
+	case "pulsarv8":
+		s.pulsarV8Book.mu.Lock()
+		s.pulsarV8Book.trades = keepIf(s.pulsarV8Book.trades, closedOnly)
+		s.pulsarV8Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1007,5 +1063,7 @@ func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV3State() PaperState { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV5State() PaperState { return s.microState(s.pulsarV5Book) }
 func (s *Store) PulsarV6State() PaperState { return s.microState(s.pulsarV6Book) }
+func (s *Store) PulsarV7State() PaperState { return s.microState(s.pulsarV7Book) }
+func (s *Store) PulsarV8State() PaperState { return s.microState(s.pulsarV8Book) }
 func (s *Store) SMCState() PaperState      { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState    { return s.microState(s.smcV2Books...) }
