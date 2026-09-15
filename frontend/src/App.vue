@@ -4782,5 +4782,9 @@ footer { padding: 18px 0 30px; text-align: center; }
   /* 7 欄的寬表(OI 儀表板 / 多空推薦):手機隱藏次要的「品質」欄,其餘就塞得下 */
   .oi-sortable th:nth-child(4), .oi-sortable td:nth-child(4){ display:none; }        /* OI:品質 */
   .signals-grid th:nth-child(5), .signals-grid td:nth-child(5){ display:none; }       /* 多空推薦:品質 */
+  /* 策略表(進行中/已結束,包在 .tblwrap):欄位多,改回「橫向捲動」而非壓縮換行 ——
+     以自然內容寬度呈現、結果標籤等單行不折;窄於容器時仍撐滿。資訊表(裸 .grid)維持撐滿。 */
+  .tblwrap .grid{ width:auto; min-width:100%; white-space:nowrap; }
+  .otag{ white-space:nowrap; display:inline-block; }
 }
 </style>
