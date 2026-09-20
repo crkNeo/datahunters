@@ -133,14 +133,10 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	meanRevBook  *microBook   // 火星:乖離回歸 1h (admin, microrev.go)
 	bollEMABook  *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
 	surge        *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
-	pulsarBook   *microBook   // 脈衝星:建在爆量熱名單上的觀察策略 (microrev.go)
-	pulsarV3Book *microBook   // 脈衝星v3:ATR 自適應止損 + 追尾 runner (microrev.go)
-	pulsarV5Book *microBook   // 脈衝星v5:= v1,但固定百分比止盈 5%/10%/15% (microrev.go)
-	pulsarV6Book *microBook   // 脈衝星v6:v3 + 確認棒進場(濾掉一進場就秒回調的假突破)(microrev.go)
-	pulsarV7Book *microBook   // 脈衝星v7:v3 + 最小止損距離(只做已在動的高波動幣)(microrev.go)
+	pulsarBook   *microBook   // 脈衝星(舊):建在爆量熱名單上的觀察策略 (microrev.go)
+	pulsarV3Book *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV8Book *microBook   // 脈衝星v8:v7 + 更強爆量門檻(鎖定真暴漲)(microrev.go)
 	smcBooks     []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
 	smcV2Books   []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
@@ -249,22 +245,12 @@ func NewStore(coins []string) *Store {
 	s.paperEMA.plan = tpMomentum
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
 	// candidate fix so it can be compared against the base 超新星.
-	// 火星:乖離回歸 1h (microrev.go)
-	s.meanRevBook = &microBook{name: "meanrev", tf: "1h", barSec: 3600, klimit: 300, minBars: 210, expiry: 24, cooldown: 4, keep: 500, plan: tpMeanRevFront, maxSLPct: 10, signal: meanRevSignal}
-	// 脈衝星:建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
+	// 脈衝星(舊):建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),
 	// 15m 動能確認進場、近10根 swing-low 止損、1:4 分批(50/75 → 1:2/1:3)、12h 逾時。
 	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
-	// 脈衝星v3:ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
+	// 脈衝星(VIP,原 v3):ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
 	// runnerExpiry 96 根 = 24h,突破 4h 讓小倉測後續跑動。plan=tpPulsarV3(1R/2R + 追尾)。
-	// gate 先關掉(不加 BTC 大盤閘門);要再開回來就把 gate: s.btcRegimeGate 加回去。
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
-	// 脈衝星v5:= v1(含 4h 逾時),但止盈改成固定百分比 TP1=+5%/TP2=+10%/最終=+15%(tpLevels 覆蓋)。
-	s.pulsarV5Book = &microBook{name: "pulsarv5", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal, tpLevels: pulsarPctTPLevels}
-	// 脈衝星v6:= v3,但進場多一道「確認棒」—— 設定在前一根成立、這一根確認才進,濾掉秒回調假突破。
-	// 其餘(ATR 濾網、追尾、4h/24h 逾時、4h 冷卻、比例)完全同 v3。開來跟 v3 A/B。
-	s.pulsarV6Book = &microBook{name: "pulsarv6", tf: "15m", barSec: 900, klimit: 200, minBars: 42, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: confirmSurgeV3Signal}
-	// 脈衝星v7:= v3 + 最小止損距離(原始 R ≥ 3%)—— 只做已在動的高波動幣,砍掉低波動咬合的秒回調單。
-	s.pulsarV7Book = &microBook{name: "pulsarv7", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV7Signal}
 	// 脈衝星v8:= v7 + 更強爆量門檻(近6根一根量 ≥4×基線)—— 在「已在動」之上再鎖定「真暴漲」等級的量。
 	s.pulsarV8Book = &microBook{name: "pulsarv8", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV8Signal}
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
@@ -295,13 +281,9 @@ func NewStore(coins []string) *Store {
 		s.paperGamble.trades = db.loadTrades("gamble")
 		s.paperEMA.trades = db.loadTrades("emaonly")
 		s.convTrades = db.loadTrades("conv")
-		s.meanRevBook.trades = db.loadTrades("meanrev")
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		s.pulsarBook.trades = db.loadTrades("pulsar")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
-		s.pulsarV5Book.trades = db.loadTrades("pulsarv5")
-		s.pulsarV6Book.trades = db.loadTrades("pulsarv6")
-		s.pulsarV7Book.trades = db.loadTrades("pulsarv7")
 		s.pulsarV8Book.trades = db.loadTrades("pulsarv8")
 		for _, b := range s.smcBooks {
 			b.trades = db.loadTrades(b.name)

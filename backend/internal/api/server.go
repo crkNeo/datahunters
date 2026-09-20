@@ -149,16 +149,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                      // 多週期支壓 (1H+4H 提示)
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))                   // 脈衝星策略
-	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星v3 (ATR + runner)
-	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))             // 脈衝星v5 (= v1, 固定% TP)
-	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))             // 脈衝星v6 (v3 + 確認棒)
-	mux.HandleFunc("/api/pulsarv7", s.gateTab("pulsarv7", s.handlePulsarV7))             // 脈衝星v7 (v3 + 最小R)
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv8", s.gateTab("pulsarv8", s.handlePulsarV8))             // 脈衝星v8 (v7 + 更強爆量)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
 	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
-	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
 
@@ -600,11 +596,6 @@ func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
 }
 
-// handleMeanRev serves the admin-only 火星(乖離回歸 1h)strategy tracker.
-func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.MeanRevState())
-}
-
 // ---- 推薦系統 ----
 
 // handleReferral serves 我的推廣 for the caller. Referred account names are masked
@@ -726,24 +717,9 @@ func (s *Server) handlePulsar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarState())
 }
 
-// handlePulsarV3 serves the 脈衝星v3 (ATR 自適應 + 追尾 runner) tracker.
+// handlePulsarV3 serves the 脈衝星 (VIP, 原 v3: ATR 自適應 + 追尾 runner) tracker.
 func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV3State())
-}
-
-// handlePulsarV5 serves the 脈衝星v5 (= v1, 固定百分比止盈 5/10/15%) tracker.
-func (s *Server) handlePulsarV5(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV5State())
-}
-
-// handlePulsarV6 serves the 脈衝星v6 (v3 + 確認棒進場) tracker.
-func (s *Server) handlePulsarV6(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV6State())
-}
-
-// handlePulsarV7 serves the 脈衝星v7 (v3 + 最小止損距離) tracker.
-func (s *Server) handlePulsarV7(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV7State())
 }
 
 // handlePulsarV8 serves the 脈衝星v8 (v7 + 更強爆量) tracker.

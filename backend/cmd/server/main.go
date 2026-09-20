@@ -220,26 +220,15 @@ func main() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
-			store.MeanRevMarkTick()
 			store.BollEMAMarkTick()
 			store.PulsarMarkTick()
 			store.PulsarV3MarkTick()
-			store.PulsarV5MarkTick()
-			store.PulsarV6MarkTick()
-			store.PulsarV7MarkTick()
 			store.PulsarV8MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
 	}()
 
-	go func() {
-		store.MeanRevTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.MeanRevTick()
-		}
-	}()
 	// 布林EMA:4H 突破蓄勢(多空)。
 	go func() {
 		store.BollEMATick()
@@ -252,17 +241,11 @@ func main() {
 	go func() {
 		store.PulsarTick()
 		store.PulsarV3Tick()
-		store.PulsarV5Tick()
-		store.PulsarV6Tick()
-		store.PulsarV7Tick()
 		store.PulsarV8Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
-			store.PulsarV5Tick()
-			store.PulsarV6Tick()
-			store.PulsarV7Tick()
 			store.PulsarV8Tick()
 		}
 	}()

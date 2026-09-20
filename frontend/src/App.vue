@@ -656,17 +656,8 @@ function stratRisky(name) { const m = stratMeta.value[name]; return !!(m && m.sh
 const STRAT_KEY_BY_TAB = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly', conv: 'conv' }
 const curStrat = computed(() => STRAT_KEY_BY_TAB[mainTab.value] || mainTab.value)
 
-// ---- admin: 火星(乖離回歸)/ 海王星(布林EMA)----
-const meanrev = ref(null)
+// ---- admin: 海王星(布林EMA)----
 const bollema = ref(null)
-async function loadMeanrev() {
-  try {
-    const res = await authFetch('/api/admin/meanrev')
-    if (res.ok) meanrev.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 async function loadBollema() {
   try {
     const res = await authFetch('/api/admin/bollema')
@@ -689,33 +680,6 @@ async function loadPulsarV3() {
   try {
     const res = await authFetch('/api/pulsarv3')
     if (res.ok) pulsarv3.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv5 = ref(null)
-async function loadPulsarV5() {
-  try {
-    const res = await authFetch('/api/pulsarv5')
-    if (res.ok) pulsarv5.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv6 = ref(null)
-async function loadPulsarV6() {
-  try {
-    const res = await authFetch('/api/pulsarv6')
-    if (res.ok) pulsarv6.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv7 = ref(null)
-async function loadPulsarV7() {
-  try {
-    const res = await authFetch('/api/pulsarv7')
-    if (res.ok) pulsarv7.value = await res.json()
   } catch (e) {
     /* secondary */
   }
@@ -792,32 +756,16 @@ const microMeta = {
     help: "‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」",
   },
   pulsar: {
-    title: '脈衝星 · 爆量埋伏 · 15m', load: loadPulsar, get: () => pulsar.value,
+    title: '脈衝星(舊) · 爆量埋伏 · 15m', load: loadPulsar, get: () => pulsar.value,
     help: '<b>建在「爆量脈搏」斥候上的觀察策略 · 只做多</b>,目標是埋伏「靜默後突然爆量」的暴漲初段。<br><br><b>【選幣】</b>不看成交量絕對排名,看「相對自身基線的爆量」——全市場 ~700 檔中,近30分鐘成交量脈搏 ≥ <b>3×</b> 自身基線者進熱名單(可含 top-80 以外的冷門幣),取前 40。<br><b>【進場】</b>(15m 收盤,全部成立):① <b>EMA5 &gt; EMA20</b>(多頭排列,非金叉→不落後)且本根收 &gt; 前一根 ② <b>反插針</b>:進場K棒收陽、實體 ≥ 全距一半、上影線 ≤ 實體(擋衝高被打下來) ③ <b>量能確認</b>:進場根量 ≥ 1.2× 靜默基線 ④ <b>新鮮度</b>:近 6 根內有一根爆量根(量 ≥ 2.5× 基線,確保剛起漲) ⑤ <b>不追高</b>:現價離近 20 根最低點 ≤ <b>25%</b>。<br><b>【止損】</b>近 10 根 swing low。<br><b>【止盈】</b>以 R = 進場−止損:<b>TP1=1:2、TP2=1:3、TP3=1:4</b>,分批 50%/75% → 40/30/30(TP1 後移保本、TP2 後移 TP1)。<br><b>【其他】</b>逾時 <b>4 小時</b>平倉、<b>出場後冷卻 4 小時(16 根)</b>——同幣出場後 4h 內不再進場,避開回調追單。<br><br>⚠️ <b>此為「裸訊號」觀察書</b>。預設靜默(不推播、不接實盤)。管理員專屬模擬單,非投資建議。',
   },
   pulsarv3: {
-    title: '脈衝星v3 · ATR自適應＋追尾 · 15m', load: loadPulsarV3, get: () => pulsarv3.value,
+    title: '脈衝星 · ATR自適應＋追尾 · 15m', load: loadPulsarV3, get: () => pulsarv3.value,
     help: '<b>= 脈衝星的 ATR 自適應版</b>,選幣同熱名單,重點在<b>止損/止盈改成隨波動調整</b>並<b>保留小倉追尾</b>。<br><br><b>【穩健 ATR】</b>ATR14 去掉最大 2 個 TR(擋單根爆量 K 把止損撐爆)。<br><b>【進場】</b>(15m 收盤,全部成立)① EMA5&gt;EMA20 且本根向上 ② 反插針(收陽、實體≥全距一半、上影≤實體) ③ <b>拋物線護欄</b>:單根全距 ≤ 3×ATR(不買垂直噴出的頂) ④ 量能 ≥ 1.2×截尾基線 ⑤ 新鮮度:近6根有一根 ≥2.5×基線 ⑥ <b>不追高</b>:距近20根低點 ≤ <b>8×ATR</b> ⑦ <b>止損可行性</b>:(現價−近10根低)須 ≤ <b>4×ATR</b>(太寬不進場),太緊則推寬到 0.8×ATR。<br><b>【止損】</b>近10根 swing low(經上述 ATR 夾在合理範圍）。<br><b>【止盈】</b>以 R=進場−止損:<b>TP1=1R 平 50%→保本</b>、<b>TP2=2R 平 25%→鎖 1R</b>、<b>剩 25% 追尾</b>(停損=峰值−1.5R,永不低於 TP1)。<br><b>【逾時】</b>主倉 <b>4 小時</b>;一旦剩追尾倉(已鎖利)放寬到 <b>24 小時</b>,讓小倉測後續跑動。<b>出場後冷卻 4 小時(16 根)</b>——同幣出場後 4h 內不再進場,避開回調追單。<br><br>⚠️ 觀察用書:與 v1 並存做對照。預設靜默、不接實盤。非投資建議。',
-  },
-  pulsarv5: {
-    title: '脈衝星v5 · 固定%止盈 · 15m', load: loadPulsarV5, get: () => pulsarv5.value,
-    help: '<b>= 脈衝星 v1,唯一差別:止盈改成固定百分比。</b><br>選幣、進場、止損<b>與脈衝星完全相同</b>(熱名單 + EMA5&gt;EMA20 + 反插針 + 量能 + 新鮮度 + 不追高;止損近10根 swing low;4 小時逾時)。<br><b>止盈(固定漲幅,與盈虧比無關)</b>:<b>TP1=+5%</b> 平 40%→保本、<b>TP2=+10%</b> 平 30%→移 TP1、<b>最終=+15%</b> 平剩 30%。<br>用來對照:固定百分比出場 vs 盈虧比出場,哪個對這些爆量幣更合適。<b>出場後冷卻 4 小時(16 根)</b>——同幣出場後 4h 內不再進場,避開回調追單。<br><br>⚠️ 觀察用書,與其他脈衝星並存。預設靜默、不接實盤。非投資建議。',
-  },
-  pulsarv6: {
-    title: '脈衝星v6 · v3+確認棒 · 15m', load: loadPulsarV6, get: () => pulsarv6.value,
-    help: '<b>= 脈衝星v3,唯一差別:進場多一道「確認棒」。</b>用來對治「一進場就秒回調」的假突破。<br><br><b>【差別】</b>v3 的所有進場條件必須在<b>前一根(N-1)</b>就成立;然後看<b>這一根(N)</b>是否<b>確認</b>:收盤要落在<b>訊號根收盤 −1% ~ +2% 的安全帶</b>內、且最低點沒跌破設定止損,才在這根收盤進場。<br>　<b>上緣 +2%</b>:噴太高不追(擋追高);<b>下緣 −1%</b>:淺回踩仍算(不因小跌就錯過後續上漲);破止損/破帶 → 當假突破<b>不進</b>。<br><b>【代價】</b>晚一根進;換取濾掉秒回調的假訊號、又避免追高。<br><b>【其餘完全同 v3】</b>選幣(爆量熱名單)、ATR 自適應濾網、止損=結構低、TP=1R/2R+追尾 50/25/25、主倉 4h、runner 24h、出場後冷卻 4h。<br><br>⚠️ 觀察用書,開來跟 v3 <b>A/B 對照</b>:確認棒有沒有減少秒回調、有沒有拖累肥尾。預設靜默、不接實盤。非投資建議。',
-  },
-  pulsarv7: {
-    title: '脈衝星v7 · v3+最小R · 15m', load: loadPulsarV7, get: () => pulsarv7.value,
-    help: '<b>= 脈衝星v3,唯一差別:進場多一道「最小止損距離」門檻。</b><br>數據依據:v3 的利潤幾乎全來自<b>寬止損(高波動、已在動)</b>的怪物單;<b>窄止損(&lt;3%)</b>那半數是低波動咬合單、<b>33% 一進場就秒回調</b>、幾乎不產怪物。<br><b>【差別】</b>只做<b>原始 R(進場−止損)≥ 3%</b> 的設定 —— 也就是「這幣本來就有真波動」的才進;爆量卻死盤的直接跳過。<br><b>【效果】</b>砍掉約一半的低波動秒回調單、<b>怪物單一個不少</b>(全在寬R)。<br><b>【其餘完全同 v3】</b>選幣、ATR 濾網、TP=1R/2R+追尾 50/25/25、4h/24h 逾時、4h 冷卻。<br><br>⚠️ 觀察用書,跟 v3 <b>A/B 對照</b>:最小R 有沒有把品質拉起來、又不傷暴漲捕捉。預設靜默、不接實盤。非投資建議。',
   },
   pulsarv8: {
     title: '脈衝星v8 · v7+真爆量 · 15m', load: loadPulsarV8, get: () => pulsarv8.value,
     help: '<b>= 脈衝星v7(最小R)+ 再加一道「更強爆量」門檻。</b>在「已在動」之上再鎖定「<b>真暴漲等級</b>」的爆量。<br><b>【差別】</b>除了 v7 的最小 R ≥ 3%,還要求<b>近 6 根內有一根量 ≥ 4× 截尾基線</b>(v3/v7 只要 2.5×)—— 溫吞的量增直接跳過,只做像 LSK / BTR / ZKC 那種真的噴量的。<br><b>【取捨】</b>單量會更少、更集中在大行情候選;可能錯過一些「量普通但後來噴」的,換取更高的怪物濃度。<br><b>【其餘完全同 v3】</b>選幣、ATR 濾網、TP=1R/2R+追尾 50/25/25、4h/24h 逾時、4h 冷卻。<br><br>⚠️ 觀察用書,跟 v3 / v7 <b>A/B 三方對照</b>。預設靜默、不接實盤。非投資建議。',
-  },
-  meanrev: {
-    title: '火星 · 1h', load: loadMeanrev, get: () => meanrev.value,
-    help: '‼️此訊號為動能策略‼️<br>波動較大風險較高<br>止損概率較大，但止盈較遠。<br>有機會在行情出來時延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「1%」<br>槓桿不超過「25-30%」<br>🌟若遇到洗盤行情風險更高，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」',
   },
   orderblock: {
     title: '訂單塊 · SMC 斐波 · 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
@@ -1296,14 +1244,9 @@ function loadAll() {
   if (canTab('paper') || canTab('gamble') || canTab('emaonly')) { loadPaper(); fetchPaperHist() }
   if (canTab('sr')) loadSR()
   if (canTab('conv')) loadConv()
-  // 這四個的端點路徑是 /api/admin/* (歷史名稱),但權限同樣由 gateTab 決定
-  if (canTab('meanrev')) loadMeanrev()
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsar')) loadPulsar()
   if (canTab('pulsarv3')) loadPulsarV3()
-  if (canTab('pulsarv5')) loadPulsarV5()
-  if (canTab('pulsarv6')) loadPulsarV6()
-  if (canTab('pulsarv7')) loadPulsarV7()
   if (canTab('pulsarv8')) loadPulsarV8()
   if (canTab('orderblock')) loadOrderBlock()
   if (canTab('orderblockv2')) loadOrderBlockV2()
@@ -1380,7 +1323,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'pulsarv7', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1526,10 +1469,10 @@ watch(mainTab, loadMe)
 // 真正生效的是 /api/tab-perms(後台可調),而且後端自己也會擋 —— 前端這層只決定畫面。
 const TAB_MIN_ROLE_FALLBACK = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
-  paper: 'vip', gamble: 'vip', emaonly: 'vip',
+  paper: 'vip', emaonly: 'vip',
   sr: 'vip',
-  admin: 'admin', referral: 'admin', conv: 'vip',
-  meanrev: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv3: 'admin', pulsarv5: 'admin', pulsarv6: 'admin', pulsarv7: 'admin', pulsarv8: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin',
+  admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1571,15 +1514,15 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  meanrev: 'signal', bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv5: 'signal', pulsarv6: 'signal', pulsarv7: 'signal', pulsarv8: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
+  bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv8: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
-  'paper', 'gamble', 'emaonly', 'conv', 'sr',
-  'admin', 'referral', 'meanrev', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv5', 'pulsarv6', 'pulsarv7', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
+  'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
+  'admin', 'referral', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -2092,29 +2035,17 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('referral', grp[0])" :class="{ active: mainTab === 'referral' }" @click="mainTab = 'referral'; loadRefAdmin()">
             推廣管理<em v-if="refAdmin && refAdmin.pending" class="navbadge">{{ refAdmin.pending }}</em>
           </button>
-          <button v-if="inGroup('meanrev', grp[0])" :class="{ active: mainTab === 'meanrev' }" @click="mainTab = 'meanrev'; loadMeanrev()">
-            火星<em v-if="meanrev && meanrev.open.length" class="navbadge">{{ meanrev.open.length }}</em>
-          </button>
           <button v-if="inGroup('bollema', grp[0])" :class="{ active: mainTab === 'bollema' }" @click="mainTab = 'bollema'; loadBollema()">
             海王星<em v-if="bollema && bollema.open.length" class="navbadge">{{ bollema.open.length }}</em>
           </button>
           <button v-if="inGroup('surge', grp[0])" :class="{ active: mainTab === 'surge' }" @click="mainTab = 'surge'; loadSurge()">
             爆量脈搏<em v-if="surge && surge.length" class="navbadge">{{ surge.length }}</em>
           </button>
-          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar' }" @click="mainTab = 'pulsar'; loadPulsar()">
-            脈衝星<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em>
-          </button>
           <button v-if="inGroup('pulsarv3', grp[0])" :class="{ active: mainTab === 'pulsarv3' }" @click="mainTab = 'pulsarv3'; loadPulsarV3()">
-            脈衝星v3<em v-if="pulsarv3 && pulsarv3.open.length" class="navbadge">{{ pulsarv3.open.length }}</em>
+            脈衝星<em v-if="pulsarv3 && pulsarv3.open.length" class="navbadge">{{ pulsarv3.open.length }}</em>
           </button>
-          <button v-if="inGroup('pulsarv5', grp[0])" :class="{ active: mainTab === 'pulsarv5' }" @click="mainTab = 'pulsarv5'; loadPulsarV5()">
-            脈衝星v5<em v-if="pulsarv5 && pulsarv5.open.length" class="navbadge">{{ pulsarv5.open.length }}</em>
-          </button>
-          <button v-if="inGroup('pulsarv6', grp[0])" :class="{ active: mainTab === 'pulsarv6' }" @click="mainTab = 'pulsarv6'; loadPulsarV6()">
-            脈衝星v6<em v-if="pulsarv6 && pulsarv6.open.length" class="navbadge">{{ pulsarv6.open.length }}</em>
-          </button>
-          <button v-if="inGroup('pulsarv7', grp[0])" :class="{ active: mainTab === 'pulsarv7' }" @click="mainTab = 'pulsarv7'; loadPulsarV7()">
-            脈衝星v7<em v-if="pulsarv7 && pulsarv7.open.length" class="navbadge">{{ pulsarv7.open.length }}</em>
+          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar' }" @click="mainTab = 'pulsar'; loadPulsar()">
+            脈衝星(舊)<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em>
           </button>
           <button v-if="inGroup('pulsarv8', grp[0])" :class="{ active: mainTab === 'pulsarv8' }" @click="mainTab = 'pulsarv8'; loadPulsarV8()">
             脈衝星v8<em v-if="pulsarv8 && pulsarv8.open.length" class="navbadge">{{ pulsarv8.open.length }}</em>
