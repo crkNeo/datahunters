@@ -22,8 +22,12 @@ type Whale struct {
 // whaleList 是預設精選名單。地址已由多個鏈上來源(Lookonchain/HypurrScan/Etherscan)交叉確認。
 // 之後可改為後台可編輯;先用程式碼種子。
 var whaleList = []Whale{
-	{Name: "麻吉大哥", Addr: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", Note: "黃立成 · 台灣(machibigbrother.eth)"},
-	{Name: "James Wynn", Addr: "0x5078c2fbea2b2ad61bc840bc023e35fce56bedb6", Note: "HL 高槓桿賭徒 · @JamesWynnReal"},
+	{Name: "麻吉大哥", Addr: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", Note: "黃立成 · 台灣 · 常年重壓 ETH 多"},
+	{Name: "James Wynn", Addr: "0x5078c2fbea2b2ad61bc840bc023e35fce56bedb6", Note: "@JamesWynnReal · 高槓桿迷因賭徒"},
+	{Name: "AguilaTrades", Addr: "0x1f250df59a777d61cb8bd043c12970f3afe4f925", Note: "@AguilaTrades · BTC 大多頭巨鯨"},
+	{Name: "Andrew Kang", Addr: "0xbb876071a63bc4d9bfcf46b012b4437ea7ff4281", Note: "Mechanism Capital 共同創辦人"},
+	{Name: "Andrew Tate", Addr: "0xb78d97390a96a17fd2b58fedbeb3dd876c8f660a", Note: "@Cobratate · 網紅拳手"},
+	{Name: "0xSifu", Addr: "0xf967239debef10dbc78e9bbbb2d8a16b72a614eb", Note: "Wonderland 前財務長 · 爭議人物"},
 }
 
 // WhaleEvent 是一則動作事件。

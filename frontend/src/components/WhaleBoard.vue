@@ -17,6 +17,11 @@ async function load() {
   } catch (e) { /* secondary */ }
 }
 const cards = computed(() => (data.value ? data.value.cards : []))
+// 有持倉的排前面(依名目大小),沒持倉的收進「監控中」小列
+const activeCards = computed(() => cards.value.filter((c) => c.positions && c.positions.length)
+  .sort((a, b) => sumNtl(b) - sumNtl(a)))
+const flatCards = computed(() => cards.value.filter((c) => !c.positions || !c.positions.length))
+function sumNtl(c) { return (c.positions || []).reduce((s, p) => s + Math.abs(p.notional), 0) }
 const events = computed(() => (data.value ? data.value.events : []))
 const pushOn = ref(false)
 async function togglePush() {
@@ -56,13 +61,13 @@ onUnmounted(() => clearInterval(timer))
       <span class="wl-adnote">開/平/反手時推播給所有訂閱者</span>
     </div>
 
-    <div v-if="cards.length" class="wl-cards">
-      <div v-for="c in cards" :key="c.addr" class="wl-card">
+    <div v-if="activeCards.length" class="wl-cards">
+      <div v-for="c in activeCards" :key="c.addr" class="wl-card">
         <div class="wl-top">
           <div class="wl-who"><span class="wl-name">{{ c.name }}</span><span class="wl-note">{{ c.note }}</span></div>
           <div class="wl-acct"><span class="wl-k">帳戶淨值</span><b>{{ fmtUsd(c.acct) }}</b></div>
         </div>
-        <table v-if="c.positions && c.positions.length" class="grid wl-pos">
+        <table class="grid wl-pos">
           <thead><tr><th>幣種</th><th>方向</th><th class="r">名目</th><th class="r">進場</th><th class="r">未實現</th><th class="r">槓桿</th><th class="r">距強平</th></tr></thead>
           <tbody>
             <tr v-for="p in c.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
@@ -76,10 +81,15 @@ onUnmounted(() => clearInterval(timer))
             </tr>
           </tbody>
         </table>
-        <p v-else class="wl-empty">目前無持倉</p>
       </div>
     </div>
+    <p v-else-if="cards.length" class="wl-none">目前追蹤名單皆無進行中持倉 · 一有動作會在下方「近期動作」出現</p>
     <p v-else class="loading">載入名人動向中…</p>
+
+    <div v-if="flatCards.length" class="wl-flat">
+      <span class="wl-flat-lbl">監控中 · 目前無持倉</span>
+      <span v-for="c in flatCards" :key="c.addr" class="wl-chip" :title="c.note">{{ c.name }}</span>
+    </div>
 
     <template v-if="events.length">
       <h3 class="psub">近期動作</h3>
@@ -112,7 +122,10 @@ onUnmounted(() => clearInterval(timer))
 .wl-pos .mono { font-family: var(--f-mono); }
 .wl-danger { background: var(--c-dn-bg); }
 .wl-liq { color: var(--c-dn); font-weight: 700; }
-.wl-empty { font-size: 12.5px; color: var(--c-mut2); padding: 8px 2px; margin: 0; }
+.wl-none { font-size: 13px; color: var(--c-mut); padding: 16px 4px; margin: 0; }
+.wl-flat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: var(--r-md); }
+.wl-flat-lbl { font-size: 11.5px; color: var(--c-mut2); }
+.wl-chip { font-size: 12px; font-weight: 600; color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 3px 11px; cursor: default; }
 .wl-feed { display: flex; flex-direction: column; gap: 1px; }
 .wl-ev { display: grid; grid-template-columns: 48px 22px 1fr; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--c-line); font-size: 12.5px; }
 .wl-ev:last-child { border-bottom: 0; }
