@@ -206,6 +206,24 @@ func main() {
 		}
 	}()
 
+	// 自動巨鯨排行:從 HL 排行榜取最大帳戶當候選池(每 6h 刷新),每 3 分鐘查其即時倉位
+	// 依總名目排序取前 20。開機延遲一下再抓(排行榜檔案大,別跟啟動搶頻寬)。
+	go func() {
+		time.Sleep(25 * time.Second)
+		store.RefreshWhalePool()
+		store.WhaleRankTick()
+		rank := time.NewTicker(3 * time.Minute)
+		pool := time.NewTicker(6 * time.Hour)
+		for {
+			select {
+			case <-rank.C:
+				store.WhaleRankTick()
+			case <-pool.C:
+				store.RefreshWhalePool()
+			}
+		}
+	}()
+
 	// spot-ETF daily net flow (Farside scrape) → injected into 快訊 once per new
 	// trading day. Flows update once daily after the US close; poll every 3h.
 	go func() {

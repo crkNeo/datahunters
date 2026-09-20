@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -99,6 +100,46 @@ func FetchPositions(address string) ([]Position, float64, error) {
 		})
 	}
 	return positions, round2(acct), nil
+}
+
+// LbEntry is one leaderboard row (address + account value USD).
+type LbEntry struct {
+	Addr string
+	Acct float64
+}
+
+// FetchLeaderboardTop returns the top-n addresses by account value from
+// Hyperliquid's public leaderboard JSON. The file is large (~40MB), so it's
+// decoded with a streaming decoder that skips the per-window PnL blocks and
+// only keeps address+accountValue — used to seed the whale-rank pool (poll rarely).
+func FetchLeaderboardTop(n int) ([]LbEntry, error) {
+	c := &http.Client{Timeout: 60 * time.Second}
+	resp, err := c.Get("https://stats-data.hyperliquid.xyz/Mainnet/leaderboard")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Rows []struct {
+			Addr string `json:"ethAddress"`
+			Acct string `json:"accountValue"`
+		} `json:"leaderboardRows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	all := make([]LbEntry, 0, len(out.Rows))
+	for _, r := range out.Rows {
+		if r.Addr == "" {
+			continue
+		}
+		all = append(all, LbEntry{Addr: r.Addr, Acct: pf(r.Acct)})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Acct > all[j].Acct })
+	if len(all) > n {
+		all = all[:n]
+	}
+	return all, nil
 }
 
 func pf(s string) float64      { v, _ := strconv.ParseFloat(s, 64); return v }

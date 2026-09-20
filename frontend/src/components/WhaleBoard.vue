@@ -23,6 +23,7 @@ const activeCards = computed(() => cards.value.filter((c) => c.positions && c.po
 const flatCards = computed(() => cards.value.filter((c) => !c.positions || !c.positions.length))
 function sumNtl(c) { return (c.positions || []).reduce((s, p) => s + Math.abs(p.notional), 0) }
 const events = computed(() => (data.value ? data.value.events : []))
+const rank = computed(() => (data.value ? data.value.rank || [] : []))
 const pushOn = ref(false)
 async function togglePush() {
   const next = !pushOn.value
@@ -91,6 +92,25 @@ onUnmounted(() => clearInterval(timer))
       <span v-for="c in flatCards" :key="c.addr" class="wl-chip" :title="c.note">{{ c.name }}</span>
     </div>
 
+    <template v-if="rank.length">
+      <h3 class="psub">🐋 巨鯨排行 · 即時<span class="wl-sub">Hyperliquid 帳戶淨值前段中,目前總名目最大者(自動)</span></h3>
+      <div class="tblwrap">
+        <table class="grid wl-rank">
+          <thead><tr><th class="r">#</th><th>對象</th><th class="r">帳戶淨值</th><th class="r">總名目</th><th class="r">淨向</th><th>最大持倉</th></tr></thead>
+          <tbody>
+            <tr v-for="r in rank" :key="r.addr">
+              <td class="r tsmall">{{ r.rank }}</td>
+              <td class="coin"><span :class="r.known ? 'wl-known' : 'wl-anon'">{{ r.name }}</span></td>
+              <td class="r mono">{{ fmtUsd(r.acct) }}</td>
+              <td class="r mono"><b>{{ fmtUsd(r.ntl) }}</b></td>
+              <td class="r"><span class="dir" :class="r.net_long ? 'short' : 'long'">{{ r.net_long ? '偏多' : '偏空' }}</span></td>
+              <td class="clickable" @click="$emit('coin', r.top.coin)"><b>{{ r.top.coin }}</b> <span :class="r.top.side === 'long' ? 'short' : 'long'">{{ r.top.side === 'long' ? '多' : '空' }}</span> <span class="tsmall mono">{{ fmtUsd(r.top.notional) }} · {{ r.top.lev }}x</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
     <template v-if="events.length">
       <h3 class="psub">近期動作</h3>
       <div class="wl-feed">
@@ -126,6 +146,11 @@ onUnmounted(() => clearInterval(timer))
 .wl-flat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: var(--r-md); }
 .wl-flat-lbl { font-size: 11.5px; color: var(--c-mut2); }
 .wl-chip { font-size: 12px; font-weight: 600; color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 3px 11px; cursor: default; }
+.tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: var(--c-mut2); }
+.wl-rank .mono { font-family: var(--f-mono); }
+.wl-known { color: var(--c-gold); font-weight: 700; }
+.wl-anon { color: var(--c-mut); font-family: var(--f-mono); font-size: 12px; }
 .wl-feed { display: flex; flex-direction: column; gap: 1px; }
 .wl-ev { display: grid; grid-template-columns: 48px 22px 1fr; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--c-line); font-size: 12.5px; }
 .wl-ev:last-child { border-bottom: 0; }
