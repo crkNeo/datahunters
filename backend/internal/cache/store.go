@@ -15,6 +15,7 @@ import (
 	"datahunter/internal/auth"
 	"datahunter/internal/exchange"
 	"datahunter/internal/gdelt"
+	"datahunter/internal/hyperliquid"
 	"datahunter/internal/marketai"
 	"datahunter/internal/notify"
 	"datahunter/internal/push"
@@ -154,6 +155,15 @@ type Store struct {
 	unlockBoard []unlock.Row
 	unlockTime  time.Time
 
+	// 名人動向(whale watch):精選地址的 Hyperliquid 即時倉位 + 動作事件流(whales.go)
+	whaleMu     sync.RWMutex
+	whalePos    map[string][]hyperliquid.Position          // addr → 目前倉位
+	whaleAcct   map[string]float64                         // addr → 帳戶淨值(USD)
+	whalePrev   map[string]map[string]hyperliquid.Position // addr → coin → 上次快照(diff 用)
+	whaleSeeded map[string]bool                            // addr → 是否已建立基準(首抓不發事件)
+	whaleEvents []WhaleEvent                               // 近期動作(newest first)
+	whaleTime   time.Time
+
 	rhW     *robinhood.Watcher // Robinhood 上架 watcher (currency-pair diff, no key)
 	rhMu    sync.RWMutex       // guards the Robinhood board
 	rhBoard []RHCoin
@@ -203,6 +213,10 @@ func NewStore(coins []string) *Store {
 		prevScore:         map[string]int{},
 		sentEvents:        map[string]bool{},
 		liqSeen:           map[string]bool{},
+		whalePos:          map[string][]hyperliquid.Position{},
+		whaleAcct:         map[string]float64{},
+		whalePrev:         map[string]map[string]hyperliquid.Position{},
+		whaleSeeded:       map[string]bool{},
 		notifier:          notify.NewTelegram(),
 		alertSignals:      os.Getenv("ALERT_SIGNAL_CROSS") == "1", // default off
 		upbitW:            upbit.NewWatcher(),

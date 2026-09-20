@@ -23,6 +23,7 @@ import EventsBoard from './components/EventsBoard.vue'
 import UpbitBoard from './components/UpbitBoard.vue'
 import NewsBoard from './components/NewsBoard.vue'
 import RobinhoodBoard from './components/RobinhoodBoard.vue'
+import WhaleBoard from './components/WhaleBoard.vue'
 import { ROUTE_TABS } from './router'
 
 // ---- shared data ----
@@ -1519,7 +1520,7 @@ const TAB_KIND_FALLBACK = {
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
 const NAV_ORDER = [
-  'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'articles',
+  'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
   'admin', 'referral', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
@@ -2008,6 +2009,7 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('robinhood', grp[0])" :class="{ active: mainTab === 'robinhood' }" @click="mainTab = 'robinhood'; loadRobinhood()">
             Robinhood<em v-if="robinhoodNew" class="navbadge">{{ robinhoodNew }}</em>
           </button>
+          <button v-if="inGroup('whales', grp[0])" :class="{ active: mainTab === 'whales' }" @click="mainTab = 'whales'">名人動向</button>
           <button v-if="inGroup('articles', grp[0])" :class="{ active: mainTab === 'articles' }" @click="mainTab = 'articles'; articleView = null">
             文章專欄<em v-if="articles.length" class="navbadge">{{ articles.length }}</em>
           </button>
@@ -2619,6 +2621,9 @@ watch([role, tabPerms, authReady], () => {
 
     <!-- Robinhood 上架 (currency-pair diff) -->
     <RobinhoodBoard v-else-if="mainTab === 'robinhood'" :robinhood="robinhood" />
+
+    <!-- 名人動向 (Hyperliquid 即時倉位 + 動作事件流) -->
+    <WhaleBoard v-else-if="mainTab === 'whales'" :admin="can('admin')" @coin="openDetail" @toast="(m) => showToast(m)" />
 
     <!-- 板塊強弱/輪動 (hourly) -->
     <SectorBoard v-else-if="mainTab === 'sectors'" ref="sectorBoard" />

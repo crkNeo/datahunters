@@ -42,6 +42,7 @@ var tabMeta = []struct {
 	{"unlock", "代幣解鎖", "public", false},
 	{"sectors", "板塊強弱", "public", false},
 	{"robinhood", "Robinhood", "public", false},
+	{"whales", "名人動向", "public", false},
 	{"articles", "文章專欄", "public", false},
 	// 會員
 	{"oi", "OI 儀表板", "member", false},
@@ -245,7 +246,7 @@ var tabOfRoute = map[string]string{
 	"/api/oi-cache": "oi", "/api/signals": "signals", "/api/radar": "radar",
 	"/api/scorelog": "scorelog", "/api/klines": "oi",
 	"/api/paper": "paper", "/api/gamble": "gamble", "/api/ema-only": "emaonly",
-	"/api/conv": "conv", "/api/sr": "sr",
+	"/api/conv": "conv", "/api/sr": "sr", "/api/whales": "whales",
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
 	"/api/admin/surge":   "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3",

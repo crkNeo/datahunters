@@ -113,6 +113,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))          // DefiLlama token-unlock board
 	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood)) // Robinhood 上架 board
 	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))       // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/whales", s.gateTab("whales", s.handleWhales))          // 名人動向(Hyperliquid 即時倉位)
+	mux.HandleFunc("/api/admin/whale-push", s.gate(A, s.handleWhalePush))       // 名人動向推播開關(預設關)
 
 	// 基礎設施 / 首頁共用資料,不屬於任何分頁,固定公開
 	mux.HandleFunc("/api/home", s.gate(P, s.handleHome))
@@ -594,6 +596,24 @@ func (s *Server) handleEMAOnly(w http.ResponseWriter, r *http.Request) {
 // handleConv serves the 冥王星 (動態ATR均線收斂 4H) strategy tracker. VIP.
 func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
+}
+
+// handleWhales serves the 名人動向 board: watched addresses' live Hyperliquid
+// positions + a diff-based action-event feed.
+func (s *Server) handleWhales(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.WhaleBoard())
+}
+
+// handleWhalePush reads (GET) or sets (POST {on:bool}) the 名人動向 push toggle.
+func (s *Server) handleWhalePush(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			On bool `json:"on"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		s.store.SetWhalePush(body.On)
+	}
+	writeJSON(w, map[string]any{"on": s.store.WhalePushEnabled()})
 }
 
 // ---- 推薦系統 ----

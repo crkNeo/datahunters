@@ -15,7 +15,7 @@ const Blank = { render: () => null }
 // 可路由的分頁(與 App.vue 的 NAV_TABS 一致)
 export const ROUTE_TABS = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock',
-  'sectors', 'robinhood', 'articles',
+  'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr',
   'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',

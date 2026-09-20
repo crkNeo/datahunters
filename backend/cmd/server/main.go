@@ -196,6 +196,16 @@ func main() {
 		}
 	}()
 
+	// 名人動向:精選地址的 Hyperliquid 即時倉位 + 動作事件流。首抓建基準、不發事件;
+	// 之後每 45s 抓一次做 diff。推播預設關(後台可開)。
+	go func() {
+		store.WhaleTick()
+		ticker := time.NewTicker(45 * time.Second)
+		for range ticker.C {
+			store.WhaleTick()
+		}
+	}()
+
 	// spot-ETF daily net flow (Farside scrape) → injected into 快訊 once per new
 	// trading day. Flows update once daily after the US close; poll every 3h.
 	go func() {
