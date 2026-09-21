@@ -147,7 +147,8 @@ onUnmounted(() => clearInterval(timer))
   color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 5px 13px; transition: all .12s; }
 .wl-pill:hover { color: var(--c-txt); border-color: var(--c-line2); }
 .wl-pill.live { color: var(--c-txt); }
-.wl-pill.on { background: var(--c-gold-soft); border-color: var(--c-gold-d); color: var(--c-gold-b); }
+.wl-pill.on { background: var(--c-gold); border-color: var(--c-gold); color: #1a1408; font-weight: 800; box-shadow: 0 2px 10px rgba(232,184,75,.28); }
+.wl-pill.on .wl-dot { background: #1a1408; box-shadow: none; }
 .wl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-up); box-shadow: 0 0 6px var(--c-up); flex: 0 0 auto; }
 .wl-card { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: var(--r-lg); padding: 14px 16px; min-width: 0; }
 .wl-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
