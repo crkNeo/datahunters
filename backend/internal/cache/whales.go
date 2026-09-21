@@ -78,17 +78,6 @@ type WhaleRank struct {
 	Top     hyperliquid.Position `json:"top"` // 最大單一持倉
 }
 
-// PerfRow 是「聰明錢績效榜」的一列(近 30 日 PnL)。
-type PerfRow struct {
-	Rank  int     `json:"rank"`
-	Name  string  `json:"name"`
-	Addr  string  `json:"addr"`
-	Known bool    `json:"known"`
-	Acct  float64 `json:"acct"` // 帳戶淨值 USD
-	Pnl   float64 `json:"pnl"`  // 近 30 日 PnL USD
-	Roi   float64 `json:"roi"`  // 近 30 日 ROI(小數)
-}
-
 // WhaleEvent 是一則動作事件。
 type WhaleEvent struct {
 	Time     int64   `json:"time"` // unix ms
@@ -115,7 +104,6 @@ type WhaleData struct {
 	Cards     []WhaleCard  `json:"cards"`
 	Events    []WhaleEvent `json:"events"`
 	Rank      []WhaleRank  `json:"rank"` // 自動巨鯨排行(即時,依總名目)
-	Perf      []PerfRow    `json:"perf"` // 聰明錢績效榜(近 30 日 PnL)
 	PushOn    bool         `json:"push_on"`
 	UpdatedAt string       `json:"updated_at"`
 	Source    string       `json:"source"`
@@ -252,7 +240,6 @@ func (s *Store) WhaleBoard() WhaleData {
 	}
 	out.Events = append(out.Events, s.whaleEvents...)
 	out.Rank = append(out.Rank, s.whaleRank...)
-	out.Perf = append(out.Perf, s.whalePerf...)
 	return out
 }
 
@@ -271,16 +258,8 @@ func (s *Store) RefreshWhalePool() {
 	for _, e := range top {
 		pool = append(pool, e.Addr)
 	}
-	perfRows := hyperliquid.TopByMonthPnl(rows, 15, 0.10) // ROI ≥ 10% 才算「有本事」,濾掉巨型金庫/做市商
-	perf := make([]PerfRow, 0, len(perfRows))
-	for i, r := range perfRows {
-		_, known := knownLabels[strings.ToLower(r.Addr)]
-		perf = append(perf, PerfRow{Rank: i + 1, Name: labelOf(r.Addr), Addr: r.Addr, Known: known,
-			Acct: round2(r.Acct), Pnl: round2(r.PnlMonth), Roi: r.RoiMonth})
-	}
 	s.whaleMu.Lock()
 	s.whalePool = pool
-	s.whalePerf = perf
 	s.whaleMu.Unlock()
 }
 

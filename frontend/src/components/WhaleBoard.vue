@@ -24,7 +24,6 @@ const flatCards = computed(() => cards.value.filter((c) => !c.positions || !c.po
 function sumNtl(c) { return (c.positions || []).reduce((s, p) => s + Math.abs(p.notional), 0) }
 const events = computed(() => (data.value ? data.value.events : []))
 const rank = computed(() => (data.value ? data.value.rank || [] : []))
-const perf = computed(() => (data.value ? data.value.perf || [] : []))
 const pushOn = ref(false)
 async function togglePush() {
   const next = !pushOn.value
@@ -69,20 +68,22 @@ onUnmounted(() => clearInterval(timer))
           <div class="wl-who"><span class="wl-name">{{ c.name }}</span><span class="wl-note">{{ c.note }}</span></div>
           <div class="wl-acct"><span class="wl-k">帳戶淨值</span><b>{{ fmtUsd(c.acct) }}</b></div>
         </div>
-        <table class="grid wl-pos">
-          <thead><tr><th>幣種</th><th>方向</th><th class="r">名目</th><th class="r">進場</th><th class="r">未實現</th><th class="r">槓桿</th><th class="r">距強平</th></tr></thead>
-          <tbody>
-            <tr v-for="p in c.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
-              <td class="coin">{{ p.coin }}</td>
-              <td><span class="dir" :class="p.side === 'long' ? 'short' : 'long'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
-              <td class="r mono">{{ fmtUsd(p.notional) }}</td>
-              <td class="r mono tsmall">{{ fmtPx(p.entry) }}</td>
-              <td class="r mono" :class="p.upnl >= 0 ? 'short' : 'long'">{{ p.upnl >= 0 ? '+' : '' }}{{ fmtUsd(p.upnl) }}</td>
-              <td class="r tsmall">{{ p.lev }}x</td>
-              <td class="r mono" :class="{ 'wl-liq': near(p.liq_dist) }">{{ p.liq_dist ? p.liq_dist.toFixed(1) + '%' : '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="tblwrap">
+          <table class="grid wl-pos">
+            <thead><tr><th>幣種</th><th>方向</th><th class="r">名目</th><th class="r">進場</th><th class="r">未實現</th><th class="r">槓桿</th><th class="r">距強平</th></tr></thead>
+            <tbody>
+              <tr v-for="p in c.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
+                <td class="coin">{{ p.coin }}</td>
+                <td><span class="dir" :class="p.side === 'long' ? 'short' : 'long'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
+                <td class="r mono">{{ fmtUsd(p.notional) }}</td>
+                <td class="r mono tsmall">{{ fmtPx(p.entry) }}</td>
+                <td class="r mono" :class="p.upnl >= 0 ? 'short' : 'long'">{{ p.upnl >= 0 ? '+' : '' }}{{ fmtUsd(p.upnl) }}</td>
+                <td class="r tsmall">{{ p.lev }}x</td>
+                <td class="r mono" :class="{ 'wl-liq': near(p.liq_dist) }">{{ p.liq_dist ? p.liq_dist.toFixed(1) + '%' : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
     <p v-else-if="cards.length" class="wl-none">目前追蹤名單皆無進行中持倉 · 一有動作會在下方「近期動作」出現</p>
@@ -93,37 +94,19 @@ onUnmounted(() => clearInterval(timer))
       <span v-for="c in flatCards" :key="c.addr" class="wl-chip" :title="c.note">{{ c.name }}</span>
     </div>
 
-    <template v-if="perf.length">
-      <h3 class="psub">💡 聰明錢績效榜 · 近 30 日<span class="wl-sub">Hyperliquid 近月最會賺的錢包(ROI≥10% 濾掉巨型金庫,自動)</span></h3>
-      <div class="tblwrap">
-        <table class="grid wl-rank">
-          <thead><tr><th class="r">#</th><th>對象</th><th class="r">近30日 PnL</th><th class="r">ROI</th><th class="r">帳戶淨值</th></tr></thead>
-          <tbody>
-            <tr v-for="p in perf" :key="p.addr">
-              <td class="r tsmall">{{ p.rank }}</td>
-              <td class="coin"><span :class="p.known ? 'wl-known' : 'wl-anon'">{{ p.name }}</span></td>
-              <td class="r mono short"><b>+{{ fmtUsd(p.pnl) }}</b></td>
-              <td class="r mono short">+{{ (p.roi * 100).toFixed(0) }}%</td>
-              <td class="r mono">{{ fmtUsd(p.acct) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
-
     <template v-if="rank.length">
-      <h3 class="psub">🐋 巨鯨排行 · 即時<span class="wl-sub">Hyperliquid 帳戶淨值前段中,目前總名目最大者(自動)</span></h3>
+      <h3 class="psub">🐋 巨鯨排行 · 即時<span class="wl-sub">HL 目前總名目最大者 · 附主倉進場點位與距強平(自動)</span></h3>
       <div class="tblwrap">
         <table class="grid wl-rank">
-          <thead><tr><th class="r">#</th><th>對象</th><th class="r">帳戶淨值</th><th class="r">總名目</th><th class="r">淨向</th><th>最大持倉</th></tr></thead>
+          <thead><tr><th class="r">#</th><th>對象</th><th class="r">總名目</th><th>主倉</th><th class="r">進場</th><th class="r">距強平</th></tr></thead>
           <tbody>
-            <tr v-for="r in rank" :key="r.addr">
+            <tr v-for="r in rank" :key="r.addr" class="clickable" @click="$emit('coin', r.top.coin)">
               <td class="r tsmall">{{ r.rank }}</td>
               <td class="coin"><span :class="r.known ? 'wl-known' : 'wl-anon'">{{ r.name }}</span></td>
-              <td class="r mono">{{ fmtUsd(r.acct) }}</td>
               <td class="r mono"><b>{{ fmtUsd(r.ntl) }}</b></td>
-              <td class="r"><span class="dir" :class="r.net_long ? 'short' : 'long'">{{ r.net_long ? '偏多' : '偏空' }}</span></td>
-              <td class="clickable" @click="$emit('coin', r.top.coin)"><b>{{ r.top.coin }}</b> <span :class="r.top.side === 'long' ? 'short' : 'long'">{{ r.top.side === 'long' ? '多' : '空' }}</span> <span class="tsmall mono">{{ fmtUsd(r.top.notional) }} · {{ r.top.lev }}x</span></td>
+              <td><b>{{ r.top.coin }}</b> <span class="dir" :class="r.top.side === 'long' ? 'short' : 'long'">{{ r.top.side === 'long' ? '多' : '空' }}</span> <span class="wl-lev">{{ r.top.lev }}x</span></td>
+              <td class="r mono tsmall">{{ fmtPx(r.top.entry) }}</td>
+              <td class="r mono" :class="{ 'wl-liq': near(r.top.liq_dist) }">{{ r.top.liq_dist ? r.top.liq_dist.toFixed(1) + '%' : '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -148,8 +131,9 @@ onUnmounted(() => clearInterval(timer))
 .wl-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .wl-toggle small { color: var(--c-mut); font-weight: 400; }
 .wl-adnote { font-size: 11px; color: var(--c-mut2); }
-.wl-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
-.wl-card { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: var(--r-lg); padding: 14px 16px; }
+/* minmax(min(340px,100%)) 是關鍵:避免在 <340px 螢幕上撐破版面(track 不會超過容器寬)*/
+.wl-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 14px; }
+.wl-card { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: var(--r-lg); padding: 14px 16px; min-width: 0; }
 .wl-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .wl-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wl-name { font-family: var(--f-disp); font-weight: 800; font-size: 17px; color: var(--c-gold); }
@@ -157,16 +141,21 @@ onUnmounted(() => clearInterval(timer))
 .wl-acct { text-align: right; white-space: nowrap; }
 .wl-acct .wl-k { display: block; font-size: 10.5px; color: var(--c-mut2); }
 .wl-acct b { font-family: var(--f-mono); font-size: 15px; color: var(--c-txt); }
-.wl-pos { width: 100%; }
+/* 表格給 min-width,窄螢幕時在 .tblwrap 內橫向捲動,不擠壓換行 */
+.wl-pos { width: 100%; min-width: 440px; }
+.wl-pos th, .wl-pos td { white-space: nowrap; }
 .wl-pos .mono { font-family: var(--f-mono); }
 .wl-danger { background: var(--c-dn-bg); }
 .wl-liq { color: var(--c-dn); font-weight: 700; }
+.wl-lev { font-family: var(--f-mono); font-size: 11px; color: var(--c-mut2); }
 .wl-none { font-size: 13px; color: var(--c-mut); padding: 16px 4px; margin: 0; }
 .wl-flat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: var(--r-md); }
 .wl-flat-lbl { font-size: 11.5px; color: var(--c-mut2); }
 .wl-chip { font-size: 12px; font-weight: 600; color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 3px 11px; cursor: default; }
 .tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: var(--c-mut2); }
+.wl-rank { width: 100%; min-width: 480px; }
+.wl-rank th, .wl-rank td { white-space: nowrap; }
 .wl-rank .mono { font-family: var(--f-mono); }
 .wl-known { color: var(--c-gold); font-weight: 700; }
 .wl-anon { color: var(--c-mut); font-family: var(--f-mono); font-size: 12px; }

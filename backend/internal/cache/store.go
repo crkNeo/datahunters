@@ -165,7 +165,6 @@ type Store struct {
 	whaleTime   time.Time
 	whalePool   []string    // 巨鯨排行候選地址(定期由 HL 排行榜刷新)
 	whaleRank   []WhaleRank // 目前依名目大小排序的巨鯨(即時)
-	whalePerf   []PerfRow   // 聰明錢績效榜(近 30 日 PnL,由排行榜刷新)
 
 	rhW     *robinhood.Watcher // Robinhood 上架 watcher (currency-pair diff, no key)
 	rhMu    sync.RWMutex       // guards the Robinhood board
