@@ -163,8 +163,9 @@ type Store struct {
 	whaleSeeded map[string]bool                            // addr → 是否已建立基準(首抓不發事件)
 	whaleEvents []WhaleEvent                               // 近期動作(newest first)
 	whaleTime   time.Time
-	whalePool   []string  // 巨鯨排行候選地址(定期由 HL 排行榜刷新)
+	whalePool   []string    // 巨鯨排行候選地址(定期由 HL 排行榜刷新)
 	whaleRank   []WhaleRank // 目前依名目大小排序的巨鯨(即時)
+	whalePerf   []PerfRow   // 聰明錢績效榜(近 30 日 PnL,由排行榜刷新)
 
 	rhW     *robinhood.Watcher // Robinhood 上架 watcher (currency-pair diff, no key)
 	rhMu    sync.RWMutex       // guards the Robinhood board

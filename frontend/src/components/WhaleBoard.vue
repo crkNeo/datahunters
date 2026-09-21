@@ -24,6 +24,7 @@ const flatCards = computed(() => cards.value.filter((c) => !c.positions || !c.po
 function sumNtl(c) { return (c.positions || []).reduce((s, p) => s + Math.abs(p.notional), 0) }
 const events = computed(() => (data.value ? data.value.events : []))
 const rank = computed(() => (data.value ? data.value.rank || [] : []))
+const perf = computed(() => (data.value ? data.value.perf || [] : []))
 const pushOn = ref(false)
 async function togglePush() {
   const next = !pushOn.value
@@ -91,6 +92,24 @@ onUnmounted(() => clearInterval(timer))
       <span class="wl-flat-lbl">監控中 · 目前無持倉</span>
       <span v-for="c in flatCards" :key="c.addr" class="wl-chip" :title="c.note">{{ c.name }}</span>
     </div>
+
+    <template v-if="perf.length">
+      <h3 class="psub">💡 聰明錢績效榜 · 近 30 日<span class="wl-sub">Hyperliquid 近月最會賺的錢包(ROI≥10% 濾掉巨型金庫,自動)</span></h3>
+      <div class="tblwrap">
+        <table class="grid wl-rank">
+          <thead><tr><th class="r">#</th><th>對象</th><th class="r">近30日 PnL</th><th class="r">ROI</th><th class="r">帳戶淨值</th></tr></thead>
+          <tbody>
+            <tr v-for="p in perf" :key="p.addr">
+              <td class="r tsmall">{{ p.rank }}</td>
+              <td class="coin"><span :class="p.known ? 'wl-known' : 'wl-anon'">{{ p.name }}</span></td>
+              <td class="r mono short"><b>+{{ fmtUsd(p.pnl) }}</b></td>
+              <td class="r mono short">+{{ (p.roi * 100).toFixed(0) }}%</td>
+              <td class="r mono">{{ fmtUsd(p.acct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <template v-if="rank.length">
       <h3 class="psub">🐋 巨鯨排行 · 即時<span class="wl-sub">Hyperliquid 帳戶淨值前段中,目前總名目最大者(自動)</span></h3>

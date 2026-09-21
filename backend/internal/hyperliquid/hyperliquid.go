@@ -102,17 +102,21 @@ func FetchPositions(address string) ([]Position, float64, error) {
 	return positions, round2(acct), nil
 }
 
-// LbEntry is one leaderboard row (address + account value USD).
-type LbEntry struct {
-	Addr string
-	Acct float64
+// LbRow is one leaderboard row: address, account value, and the 30-day window
+// performance (PnL/ROI/volume). Enough to derive both the biggest-account pool
+// and the "近30日最賺" smart-money ranking from one fetch.
+type LbRow struct {
+	Addr     string
+	Acct     float64
+	PnlMonth float64
+	RoiMonth float64
+	VlmMonth float64
 }
 
-// FetchLeaderboardTop returns the top-n addresses by account value from
-// Hyperliquid's public leaderboard JSON. The file is large (~40MB), so it's
-// decoded with a streaming decoder that skips the per-window PnL blocks and
-// only keeps address+accountValue — used to seed the whale-rank pool (poll rarely).
-func FetchLeaderboardTop(n int) ([]LbEntry, error) {
+// FetchLeaderboard returns all rows from Hyperliquid's public leaderboard JSON
+// (~40MB). Decoded with a streaming decoder; only address/accountValue/month-window
+// are kept (other windows are skipped). Poll rarely (the file is large).
+func FetchLeaderboard() ([]LbRow, error) {
 	c := &http.Client{Timeout: 60 * time.Second}
 	resp, err := c.Get("https://stats-data.hyperliquid.xyz/Mainnet/leaderboard")
 	if err != nil {
@@ -121,25 +125,60 @@ func FetchLeaderboardTop(n int) ([]LbEntry, error) {
 	defer resp.Body.Close()
 	var out struct {
 		Rows []struct {
-			Addr string `json:"ethAddress"`
-			Acct string `json:"accountValue"`
+			Addr string               `json:"ethAddress"`
+			Acct string               `json:"accountValue"`
+			WP   [][2]json.RawMessage `json:"windowPerformances"`
 		} `json:"leaderboardRows"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	all := make([]LbEntry, 0, len(out.Rows))
+	all := make([]LbRow, 0, len(out.Rows))
 	for _, r := range out.Rows {
 		if r.Addr == "" {
 			continue
 		}
-		all = append(all, LbEntry{Addr: r.Addr, Acct: pf(r.Acct)})
-	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Acct > all[j].Acct })
-	if len(all) > n {
-		all = all[:n]
+		lr := LbRow{Addr: r.Addr, Acct: pf(r.Acct)}
+		for _, w := range r.WP {
+			var name string
+			if json.Unmarshal(w[0], &name) != nil || name != "month" {
+				continue
+			}
+			var p struct{ Pnl, Roi, Vlm string }
+			if json.Unmarshal(w[1], &p) == nil {
+				lr.PnlMonth, lr.RoiMonth, lr.VlmMonth = pf(p.Pnl), pf(p.Roi), pf(p.Vlm)
+			}
+		}
+		all = append(all, lr)
 	}
 	return all, nil
+}
+
+// TopByAcct returns the n rows with the largest account value.
+func TopByAcct(rows []LbRow, n int) []LbRow {
+	out := append([]LbRow{}, rows...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Acct > out[j].Acct })
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
+// TopByMonthPnl returns the n rows with the largest 30-day PnL among traders whose
+// 30-day ROI clears minRoi — an ROI floor filters out mega-accounts / vaults / market
+// makers that book huge PnL on tiny % (they're not "smart money" worth following).
+func TopByMonthPnl(rows []LbRow, n int, minRoi float64) []LbRow {
+	out := make([]LbRow, 0, len(rows))
+	for _, r := range rows {
+		if r.PnlMonth > 0 && r.RoiMonth >= minRoi {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PnlMonth > out[j].PnlMonth })
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
 }
 
 func pf(s string) float64      { v, _ := strconv.ParseFloat(s, 64); return v }

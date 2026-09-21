@@ -25,11 +25,15 @@ type Whale struct {
 // 之後可改為後台可編輯;先用程式碼種子。
 var whaleList = []Whale{
 	{Name: "麻吉大哥", Addr: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", Note: "黃立成 · 台灣 · 常年重壓 ETH 多"},
+	{Name: "0xTiamat", Addr: "0xbcd420d13362532756c968f663f96ba95e240dd2", Note: "活躍實戰 · 全市場多幣布局"},
+	{Name: "Cyantarb", Addr: "0x7b7f72a28fe109fa703eeed7984f2a8a68fedee2", Note: "活躍實戰 · 多幣持倉"},
 	{Name: "James Wynn", Addr: "0x5078c2fbea2b2ad61bc840bc023e35fce56bedb6", Note: "@JamesWynnReal · 高槓桿迷因賭徒"},
 	{Name: "AguilaTrades", Addr: "0x1f250df59a777d61cb8bd043c12970f3afe4f925", Note: "@AguilaTrades · BTC 大多頭巨鯨"},
 	{Name: "Andrew Kang", Addr: "0xbb876071a63bc4d9bfcf46b012b4437ea7ff4281", Note: "Mechanism Capital 共同創辦人"},
 	{Name: "Andrew Tate", Addr: "0xb78d97390a96a17fd2b58fedbeb3dd876c8f660a", Note: "@Cobratate · 網紅拳手"},
 	{Name: "0xSifu", Addr: "0xf967239debef10dbc78e9bbbb2d8a16b72a614eb", Note: "Wonderland 前財務長 · 爭議人物"},
+	{Name: "Ansem", Addr: "0x2639dc3ab1bc1eb232720be305ce83b57c14405b", Note: "@blknoiz06 · 迷因幣 KOL"},
+	{Name: "Pentoshi", Addr: "0xff0ad2ff560a84474c818521c6aedccbdce24fbf", Note: "@Pentosh1 · 資深交易員"},
 }
 
 // knownLabels：地址 → 已知身分(小寫地址)。排行榜命中就顯示名字,否則顯示縮寫地址。
@@ -45,6 +49,9 @@ var knownLabels = map[string]string{
 	"0xff0ad2ff560a84474c818521c6aedccbdce24fbf": "Pentoshi",
 	"0xbcd420d13362532756c968f663f96ba95e240dd2": "0xTiamat",
 	"0x741a58844ac349d6195d0b8ccf7fa07501eba5c2": "Colasama",
+	"0x7b7f72a28fe109fa703eeed7984f2a8a68fedee2": "Cyantarb",
+	"0x0aadc54a9e78cfe2e971aa8edcedea9c6df01f46": "Flood",
+	"0x86523927bffeafe2e532f0218feb1f3c29f6120d": "Evaded",
 }
 
 // labelOf 回傳地址的顯示名:已知則名字,否則 0x1234…abcd 縮寫。
@@ -69,6 +76,17 @@ type WhaleRank struct {
 	Ntl     float64              `json:"ntl"`   // 總名目 USD
 	NetLong bool                 `json:"net_long"`
 	Top     hyperliquid.Position `json:"top"` // 最大單一持倉
+}
+
+// PerfRow 是「聰明錢績效榜」的一列(近 30 日 PnL)。
+type PerfRow struct {
+	Rank  int     `json:"rank"`
+	Name  string  `json:"name"`
+	Addr  string  `json:"addr"`
+	Known bool    `json:"known"`
+	Acct  float64 `json:"acct"` // 帳戶淨值 USD
+	Pnl   float64 `json:"pnl"`  // 近 30 日 PnL USD
+	Roi   float64 `json:"roi"`  // 近 30 日 ROI(小數)
 }
 
 // WhaleEvent 是一則動作事件。
@@ -97,6 +115,7 @@ type WhaleData struct {
 	Cards     []WhaleCard  `json:"cards"`
 	Events    []WhaleEvent `json:"events"`
 	Rank      []WhaleRank  `json:"rank"` // 自動巨鯨排行(即時,依總名目)
+	Perf      []PerfRow    `json:"perf"` // 聰明錢績效榜(近 30 日 PnL)
 	PushOn    bool         `json:"push_on"`
 	UpdatedAt string       `json:"updated_at"`
 	Source    string       `json:"source"`
@@ -233,22 +252,35 @@ func (s *Store) WhaleBoard() WhaleData {
 	}
 	out.Events = append(out.Events, s.whaleEvents...)
 	out.Rank = append(out.Rank, s.whaleRank...)
+	out.Perf = append(out.Perf, s.whalePerf...)
 	return out
 }
 
-// RefreshWhalePool 從 HL 排行榜取帳戶淨值前 N 大的地址,當作巨鯨排行的候選池。
-// 排行榜檔案很大,失敗就保留舊池;偶爾刷新即可(每 6h)。
+// RefreshWhalePool 抓一次 HL 排行榜,同時導出兩份:
+//   - whalePool:帳戶淨值前 60 大 → 巨鯨排行(依即時總名目)的候選池
+//   - whalePerf:近 30 日 PnL 前 15 名 → 聰明錢績效榜(直接來自排行榜,無需再查倉位)
+//
+// 排行榜檔案很大,失敗就保留舊值;每 6h 刷新即可。
 func (s *Store) RefreshWhalePool() {
-	lb, err := hyperliquid.FetchLeaderboardTop(60)
-	if err != nil || len(lb) == 0 {
+	rows, err := hyperliquid.FetchLeaderboard()
+	if err != nil || len(rows) == 0 {
 		return
 	}
-	pool := make([]string, 0, len(lb))
-	for _, e := range lb {
+	top := hyperliquid.TopByAcct(rows, 60)
+	pool := make([]string, 0, len(top))
+	for _, e := range top {
 		pool = append(pool, e.Addr)
+	}
+	perfRows := hyperliquid.TopByMonthPnl(rows, 15, 0.10) // ROI ≥ 10% 才算「有本事」,濾掉巨型金庫/做市商
+	perf := make([]PerfRow, 0, len(perfRows))
+	for i, r := range perfRows {
+		_, known := knownLabels[strings.ToLower(r.Addr)]
+		perf = append(perf, PerfRow{Rank: i + 1, Name: labelOf(r.Addr), Addr: r.Addr, Known: known,
+			Acct: round2(r.Acct), Pnl: round2(r.PnlMonth), Roi: r.RoiMonth})
 	}
 	s.whaleMu.Lock()
 	s.whalePool = pool
+	s.whalePerf = perf
 	s.whaleMu.Unlock()
 }
 
