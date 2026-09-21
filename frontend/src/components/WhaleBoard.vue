@@ -17,11 +17,21 @@ async function load() {
   } catch (e) { /* secondary */ }
 }
 const cards = computed(() => (data.value ? data.value.cards : []))
-// 有持倉的排前面(依名目大小),沒持倉的收進「監控中」小列
-const activeCards = computed(() => cards.value.filter((c) => c.positions && c.positions.length)
-  .sort((a, b) => sumNtl(b) - sumNtl(a)))
-const flatCards = computed(() => cards.value.filter((c) => !c.positions || !c.positions.length))
 function sumNtl(c) { return (c.positions || []).reduce((s, p) => s + Math.abs(p.notional), 0) }
+const hasPos = (c) => !!(c && c.positions && c.positions.length)
+// 標籤順序:有持倉的排前面(依名目大小),沒持倉的(監控中)排後面
+const orderedWhales = computed(() => {
+  const active = cards.value.filter(hasPos).sort((a, b) => sumNtl(b) - sumNtl(a))
+  const flat = cards.value.filter((c) => !hasPos(c))
+  return [...active, ...flat]
+})
+const selected = ref("") // 目前選中的地址
+// 一律回一個有效對象(沒選就用第一個,通常是持倉最大的)
+const sel = computed(() => {
+  const list = orderedWhales.value
+  if (!list.length) return null
+  return list.find((c) => c.addr === selected.value) || list[0]
+})
 const events = computed(() => (data.value ? data.value.events : []))
 const rank = computed(() => (data.value ? data.value.rank || [] : []))
 const pushOn = ref(false)
@@ -62,37 +72,37 @@ onUnmounted(() => clearInterval(timer))
       <span class="wl-adnote">開/平/反手時推播給所有訂閱者</span>
     </div>
 
-    <div v-if="activeCards.length" class="wl-cards">
-      <div v-for="c in activeCards" :key="c.addr" class="wl-card">
-        <div class="wl-top">
-          <div class="wl-who"><span class="wl-name">{{ c.name }}</span><span class="wl-note">{{ c.note }}</span></div>
-          <div class="wl-acct"><span class="wl-k">帳戶淨值</span><b>{{ fmtUsd(c.acct) }}</b></div>
-        </div>
-        <div class="tblwrap">
-          <table class="grid wl-pos">
-            <thead><tr><th>幣種</th><th>方向</th><th class="r">名目</th><th class="r">進場</th><th class="r">未實現</th><th class="r">槓桿</th><th class="r">距強平</th></tr></thead>
-            <tbody>
-              <tr v-for="p in c.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
-                <td class="coin">{{ p.coin }}</td>
-                <td><span class="dir" :class="p.side === 'long' ? 'short' : 'long'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
-                <td class="r mono">{{ fmtUsd(p.notional) }}</td>
-                <td class="r mono tsmall">{{ fmtPx(p.entry) }}</td>
-                <td class="r mono" :class="p.upnl >= 0 ? 'short' : 'long'">{{ p.upnl >= 0 ? '+' : '' }}{{ fmtUsd(p.upnl) }}</td>
-                <td class="r tsmall">{{ p.lev }}x</td>
-                <td class="r mono" :class="{ 'wl-liq': near(p.liq_dist) }">{{ p.liq_dist ? p.liq_dist.toFixed(1) + '%' : '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+    <!-- 標籤切換人:綠點=有持倉,灰=監控中(空倉);點名字切換,下方只顯示這一位 -->
+    <div v-if="cards.length" class="wl-picker">
+      <button v-for="c in orderedWhales" :key="c.addr" class="wl-pill" :class="{ on: sel && sel.addr === c.addr, live: hasPos(c) }" @click="selected = c.addr" :title="c.note">
+        <i v-if="hasPos(c)" class="wl-dot"></i>{{ c.name }}
+      </button>
     </div>
-    <p v-else-if="cards.length" class="wl-none">目前追蹤名單皆無進行中持倉 · 一有動作會在下方「近期動作」出現</p>
-    <p v-else class="loading">載入名人動向中…</p>
 
-    <div v-if="flatCards.length" class="wl-flat">
-      <span class="wl-flat-lbl">監控中 · 目前無持倉</span>
-      <span v-for="c in flatCards" :key="c.addr" class="wl-chip" :title="c.note">{{ c.name }}</span>
+    <div v-if="sel" class="wl-card">
+      <div class="wl-top">
+        <div class="wl-who"><span class="wl-name">{{ sel.name }}</span><span class="wl-note">{{ sel.note }}</span></div>
+        <div class="wl-acct"><span class="wl-k">帳戶淨值</span><b>{{ fmtUsd(sel.acct) }}</b></div>
+      </div>
+      <div v-if="hasPos(sel)" class="tblwrap">
+        <table class="grid wl-pos">
+          <thead><tr><th>幣種</th><th>方向</th><th class="r">名目</th><th class="r">進場</th><th class="r">未實現</th><th class="r">槓桿</th><th class="r">距強平</th></tr></thead>
+          <tbody>
+            <tr v-for="p in sel.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
+              <td class="coin">{{ p.coin }}</td>
+              <td><span class="dir" :class="p.side === 'long' ? 'short' : 'long'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
+              <td class="r mono">{{ fmtUsd(p.notional) }}</td>
+              <td class="r mono tsmall">{{ fmtPx(p.entry) }}</td>
+              <td class="r mono" :class="p.upnl >= 0 ? 'short' : 'long'">{{ p.upnl >= 0 ? '+' : '' }}{{ fmtUsd(p.upnl) }}</td>
+              <td class="r tsmall">{{ p.lev }}x</td>
+              <td class="r mono" :class="{ 'wl-liq': near(p.liq_dist) }">{{ p.liq_dist ? p.liq_dist.toFixed(1) + '%' : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="wl-empty">目前無持倉 · 監控中 —— 一有動作會在下方「近期動作」出現</p>
     </div>
+    <p v-else class="loading">載入名人動向中…</p>
 
     <template v-if="rank.length">
       <h3 class="psub">🐋 巨鯨排行 · 即時<span class="wl-sub">HL 目前總名目最大者 · 附主倉進場點位與距強平(自動)</span></h3>
@@ -131,8 +141,14 @@ onUnmounted(() => clearInterval(timer))
 .wl-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .wl-toggle small { color: var(--c-mut); font-weight: 400; }
 .wl-adnote { font-size: 11px; color: var(--c-mut2); }
-/* minmax(min(340px,100%)) 是關鍵:避免在 <340px 螢幕上撐破版面(track 不會超過容器寬)*/
-.wl-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 14px; }
+/* 標籤切換人 */
+.wl-picker { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+.wl-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 5px 13px; transition: all .12s; }
+.wl-pill:hover { color: var(--c-txt); border-color: var(--c-line2); }
+.wl-pill.live { color: var(--c-txt); }
+.wl-pill.on { background: var(--c-gold-soft); border-color: var(--c-gold-d); color: var(--c-gold-b); }
+.wl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-up); box-shadow: 0 0 6px var(--c-up); flex: 0 0 auto; }
 .wl-card { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: var(--r-lg); padding: 14px 16px; min-width: 0; }
 .wl-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .wl-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -148,10 +164,7 @@ onUnmounted(() => clearInterval(timer))
 .wl-danger { background: var(--c-dn-bg); }
 .wl-liq { color: var(--c-dn); font-weight: 700; }
 .wl-lev { font-family: var(--f-mono); font-size: 11px; color: var(--c-mut2); }
-.wl-none { font-size: 13px; color: var(--c-mut); padding: 16px 4px; margin: 0; }
-.wl-flat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding: 10px 12px; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: var(--r-md); }
-.wl-flat-lbl { font-size: 11.5px; color: var(--c-mut2); }
-.wl-chip { font-size: 12px; font-weight: 600; color: var(--c-mut); background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 20px; padding: 3px 11px; cursor: default; }
+.wl-empty { font-size: 13px; color: var(--c-mut); padding: 14px 4px; margin: 0; }
 .tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: var(--c-mut2); }
 .wl-rank { width: 100%; min-width: 480px; }
