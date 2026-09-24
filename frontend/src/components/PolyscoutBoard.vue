@@ -45,6 +45,26 @@ function fmtUsd(v) {
 }
 const cents = (v) => (v * 100).toFixed(0) + "¢" // Polymarket 價格 0~1,以「分」呈現
 const pct = (v) => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"
+
+// end_date 只有日期(YYYY-MM-DD),補 00:00:00 成標準時間格式呈現
+function fmtTime(d) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? d + " 00:00:00" : (d || "—")
+}
+// 把英文市場名整理成看得懂的短標題;認不得的(如非幣市場)就保留原文
+const COIN = { bitcoin: "BTC", ethereum: "ETH", solana: "SOL", ripple: "XRP", xrp: "XRP", dogecoin: "DOGE", cardano: "ADA", avalanche: "AVAX", chainlink: "LINK", polkadot: "DOT", litecoin: "LTC", "binance coin": "BNB", bnb: "BNB" }
+function prettyTitle(t) {
+  if (!t) return t
+  const low = t.toLowerCase()
+  let sym = null
+  for (const k in COIN) if (low.includes(k)) { sym = COIN[k]; break }
+  if (/up or down/i.test(t)) return (sym || "?") + " 短線漲跌"
+  const m = t.match(/\$[\d,]+(?:\.\d+)?[KMB]?(?![A-Za-z])/i) // 價位;避免吃到後面單字的字母
+  if (sym && m) {
+    if (/\b(dip|drop|fall|below|under)\b/i.test(t)) return `${sym} 會跌到 ${m[0]}?`
+    if (/\b(reach|hit|hits|above|exceed|over)\b/i.test(t)) return `${sym} 會漲到 ${m[0]}?`
+  }
+  return t
+}
 const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉弱": "v-bad", "資料不足": "v-mut", "觀察中": "v-mut" }
 </script>
 
@@ -84,10 +104,11 @@ const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉�
 
       <div v-if="hasPos(sel)" class="tblwrap">
         <table class="grid ps-pos">
-          <thead><tr><th>市場</th><th>方向</th><th class="r">部位</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益</th></tr></thead>
+          <thead><tr><th>市場</th><th>到期</th><th>方向</th><th class="r">部位</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益</th></tr></thead>
           <tbody>
             <tr v-for="(p, i) in sel.positions" :key="i">
-              <td class="ps-mkt"><img v-if="p.icon" :src="p.icon" class="ps-icon" alt="" />{{ p.title }}</td>
+              <td class="ps-mkt"><img v-if="p.icon" :src="p.icon" class="ps-icon" alt="" /><span :title="p.title">{{ prettyTitle(p.title) }}</span></td>
+              <td class="ps-date mono tsmall">{{ fmtTime(p.end_date) }}</td>
               <td><span class="dir" :class="/^(yes|up|long)$/i.test(p.outcome) ? 'short' : 'long'">{{ p.outcome }}</span></td>
               <td class="r mono">{{ fmtUsd(p.cur_value) }}</td>
               <td class="r mono tsmall">{{ cents(p.avg_price) }}</td>
@@ -137,10 +158,11 @@ const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉�
 .ps-reasons { font-size: 12px; color: #8b909a; margin: 0 0 12px; }
 .up { color: #2ec26b; } .dn { color: #ff5c5c; }
 .tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
-.ps-pos { width: 100%; min-width: 560px; }
+.ps-pos { width: 100%; min-width: 680px; }
 .ps-pos .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .ps-pos th, .ps-pos td { white-space: nowrap; }
-.ps-mkt { white-space: normal; min-width: 220px; max-width: 340px; display: flex; align-items: center; gap: 7px; color: #e8eaed; }
+.ps-mkt { white-space: normal; min-width: 180px; max-width: 300px; display: flex; align-items: center; gap: 7px; color: #e8eaed; }
+.ps-date { color: #8b909a; }
 .ps-icon { width: 18px; height: 18px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
 .ps-pos small { color: #6a6f7a; font-size: 10.5px; }
 .wl-empty { font-size: 13px; color: #8b909a; padding: 14px 4px; margin: 0; }
