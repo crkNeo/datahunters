@@ -90,7 +90,7 @@ onUnmounted(() => clearInterval(timer))
           <tbody>
             <tr v-for="p in sel.positions" :key="p.coin" class="clickable" :class="{ 'wl-danger': near(p.liq_dist) }" @click="$emit('coin', p.coin)">
               <td class="coin">{{ p.coin }}</td>
-              <td><span class="dir" :class="p.side === 'long' ? 'short' : 'long'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
+              <td><span class="dir" :class="p.side === 'long' ? 'long' : 'short'">{{ p.side === 'long' ? '做多' : '做空' }}</span></td>
               <td class="r mono">{{ fmtUsd(p.notional) }}</td>
               <td class="r mono tsmall">{{ fmtPx(p.entry) }}</td>
               <td class="r mono" :class="p.upnl >= 0 ? 'short' : 'long'">{{ p.upnl >= 0 ? '+' : '' }}{{ fmtUsd(p.upnl) }}</td>
@@ -114,7 +114,7 @@ onUnmounted(() => clearInterval(timer))
               <td class="r tsmall">{{ r.rank }}</td>
               <td class="coin"><span :class="r.known ? 'wl-known' : 'wl-anon'">{{ r.name }}</span></td>
               <td class="r mono"><b>{{ fmtUsd(r.ntl) }}</b></td>
-              <td><b>{{ r.top.coin }}</b> <span class="dir" :class="r.top.side === 'long' ? 'short' : 'long'">{{ r.top.side === 'long' ? '多' : '空' }}</span> <span class="wl-lev">{{ r.top.lev }}x</span></td>
+              <td><b>{{ r.top.coin }}</b> <span class="dir" :class="r.top.side === 'long' ? 'long' : 'short'">{{ r.top.side === 'long' ? '多' : '空' }}</span> <span class="wl-lev">{{ r.top.lev }}x</span></td>
               <td class="r mono tsmall">{{ fmtPx(r.top.entry) }}</td>
               <td class="r mono" :class="{ 'wl-liq': near(r.top.liq_dist) }">{{ r.top.liq_dist ? r.top.liq_dist.toFixed(1) + '%' : '—' }}</td>
             </tr>
