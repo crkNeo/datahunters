@@ -64,6 +64,7 @@ var tabMeta = []struct {
 	{"pulsarv8", "脈衝星v8", "admin", false},
 	{"orderblock", "訂單塊", "admin", false},
 	{"orderblockv2", "訂單塊v2", "admin", false},
+	{"polyscout", "跟單篩選", "admin", false}, // Polymarket CRYPTO 一致性篩選(管理員)
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},

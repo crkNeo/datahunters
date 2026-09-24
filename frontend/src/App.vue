@@ -24,6 +24,7 @@ import UpbitBoard from './components/UpbitBoard.vue'
 import NewsBoard from './components/NewsBoard.vue'
 import RobinhoodBoard from './components/RobinhoodBoard.vue'
 import WhaleBoard from './components/WhaleBoard.vue'
+import PolyscoutBoard from './components/PolyscoutBoard.vue'
 import { ROUTE_TABS } from './router'
 
 // ---- shared data ----
@@ -1473,7 +1474,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1523,7 +1524,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'events', 'flow', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
-  'admin', 'referral', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:看得到,且身分列與類型都對得上。
 // "admin:*" 格 = 權限為 admin 的分頁(不分資訊/訊號);其餘格 = 身分列 tier + 類型 kind。
@@ -2059,6 +2060,7 @@ watch([role, tabPerms, authReady], () => {
             訂單塊v2<em v-if="orderblockv2 && orderblockv2.open.length" class="navbadge">{{ orderblockv2.open.length }}</em>
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf' }" @click="mainTab = 'srmtf'; loadSRMTF()">反轉訊號</button>
+          <button v-if="inGroup('polyscout', grp[0])" :class="{ active: mainTab === 'polyscout' }" @click="mainTab = 'polyscout'">跟單篩選</button>
         </div>
       </div>
       </template>
@@ -2128,6 +2130,8 @@ watch([role, tabPerms, authReady], () => {
     </section>
 
     <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->
+    <PolyscoutBoard v-else-if="mainTab === 'polyscout' && canTab('polyscout')" />
+
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
       <div class="mk-head">
         <h2>反轉訊號<span class="help" tabindex="0">?<span class="help-pop"><b>單根 K 棒反轉型態(錘頭/射擊星)</b>,同時掃 <b>1H 與 4H</b> 收盤。<br><b>錘頭線(做多)</b>:實體很小、下影線明顯較長(遠大於實體)且絕對主導上影線(即使帶一點點上影線仍算)、且當根 low < 前 10 根最低(局部低點)。<br><b>射擊星(做空)</b>:實體很小、上影線明顯較長且絕對主導下影線、且當根 high > 前 10 根最高(局部高點)。<br>顏色不要求。<b>僅提示,不進場、無止盈止損、無下單訊號</b>,命中即推播(TG + 軟體)。⚠️ 僅供參考,非投資建議。</span></span></h2>

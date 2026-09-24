@@ -12,6 +12,7 @@ import (
 
 	"datahunter/internal/auth"
 	"datahunter/internal/cache"
+	"datahunter/internal/polymarket"
 )
 
 type Server struct {
@@ -145,6 +146,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
 	mux.HandleFunc("/api/admin/strat-config", s.gate(A, s.handleStratConfig))     // 策略設定(類型/風控/止損上限/保本/分批)
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
+	mux.HandleFunc("/api/admin/polyscout", s.gate(A, s.handlePolyscout))          // Polymarket CRYPTO 跟單篩選(一致性)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                         // 冥王星 (動態ATR均線收斂 4H)
@@ -614,6 +616,21 @@ func (s *Server) handleWhalePush(w http.ResponseWriter, r *http.Request) {
 		s.store.SetWhalePush(body.On)
 	}
 	writeJSON(w, map[string]any{"on": s.store.WhalePushEnabled()})
+}
+
+// handlePolyscout 跑 Polymarket CRYPTO 排行榜前 N 名的跨區間一致性篩選(admin)。
+// ⚠️ Polymarket 對美國 IP 封鎖,若後端所在網路連不到會回 502。
+func (s *Server) handlePolyscout(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 50 {
+		limit = n
+	}
+	reps, err := polymarket.Screen(limit)
+	if err != nil {
+		http.Error(w, "polymarket 連線失敗(可能被地區封鎖):"+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"reports": reps})
 }
 
 // ---- 推薦系統 ----
