@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -55,45 +56,58 @@ type Report struct {
 	Reasons         []string          `json:"reasons"`
 }
 
-// row 是排行榜/個人成績共用的寬鬆解析結構(欄位名未實測,盡量多接幾種)。
+// row 是排行榜的一列(已抽取)。實測欄位:proxyWallet / userName / rank / pnl / vol。
 type row struct {
-	Wallet  string  `json:"wallet"`
-	Proxy   string  `json:"proxyWallet"`
-	User    string  `json:"user"`
-	Address string  `json:"address"`
-	Name    string  `json:"name"`
-	User2   string  `json:"username"`
-	Pseudo  string  `json:"pseudonym"`
-	Rank    int     `json:"rank"`
-	PnL     float64 `json:"pnl"`
-	Profit  float64 `json:"profit"`
-	Vol     float64 `json:"vol"`
-	Volume  float64 `json:"volume"`
+	Wallet string
+	Name   string
+	Rank   int
+	PnL    float64
+	Vol    float64
 }
 
-func (r row) wallet() string { return first(r.Wallet, r.Proxy, r.User, r.Address) }
-func (r row) name() string   { return first(r.Name, r.User2, r.Pseudo) }
-func (r row) pnl() float64   { return nz(r.PnL, r.Profit) }
-func (r row) vol() float64   { return nz(r.Vol, r.Volume) }
-
-func first(ss ...string) string {
-	for _, s := range ss {
-		if s != "" {
+// 值可能是數字或字串("123.45"),都要吃。
+func gf(m map[string]any, keys ...string) float64 {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case float64:
+			return v
+		case string:
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				return f
+			}
+		case json.Number:
+			if f, err := v.Float64(); err == nil {
+				return f
+			}
+		}
+	}
+	return 0
+}
+func gs(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := m[k].(string); ok && s != "" {
 			return s
 		}
 	}
 	return ""
 }
-func nz(vs ...float64) float64 {
-	for _, v := range vs {
-		if v != 0 {
-			return v
-		}
+
+func mapsToRows(ms []map[string]any) []row {
+	out := make([]row, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, row{
+			Wallet: gs(m, "proxyWallet", "wallet", "user", "address"),
+			Name:   gs(m, "userName", "name", "username", "pseudonym"),
+			Rank:   int(gf(m, "rank")),
+			PnL:    gf(m, "pnl", "profit", "amount"),
+			Vol:    gf(m, "vol", "volume"),
+		})
 	}
-	return 0
+	return out
 }
 
-// fetchLeaderboard 打排行榜。回傳寬鬆解析後的 rows。leaderboard 回傳可能是陣列或 {leaderboard:[…]}。
+// fetchLeaderboard 打排行榜。實測 /v1/leaderboard 回傳是物件陣列;仍寬鬆接受
+// {leaderboard|data|results:[…]} 包裝,且數字可為字串。真的認不得就把原始前段吐進錯誤。
 func fetchLeaderboard(q url.Values) ([]row, error) {
 	u := base + "/v1/leaderboard?" + q.Encode()
 	req, _ := http.NewRequest("GET", u, nil)
@@ -102,25 +116,33 @@ func fetchLeaderboard(q url.Values) ([]row, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("leaderboard %d", resp.StatusCode)
-	}
 	body, _ := io.ReadAll(resp.Body)
-	var arr []row
-	if json.Unmarshal(body, &arr) == nil && len(arr) > 0 {
-		return arr, nil
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("leaderboard HTTP %d: %s", resp.StatusCode, snip(body))
 	}
-	var wrap struct {
-		Leaderboard []row `json:"leaderboard"`
-		Data        []row `json:"data"`
+	var arr []map[string]any
+	if json.Unmarshal(body, &arr) == nil {
+		return mapsToRows(arr), nil // 空陣列也回(user 查詢無排名時就是空的)
 	}
+	var wrap map[string]json.RawMessage
 	if json.Unmarshal(body, &wrap) == nil {
-		if len(wrap.Leaderboard) > 0 {
-			return wrap.Leaderboard, nil
+		for _, k := range []string{"leaderboard", "data", "results", "traders"} {
+			if raw, ok := wrap[k]; ok {
+				var a []map[string]any
+				if json.Unmarshal(raw, &a) == nil {
+					return mapsToRows(a), nil
+				}
+			}
 		}
-		return wrap.Data, nil
 	}
-	return nil, fmt.Errorf("leaderboard: unexpected shape")
+	return nil, fmt.Errorf("leaderboard: unexpected shape: %s", snip(body))
+}
+
+func snip(b []byte) string {
+	if len(b) > 220 {
+		return string(b[:220]) + "…"
+	}
+	return string(b)
 }
 
 // Leaderboard 回加密貨幣類 MONTH 排行榜前 limit 名(候選清單)。
@@ -138,7 +160,7 @@ func Windows(wallet string) map[string]Window {
 		rows, err := fetchLeaderboard(q)
 		if err == nil && len(rows) > 0 {
 			r := rows[0]
-			w.Rank, w.PnL, w.Vol, w.HasData = r.Rank, r.pnl(), r.vol(), true
+			w.Rank, w.PnL, w.Vol, w.HasData = r.Rank, r.PnL, r.Vol, true
 		}
 		out[p] = w
 		time.Sleep(120 * time.Millisecond) // 禮貌間隔
@@ -212,11 +234,10 @@ func Screen(limit int) ([]Report, error) {
 	th := Defaults()
 	out := make([]Report, 0, len(lb))
 	for _, r := range lb {
-		wallet := r.wallet()
-		if wallet == "" {
+		if r.Wallet == "" {
 			continue
 		}
-		rep := Assess(wallet, r.name(), Windows(wallet), th)
+		rep := Assess(r.Wallet, r.Name, Windows(r.Wallet), th)
 		rep.Windows = nil // payload 精簡:表格用不到逐區間明細
 		out = append(out, rep)
 	}
