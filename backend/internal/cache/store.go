@@ -181,6 +181,13 @@ type Store struct {
 	maiRetryAt time.Time // after a failure, don't retry before this (5-min backoff)
 	maiSeeded  bool      // first analysis shows but doesn't push
 
+	// 跟單篩選 · 聰明錢共識(polyscout):每小時用 AI 彙整前 20 名交易者的看法 + 整體大綱
+	polyMu      sync.RWMutex
+	polyData    PolyConsensus // 最新一份彙整(整體 + 個別)
+	polyBucket  int64         // 上次成功的小時桶(每小時一次閘門)
+	polyRetryAt time.Time     // 失敗後的退避
+	polySeeded  bool          // 首份只顯示不推播
+
 	sectorMu     sync.RWMutex       // guards the 板塊強弱 board (hourly)
 	sectorBoard  []SectorRow        // ranked sectors (strongest first)
 	sectorPrev   map[string]float64 // sector → last-hour VsBTC (for the rotation Δ)

@@ -1,41 +1,43 @@
 <!--
-  跟單篩選(polyscout · 管理員)。自動抓 Polymarket CRYPTO 排行榜「當前前 10 名」,
-  做跨區間一致性判定,並像名人動向一樣用標籤切換人 —— 點名字看那個錢包目前的預測市場持倉。
-  ⚠️ 台灣部分 ISP 依法院命令封鎖 Polymarket 網域,後端已自帶 1.1.1.1 解析繞過。
-  純資訊呈現,非投資建議、跟單風險自負。
+  跟單篩選 · 聰明錢共識(polyscout · 管理員)。
+  每小時後端用 AI 彙整 Polymarket CRYPTO 前 20 名交易者「目前的看法」:
+  上方=整體大綱 + 信心,下方=前 20 名個別看法(點開看佐證倉位)。
+  重點是「他們現在怎麼看盤」,不看進場價。純資訊,非投資建議、跟單風險自負。
 -->
 <script setup>
 import { ref, computed, onMounted } from "vue"
 import { authFetch } from "../lib/api"
 
-const rows = ref([])
+const emit = defineEmits(["toast"])
+
+const d = ref(null)
 const loading = ref(false)
 const err = ref("")
 async function load() {
   loading.value = true; err.value = ""
   try {
-    const res = await authFetch("/api/admin/polyscout?limit=10", { timeout: 60000 })
-    if (res.ok) { rows.value = (await res.json()).reports || [] }
-    else { err.value = (await res.text()).trim() || ("HTTP " + res.status); rows.value = [] }
+    const res = await authFetch("/api/admin/polyscout", { timeout: 30000 })
+    if (res.ok) { d.value = await res.json() }
+    else { err.value = (await res.text()).trim() || ("HTTP " + res.status) }
   } catch (e) { err.value = "" + e } finally { loading.value = false }
 }
 onMounted(load)
 
-const hasPos = (r) => !!(r && r.positions && r.positions.length)
-function posVal(r) { return (r.positions || []).reduce((s, p) => s + p.cur_value, 0) }
-// 標籤順序:有公開持倉的排前面(依持倉市值),其餘依後端排序(ALL 損益)在後
-const ordered = computed(() => {
-  const live = rows.value.filter(hasPos).sort((a, b) => posVal(b) - posVal(a))
-  const flat = rows.value.filter((r) => !hasPos(r))
-  return [...live, ...flat]
-})
-const selected = ref("")
-const sel = computed(() => {
-  const list = ordered.value
-  if (!list.length) return null
-  return list.find((r) => r.wallet === selected.value) || list[0]
-})
-const nameOf = (r) => r.name || (r.wallet.slice(0, 6) + "…" + r.wallet.slice(-4))
+const views = computed(() => (d.value && d.value.views) || [])
+const seeding = computed(() => !loading.value && !err.value && views.value.length === 0)
+
+const pushOn = ref(false)
+async function togglePush() {
+  const next = !pushOn.value
+  try {
+    const res = await authFetch("/api/admin/polyscout-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: next }) })
+    if (res.ok) { pushOn.value = !!(await res.json()).on; emit("toast", pushOn.value ? "聰明錢共識推播已開啟" : "聰明錢共識推播已關閉") }
+  } catch (e) { emit("toast", "設定失敗") }
+}
+
+const open = ref("") // 展開中的 wallet
+const toggle = (w) => { open.value = open.value === w ? "" : w }
+const nameOf = (v) => v.name || (v.wallet.slice(0, 6) + "…" + v.wallet.slice(-4))
 
 function fmtUsd(v) {
   const a = Math.abs(v); const s = v < 0 ? "-" : ""
@@ -43,128 +45,143 @@ function fmtUsd(v) {
   if (a >= 1e3) return s + "$" + (a / 1e3).toFixed(1) + "K"
   return s + "$" + a.toFixed(0)
 }
-const cents = (v) => (v * 100).toFixed(0) + "¢" // Polymarket 價格 0~1,以「分」呈現
+const cents = (v) => (v * 100).toFixed(0) + "¢"
 const pct = (v) => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"
+const fmtTime = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x || "") ? x + " 00:00:00" : (x || "—")
+const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉弱": "v-bad", "資料不足": "v-mut", "觀察中": "v-mut" }
+// 方向配色:偏多綠、偏空紅、區間金、中性灰
+const leanClass = (l) => ({ "偏多": "l-up", "偏空": "l-dn", "區間": "l-range", "中性": "l-mut" }[l] || "l-mut")
 
-// end_date 只有日期(YYYY-MM-DD),補 00:00:00 成標準時間格式呈現
-function fmtTime(d) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? d + " 00:00:00" : (d || "—")
-}
-// 把英文市場名整理成看得懂的短標題;認不得的(如非幣市場)就保留原文
 const COIN = { bitcoin: "BTC", ethereum: "ETH", solana: "SOL", ripple: "XRP", xrp: "XRP", dogecoin: "DOGE", cardano: "ADA", avalanche: "AVAX", chainlink: "LINK", polkadot: "DOT", litecoin: "LTC", "binance coin": "BNB", bnb: "BNB" }
 function prettyTitle(t) {
   if (!t) return t
-  const low = t.toLowerCase()
-  let sym = null
+  const low = t.toLowerCase(); let sym = null
   for (const k in COIN) if (low.includes(k)) { sym = COIN[k]; break }
   if (/up or down/i.test(t)) return (sym || "?") + " 短線漲跌"
-  const m = t.match(/\$[\d,]+(?:\.\d+)?[KMB]?(?![A-Za-z])/i) // 價位;避免吃到後面單字的字母
+  const m = t.match(/\$[\d,]+(?:\.\d+)?[KMB]?(?![A-Za-z])/i)
   if (sym && m) {
     if (/\b(dip|drop|fall|below|under)\b/i.test(t)) return `${sym} 會跌到 ${m[0]}?`
     if (/\b(reach|hit|hits|above|exceed|over)\b/i.test(t)) return `${sym} 會漲到 ${m[0]}?`
   }
   return t
 }
-const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉弱": "v-bad", "資料不足": "v-mut", "觀察中": "v-mut" }
 </script>
 
 <template>
   <section>
     <div class="mk-head">
-      <h2>跟單篩選 <span class="ps-tag">Polymarket · CRYPTO</span>
-        <span class="help" tabindex="0">?<span class="help-pop">自動抓 CRYPTO 排行榜<b>當前前 10 名</b>,比對 DAY/WEEK/MONTH/ALL 四區間損益做<b>一致性判定</b>(長期穩定 vs 短期爆發)。點名字看那個錢包<b>目前的預測市場持倉</b>(押哪個市場、方向、進場價、損益)。<br>⚠️ 純資訊呈現,<b>非投資建議、跟單風險自負</b>。</span></span>
+      <h2>跟單篩選 · 聰明錢共識
+        <span class="help" tabindex="0">?<span class="help-pop">每小時由 AI 彙整 Polymarket CRYPTO 排行榜<b>前 20 名交易者目前的持倉</b>,判讀他們「現在覺得市場會怎麼走」:<b>上方=整體大綱與信心,下方=每個人的個別看法</b>(點開看佐證倉位)。<br>重點是<b>方向與看法</b>而非進場價 —— 等看到倉,現價常已貼近結算、跟進沒空間。<br>⚠️ 純資訊,<b>非投資建議、跟單風險自負</b>。</span></span>
       </h2>
-      <button class="ps-refresh" :disabled="loading" @click="load">{{ loading ? '更新中…' : '↻ 重新整理' }}</button>
+      <div class="pc-head-r">
+        <span v-if="d && d.updated_at" class="mk-count">{{ d.source }} · {{ d.updated_at }}</span>
+        <button class="ps-refresh" :disabled="loading" @click="load">{{ loading ? '…' : '↻' }}</button>
+      </div>
+    </div>
+
+    <div class="wl-admin">
+      <label class="wl-toggle"><input type="checkbox" :checked="pushOn" @change="togglePush" /> 聰明錢共識推播<small>{{ pushOn ? '(已開啟)' : '(預設關閉)' }}</small></label>
+      <span class="wl-adnote">每小時彙整更新時推播整體大綱</span>
     </div>
 
     <p v-if="err" class="ps-err">✕ {{ err }}</p>
-    <p v-else-if="loading && !rows.length" class="loading">載入排行榜與持倉中…（約需數秒）</p>
+    <p v-else-if="loading && !d" class="loading">載入中…</p>
+    <p v-else-if="seeding" class="loading">AI 正在彙整前 20 名的看法,首份約在啟動後一分鐘內產生,稍候重新整理…</p>
 
-    <!-- 標籤切換人:綠點=有公開持倉;點名字切換,下方只顯示這一位 -->
-    <div v-if="rows.length" class="wl-picker">
-      <button v-for="r in ordered" :key="r.wallet" class="wl-pill" :class="{ on: sel && sel.wallet === r.wallet, live: hasPos(r) }" @click="selected = r.wallet">
-        <i v-if="hasPos(r)" class="wl-dot"></i>{{ nameOf(r) }}
-      </button>
+    <!-- 整體大綱 -->
+    <div v-if="d && d.summary" class="pc-overall">
+      <div class="pc-badges">
+        <span class="pc-lean" :class="leanClass(d.lean)">整體 {{ d.lean || '—' }}</span>
+        <span class="pc-conf">信心 <b>{{ d.confidence || '—' }}</b></span>
+      </div>
+      <p class="pc-summary">{{ d.summary }}</p>
     </div>
 
-    <div v-if="sel" class="wl-card">
-      <div class="wl-top">
-        <div class="wl-who">
-          <span class="wl-name">{{ nameOf(sel) }}<span class="ps-v" :class="vclass[sel.verdict]">{{ sel.verdict }}</span></span>
-          <a class="wl-note" :href="'https://polymarket.com/profile/' + sel.wallet" target="_blank" rel="noopener">{{ sel.wallet.slice(0, 10) }}…{{ sel.wallet.slice(-6) }} ↗</a>
-        </div>
-        <div class="ps-stats">
-          <span><i>ALL</i><b :class="sel.all_pnl >= 0 ? 'up' : 'dn'">{{ fmtUsd(sel.all_pnl) }}</b></span>
-          <span><i>MONTH</i><b :class="sel.month_pnl >= 0 ? 'up' : 'dn'">{{ fmtUsd(sel.month_pnl) }}</b></span>
-          <span><i>獲利區間</i><b>{{ sel.profitable_count }}/4</b></span>
-          <span><i>近期佔比</i><b>{{ sel.all_pnl > 0 ? (sel.recent_share * 100).toFixed(0) + '%' : '—' }}</b></span>
+    <!-- 前 20 名個別看法 -->
+    <template v-if="views.length">
+      <h3 class="psub">前 {{ views.length }} 名 · 個別看法<span class="wl-sub">點一列展開佐證倉位</span></h3>
+      <div class="pc-list">
+        <div v-for="(v, i) in views" :key="v.wallet" class="pc-item">
+          <div class="pc-row" :class="{ open: open === v.wallet }" @click="toggle(v.wallet)">
+            <span class="pc-idx">{{ i + 1 }}</span>
+            <span class="pc-name">{{ nameOf(v) }}</span>
+            <span class="ps-v" :class="vclass[v.verdict]">{{ v.verdict }}</span>
+            <span class="pc-leanchip" :class="leanClass(v.lean)">{{ v.lean || '—' }}</span>
+            <span class="pc-view">{{ v.view || '—' }}</span>
+            <span class="pc-caret">{{ (v.positions && v.positions.length) ? (open === v.wallet ? '▲' : '▼ ' + v.positions.length) : '' }}</span>
+          </div>
+          <div v-if="open === v.wallet && v.positions && v.positions.length" class="tblwrap">
+            <table class="grid pc-pos">
+              <thead><tr><th>市場</th><th>到期</th><th>方向</th><th class="r">部位</th><th class="r">現價</th><th class="r">損益</th></tr></thead>
+              <tbody>
+                <tr v-for="(p, j) in v.positions" :key="j">
+                  <td class="pc-mkt"><img v-if="p.icon" :src="p.icon" class="pc-icon" alt="" /><span :title="p.title">{{ prettyTitle(p.title) }}</span></td>
+                  <td class="pc-date mono tsmall">{{ fmtTime(p.end_date) }}</td>
+                  <td><span class="dir" :class="/^(yes|up|long)$/i.test(p.outcome) ? 'short' : 'long'">{{ p.outcome }}</span></td>
+                  <td class="r mono">{{ fmtUsd(p.cur_value) }}</td>
+                  <td class="r mono tsmall">{{ cents(p.cur_price) }}</td>
+                  <td class="r mono" :class="p.cash_pnl >= 0 ? 'short' : 'long'">{{ fmtUsd(p.cash_pnl) }} <small>{{ pct(p.percent_pnl) }}</small></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <p v-if="(sel.reasons || []).length" class="ps-reasons">{{ (sel.reasons || []).join('；') }}</p>
+    </template>
 
-      <div v-if="hasPos(sel)" class="tblwrap">
-        <table class="grid ps-pos">
-          <thead><tr><th>市場</th><th>到期</th><th>方向</th><th class="r">部位</th><th class="r">進場</th><th class="r">現價</th><th class="r">損益</th></tr></thead>
-          <tbody>
-            <tr v-for="(p, i) in sel.positions" :key="i">
-              <td class="ps-mkt"><img v-if="p.icon" :src="p.icon" class="ps-icon" alt="" /><span :title="p.title">{{ prettyTitle(p.title) }}</span></td>
-              <td class="ps-date mono tsmall">{{ fmtTime(p.end_date) }}</td>
-              <td><span class="dir" :class="/^(yes|up|long)$/i.test(p.outcome) ? 'short' : 'long'">{{ p.outcome }}</span></td>
-              <td class="r mono">{{ fmtUsd(p.cur_value) }}</td>
-              <td class="r mono tsmall">{{ cents(p.avg_price) }}</td>
-              <td class="r mono tsmall">{{ cents(p.cur_price) }}</td>
-              <td class="r mono" :class="p.cash_pnl >= 0 ? 'short' : 'long'">{{ fmtUsd(p.cash_pnl) }} <small>{{ pct(p.percent_pnl) }}</small></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else class="wl-empty">目前無公開持倉（可能已結算、或倉位不在 Polymarket）</p>
-    </div>
-
-    <p class="ps-note">⚠️ 僅供研究,非投資建議。價格單位為「分」(Polymarket 每股 0~1 美元)。</p>
+    <p class="ps-note">⚠️ 僅供研究,非投資建議。方向由 AI 依公開倉位判讀,可能有誤;價格單位為「分」(每股 0~1 美元)。</p>
   </section>
 </template>
 
 <style scoped>
 /* 本站無 CSS 變數,全部實色(對齊 App.vue:金 #e8b84b、綠 #2ec26b、紅 #ff5c5c) */
-.ps-tag { margin-left: 8px; font-size: 11px; font-weight: 700; color: #e8b84b; background: rgba(232,184,75,.13); border: 1px solid #4a412a; border-radius: 6px; padding: 2px 7px; vertical-align: middle; }
-.ps-refresh { background: #1b1e25; color: #cdd0d6; border: 1px solid #23262d; border-radius: 8px; padding: 6px 13px; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.mk-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.pc-head-r { display: flex; align-items: center; gap: 10px; }
+.mk-count { font-size: 11px; color: #6a6f7a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ps-refresh { background: #1b1e25; color: #cdd0d6; border: 1px solid #23262d; border-radius: 8px; padding: 5px 11px; font-weight: 700; font-size: 13px; cursor: pointer; }
 .ps-refresh:disabled { opacity: .55; cursor: default; }
+.wl-admin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #0f1116; border: 1px solid #23262d; border-radius: 10px; padding: 9px 14px; margin: 10px 0 14px; }
+.wl-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: #e8eaed; cursor: pointer; }
+.wl-toggle small { color: #8b909a; font-weight: 400; }
+.wl-adnote { font-size: 11px; color: #6a6f7a; }
 .ps-err { font-size: 13px; color: #ff5c5c; background: #241419; border: 1px solid #4a2027; border-radius: 8px; padding: 10px 12px; }
 .loading { font-size: 13px; color: #8b909a; padding: 16px 4px; }
-/* 標籤切換人 */
-.wl-picker { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
-.wl-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
-  color: #8b909a; background: #1b1e25; border: 1px solid #23262d; border-radius: 20px; padding: 5px 13px; transition: all .12s; }
-.wl-pill:hover { color: #e8eaed; border-color: #33383f; }
-.wl-pill.live { color: #cdd0d6; }
-.wl-pill.on { background: rgba(232,184,75,.14); border-color: #e8b84b; color: #e8b84b; font-weight: 800; }
-.wl-dot { width: 7px; height: 7px; border-radius: 50%; background: #2ec26b; box-shadow: 0 0 6px rgba(46,194,107,.7); flex: 0 0 auto; }
-.wl-card { background: #14161b; border: 1px solid #23262d; border-radius: 14px; padding: 14px 16px; min-width: 0; }
-.wl-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.wl-who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.wl-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; color: #e8b84b; }
-.wl-note { font-size: 11px; color: #8b909a; text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.wl-note:hover { color: #e8b84b; }
-.ps-v { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 8px; }
-.v-good { color: #2ec26b; background: #10261c; }
-.v-warn { color: #e8b84b; background: rgba(232,184,75,.12); }
-.v-bad { color: #ff5c5c; background: #241419; }
-.v-mut { color: #8b909a; background: #1b1e25; }
-.ps-stats { display: flex; gap: 16px; flex-wrap: wrap; text-align: right; }
-.ps-stats span { display: flex; flex-direction: column; }
-.ps-stats i { font-size: 10.5px; color: #6a6f7a; font-style: normal; }
-.ps-stats b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: #e8eaed; }
-.ps-reasons { font-size: 12px; color: #8b909a; margin: 0 0 12px; }
+/* 整體大綱 */
+.pc-overall { background: #14161b; border: 1px solid #23262d; border-left: 3px solid #e8b84b; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+.pc-badges { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.pc-lean { font-size: 14px; font-weight: 800; border-radius: 7px; padding: 3px 12px; }
+.pc-conf { font-size: 12px; color: #8b909a; } .pc-conf b { color: #e8eaed; font-size: 13px; }
+.pc-summary { font-size: 14px; line-height: 1.7; color: #e8eaed; margin: 0; white-space: pre-wrap; }
+.l-up { color: #2ec26b; background: #10261c; } .l-dn { color: #ff5c5c; background: #241419; }
+.l-range { color: #e8b84b; background: rgba(232,184,75,.12); } .l-mut { color: #8b909a; background: #1b1e25; }
+/* 個別列表 */
+.psub { margin: 0 0 10px; } .wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: #6a6f7a; }
+.pc-list { display: flex; flex-direction: column; gap: 6px; }
+.pc-item { background: #14161b; border: 1px solid #23262d; border-radius: 10px; overflow: hidden; }
+.pc-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; }
+.pc-row:hover { background: #191c22; }
+.pc-row.open { background: #191c22; border-bottom: 1px solid #23262d; }
+.pc-idx { font-size: 11px; color: #6a6f7a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; width: 20px; flex: 0 0 auto; text-align: right; }
+.pc-name { font-weight: 700; color: #e8eaed; font-size: 13.5px; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; }
+.ps-v { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex: 0 0 auto; }
+.v-good { color: #2ec26b; background: #10261c; } .v-warn { color: #e8b84b; background: rgba(232,184,75,.12); }
+.v-bad { color: #ff5c5c; background: #241419; } .v-mut { color: #8b909a; background: #1b1e25; }
+.pc-leanchip { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 8px; white-space: nowrap; flex: 0 0 auto; }
+.pc-view { font-size: 13px; color: #cdd0d6; flex: 1 1 auto; min-width: 0; }
+.pc-caret { font-size: 11px; color: #8b909a; white-space: nowrap; flex: 0 0 auto; }
+.tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; padding: 4px 12px 10px; }
+.pc-pos { width: 100%; min-width: 560px; }
+.pc-pos .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pc-pos th, .pc-pos td { white-space: nowrap; }
+.pc-mkt { white-space: normal; min-width: 170px; max-width: 290px; display: flex; align-items: center; gap: 7px; color: #e8eaed; }
+.pc-icon { width: 18px; height: 18px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+.pc-date { color: #8b909a; }
+.pc-pos small { color: #6a6f7a; font-size: 10.5px; }
 .up { color: #2ec26b; } .dn { color: #ff5c5c; }
-.tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
-.ps-pos { width: 100%; min-width: 680px; }
-.ps-pos .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.ps-pos th, .ps-pos td { white-space: nowrap; }
-.ps-mkt { white-space: normal; min-width: 180px; max-width: 300px; display: flex; align-items: center; gap: 7px; color: #e8eaed; }
-.ps-date { color: #8b909a; }
-.ps-icon { width: 18px; height: 18px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
-.ps-pos small { color: #6a6f7a; font-size: 10.5px; }
-.wl-empty { font-size: 13px; color: #8b909a; padding: 14px 4px; margin: 0; }
-.ps-note { font-size: 11px; color: #6a6f7a; margin: 12px 0 0; }
+.ps-note { font-size: 11px; color: #6a6f7a; margin: 14px 0 0; }
+/* 窄螢幕:個別列自動換行,不擠爆 */
+@media (max-width: 640px) {
+  .pc-row { flex-wrap: wrap; }
+  .pc-view { flex-basis: 100%; order: 5; }
+}
 </style>

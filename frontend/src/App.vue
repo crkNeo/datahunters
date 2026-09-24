@@ -2130,7 +2130,7 @@ watch([role, tabPerms, authReady], () => {
     </section>
 
     <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->
-    <PolyscoutBoard v-else-if="mainTab === 'polyscout' && canTab('polyscout')" />
+    <PolyscoutBoard v-else-if="mainTab === 'polyscout' && canTab('polyscout')" @toast="(m) => showToast(m)" />
 
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
       <div class="mk-head">

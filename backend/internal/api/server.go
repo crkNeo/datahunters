@@ -12,7 +12,6 @@ import (
 
 	"datahunter/internal/auth"
 	"datahunter/internal/cache"
-	"datahunter/internal/polymarket"
 )
 
 type Server struct {
@@ -146,7 +145,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
 	mux.HandleFunc("/api/admin/strat-config", s.gate(A, s.handleStratConfig))     // 策略設定(類型/風控/止損上限/保本/分批)
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
-	mux.HandleFunc("/api/admin/polyscout", s.gate(A, s.handlePolyscout))          // Polymarket CRYPTO 跟單篩選(一致性)
+	mux.HandleFunc("/api/admin/polyscout", s.gate(A, s.handlePolyscout))          // 跟單篩選 · 聰明錢共識(AI 彙整前 20 名)
+	mux.HandleFunc("/api/admin/polyscout-push", s.gate(A, s.handlePolyscoutPush)) // 共識推播開關(預設關閉)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                         // 冥王星 (動態ATR均線收斂 4H)
@@ -618,19 +618,22 @@ func (s *Server) handleWhalePush(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"on": s.store.WhalePushEnabled()})
 }
 
-// handlePolyscout 跑 Polymarket CRYPTO 排行榜前 N 名的跨區間一致性篩選(admin)。
-// ⚠️ Polymarket 對美國 IP 封鎖,若後端所在網路連不到會回 502。
+// handlePolyscout 回傳「聰明錢共識」彙整(admin):每小時由 PolyConsensusTick 用 AI
+// 產生的前 20 名個別看法 + 整體大綱,這裡只讀快取。首份未產出前回空(前端顯示產生中)。
 func (s *Server) handlePolyscout(w http.ResponseWriter, r *http.Request) {
-	limit := 20
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 50 {
-		limit = n
+	writeJSON(w, s.store.PolyConsensusBoard())
+}
+
+// handlePolyscoutPush 讀(GET)或設定(POST {on:bool})聰明錢共識推播開關(預設關閉)。
+func (s *Server) handlePolyscoutPush(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			On bool `json:"on"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		s.store.SetPolyPush(body.On)
 	}
-	reps, err := polymarket.Screen(limit)
-	if err != nil {
-		http.Error(w, "polymarket 連線失敗(可能被地區封鎖):"+err.Error(), http.StatusBadGateway)
-		return
-	}
-	writeJSON(w, map[string]any{"reports": reps})
+	writeJSON(w, map[string]any{"on": s.store.PolyPushEnabled()})
 }
 
 // ---- 推薦系統 ----

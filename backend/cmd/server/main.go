@@ -333,6 +333,17 @@ func main() {
 		}
 	}()
 
+	// 跟單篩選 · 聰明錢共識:每小時用 AI 彙整 Polymarket 前 20 名交易者的看法 + 整體大綱。
+	// 獨立 goroutine —— 要先抓 Polymarket 倉位(較慢),不擋大盤分析;內部自我閘門到每小時。
+	go func() {
+		time.Sleep(30 * time.Second) // 等網路/AI 就緒
+		store.PolyConsensusTick()    // 首份 seed(顯示、不推播)
+		ticker := time.NewTicker(60 * time.Second)
+		for range ticker.C {
+			store.PolyConsensusTick()
+		}
+	}()
+
 	srv := api.NewServer(store, secret)
 
 	// one process serves everything: the frontend SPA plus /api and /uploads.
