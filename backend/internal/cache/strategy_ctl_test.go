@@ -20,11 +20,11 @@ func TestStratDefaultsMirrorCode(t *testing.T) {
 		a, b  float64 // split 位置
 		w1    float64 // TP1 平倉比例
 	}{
-		{"gamble", 12, "split", 40, 70, 40},   // FILTER@12% + tpMomentum
-		{"main", 0, "split", 40, 70, 40},      // tpMomentum
-		{"conv", 0, "split", 40, 70, 40},      // tpMomentum(原本寫死在 convergence.go)
-		{"meanrev", 10, "split", 45, 60, 60}, // tpMeanRevFront(K棒重播調校)
-		{"bollema", 0, "single", 0, 0, 0},    // 單段 + 保本位提示
+		{"gamble", 12, "split", 40, 70, 40}, // FILTER@12% + tpMomentum
+		{"main", 0, "split", 40, 70, 40},    // tpMomentum
+		{"conv", 0, "split", 40, 70, 40},    // tpMomentum(原本寫死在 convergence.go)
+		{"pulsar", 0, "split", 50, 75, 40},  // 爆量觀察書(靜默)
+		{"bollema", 0, "single", 0, 0, 0},   // 單段 + 保本位提示
 	} {
 		got := s.StratConfigOf(tc.name)
 		if got.MaxSLPct != tc.maxSL {
@@ -40,7 +40,7 @@ func TestStratDefaultsMirrorCode(t *testing.T) {
 	}
 }
 
-// 預設值必須真的還原出與 multitp.go 三組 preset 相同的計畫,否則「沒動過的策略
+// 預設值必須真的還原出與 multitp.go preset 相同的計畫,否則「沒動過的策略
 // 行為不變」這個保證就是空的。
 func TestDefaultsReproducePresetPlans(t *testing.T) {
 	s := newCfgStore()
@@ -49,7 +49,6 @@ func TestDefaultsReproducePresetPlans(t *testing.T) {
 		want *tpPlan
 	}{
 		{"gamble", tpMomentum},
-		{"meanrev", tpMeanRevFront},
 	} {
 		got, be := s.tpFor(tc.name, tc.want)
 		if !be {
@@ -70,8 +69,8 @@ func TestDefaultsReproducePresetPlans(t *testing.T) {
 // 分批比例沒加到 100 時要正規化,不能讓倉位算超過或不足。
 func TestSplitWeightsNormalised(t *testing.T) {
 	s := newCfgStore()
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 50, SplitW2: 50, SplitW3: 50})
-	p, _ := s.tpFor("meanrev", nil)
+	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 50, SplitW2: 50, SplitW3: 50})
+	p, _ := s.tpFor("gamble", nil)
 	if sum := p.w1 + p.w2 + p.w3; sum < 0.999 || sum > 1.001 {
 		t.Errorf("weights sum to %v, want 1", sum)
 	}
@@ -80,16 +79,16 @@ func TestSplitWeightsNormalised(t *testing.T) {
 // 出場模式互斥:非 split 模式不得回傳分段計畫。
 func TestExitModesAreExclusive(t *testing.T) {
 	s := newCfgStore()
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05})
-	if p, be := s.tpFor("meanrev", tpMeanRevFront); p != nil || be {
+	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05})
+	if p, be := s.tpFor("gamble", tpMomentum); p != nil || be {
 		t.Errorf("breakeven 模式仍回傳分段計畫: plan=%v be=%v", p, be)
 	}
-	if at, buf := s.beFor("meanrev"); at != 0.5 || buf != 0.0005 {
+	if at, buf := s.beFor("gamble"); at != 0.5 || buf != 0.0005 {
 		t.Errorf("beFor = %v/%v, want 0.5/0.0005", at, buf)
 	}
 	// split 模式不應該有獨立保本觸發
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15, BeAtPct: 50})
-	if at, _ := s.beFor("meanrev"); at != 0 {
+	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15, BeAtPct: 50})
+	if at, _ := s.beFor("gamble"); at != 0 {
 		t.Errorf("split 模式不該有獨立保本觸發,得到 %v", at)
 	}
 }
@@ -97,8 +96,8 @@ func TestExitModesAreExclusive(t *testing.T) {
 // TP2 必須在 TP1 之後,否則分段會退化成單段。
 func TestSplitOrderingEnforced(t *testing.T) {
 	s := newCfgStore()
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "split", SplitA: 60, SplitB: 30, SplitW1: 50, SplitW2: 30, SplitW3: 20})
-	if got := s.StratConfigOf("meanrev"); got.SplitB <= got.SplitA {
+	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "split", SplitA: 60, SplitB: 30, SplitW1: 50, SplitW2: 30, SplitW3: 20})
+	if got := s.StratConfigOf("gamble"); got.SplitB <= got.SplitA {
 		t.Errorf("SplitB=%v 未被修正到 SplitA=%v 之後", got.SplitB, got.SplitA)
 	}
 }
@@ -120,16 +119,16 @@ func TestEveryStrategyIsFullyRegistered(t *testing.T) {
 // stratMaxSL falls back to the book's own value until an admin override exists.
 func TestStratMaxSLOverride(t *testing.T) {
 	s := newCfgStore()
-	if got := s.stratMaxSL("meanrev", 10); got != 10 {
+	if got := s.stratMaxSL("gamble", 10); got != 10 {
 		t.Fatalf("no override: got %v, want book default 10", got)
 	}
-	s.SetStrategyConfig("meanrev", StratCfg{MaxSLPct: 6, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15})
-	if got := s.stratMaxSL("meanrev", 10); got != 6 {
+	s.SetStrategyConfig("gamble", StratCfg{MaxSLPct: 6, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15})
+	if got := s.stratMaxSL("gamble", 10); got != 6 {
 		t.Fatalf("after override: got %v, want 6", got)
 	}
 	// 0 means "no cap" and must override a non-zero book default, not fall back.
-	s.SetStrategyConfig("meanrev", StratCfg{MaxSLPct: 0, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15})
-	if got := s.stratMaxSL("meanrev", 10); got != 0 {
+	s.SetStrategyConfig("gamble", StratCfg{MaxSLPct: 0, ExitMode: "split", SplitA: 45, SplitB: 60, SplitW1: 60, SplitW2: 25, SplitW3: 15})
+	if got := s.stratMaxSL("gamble", 10); got != 0 {
 		t.Fatalf("explicit 0: got %v, want 0 (no cap)", got)
 	}
 }
@@ -140,8 +139,8 @@ func TestNotifyToggles(t *testing.T) {
 	if !s.notifyOn("gamble", "open") || !s.notifyOn("gamble", "tp") {
 		t.Error("gamble 預設應開啟開倉/止盈通知")
 	}
-	if s.notifyOn("meanrev", "open") {
-		t.Error("meanrev 預設不該發開倉通知(管理員觀察書)")
+	if s.notifyOn("pulsar", "open") {
+		t.Error("pulsar 預設不該發開倉通知(管理員觀察書)")
 	}
 	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "single", NotifyClose: true})
 	if s.notifyOn("gamble", "open") || !s.notifyOn("gamble", "close") {
@@ -219,17 +218,17 @@ func TestApplyBreakeven(t *testing.T) {
 // 切換到保本/單段模式時,分段設定必須保留 —— 否則切回分批會拿到壞掉的 1/1。
 func TestSwitchingModeKeepsSplitSettings(t *testing.T) {
 	s := newCfgStore()
-	base := s.StratConfigOf("meanrev") // 45/60、60/25/15
+	base := s.StratConfigOf("pulsar") // 50/75、40/30/30
 	// 模擬前端切到保本模式:只送保本相關欄位,不送分段參數
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05, MaxSLPct: 10})
-	got := s.StratConfigOf("meanrev")
+	s.SetStrategyConfig("pulsar", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05, MaxSLPct: 10})
+	got := s.StratConfigOf("pulsar")
 	if got.SplitA != base.SplitA || got.SplitB != base.SplitB || got.SplitW1 != base.SplitW1 {
 		t.Errorf("切到保本後分段設定被清掉: %v/%v w1=%v,原本 %v/%v w1=%v",
 			got.SplitA, got.SplitB, got.SplitW1, base.SplitA, base.SplitB, base.SplitW1)
 	}
 	// 切回分批應該還是原本那組
-	s.SetStrategyConfig("meanrev", StratCfg{ExitMode: "split", MaxSLPct: 10})
-	if p, _ := s.tpFor("meanrev", nil); p == nil || p.a != base.SplitA/100 || p.b != base.SplitB/100 {
+	s.SetStrategyConfig("pulsar", StratCfg{ExitMode: "split", MaxSLPct: 10})
+	if p, _ := s.tpFor("pulsar", nil); p == nil || p.a != base.SplitA/100 || p.b != base.SplitB/100 {
 		t.Errorf("切回分批後計畫不正確: %+v", p)
 	}
 }
@@ -240,15 +239,15 @@ func TestManualExitAlwaysNotifies(t *testing.T) {
 	s := &Store{stratCfg: map[string]StratCfg{}, tabPerms: map[string]string{}, notifier: nil}
 	tr := &PaperTrade{Coin: "BTC", Dir: "long", Entry: 100, Cur: 101, PnLPct: 1, Outcome: "momdead", OpenTime: time.Now()}
 
-	// meanrev 預設 NotifyClose=false → 自動平倉不通知
-	if s.notifyOn("meanrev", "close") {
-		t.Fatal("前提錯了:meanrev 預設應該是不發平倉通知")
+	// pulsar 預設 NotifyClose=false → 自動平倉不通知
+	if s.notifyOn("pulsar", "close") {
+		t.Fatal("前提錯了:pulsar 預設應該是不發平倉通知")
 	}
-	if s.notifyCloseBook("meanrev", tr, time.Now(), false) {
+	if s.notifyCloseBook("pulsar", tr, time.Now(), false) {
 		t.Error("自動平倉不該通知(開關是關的)")
 	}
 	// 手動出場 force=true → 一律通知
-	if !s.notifyCloseBook("meanrev", tr, time.Now(), true) {
+	if !s.notifyCloseBook("pulsar", tr, time.Now(), true) {
 		t.Error("手動出場沒有發通知")
 	}
 	// 多週期分腿(orderblock_4h)要能解析回主 key,不能因為查不到設定而漏發
