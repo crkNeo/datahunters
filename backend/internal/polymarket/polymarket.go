@@ -7,9 +7,11 @@
 package polymarket
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -22,7 +24,24 @@ const base = "https://data-api.polymarket.com"
 
 var periods = []string{"DAY", "WEEK", "MONTH", "ALL"}
 
-var client = &http.Client{Timeout: 15 * time.Second}
+// 台灣部分 ISP 依苗栗地院命令把 data-api.polymarket.com 的 DNS 投毒成封鎖頁
+// (182.173.0.181),但真實 IP(Cloudflare)其實可達。所以這裡自帶解析器走公共 DNS
+// (1.1.1.1),繞過被投毒的 ISP resolver,不必要求使用者去改作業系統 DNS。
+// ponytail: 硬指定 1.1.1.1:53;哪天連 port 53 都被攔再改走 DoH。
+var client = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 8 * time.Second,
+			Resolver: &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+					return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, "1.1.1.1:53")
+				},
+			},
+		}).DialContext,
+	},
+}
 
 // Thresholds 集中所有判定門檻(PLAN §3.3),不寫死在邏輯裡。
 type Thresholds struct {
@@ -145,29 +164,6 @@ func snip(b []byte) string {
 	return string(b)
 }
 
-// Leaderboard 回加密貨幣類 MONTH 排行榜前 limit 名(候選清單)。
-func Leaderboard(limit int) ([]row, error) {
-	q := url.Values{"category": {"CRYPTO"}, "timePeriod": {"MONTH"}, "limit": {itoa(limit)}}
-	return fetchLeaderboard(q)
-}
-
-// Windows 查一個錢包在四個時間區間的成績(每個錢包 4 次請求)。
-func Windows(wallet string) map[string]Window {
-	out := map[string]Window{}
-	for _, p := range periods {
-		w := Window{Period: p}
-		q := url.Values{"category": {"CRYPTO"}, "timePeriod": {p}, "user": {wallet}}
-		rows, err := fetchLeaderboard(q)
-		if err == nil && len(rows) > 0 {
-			r := rows[0]
-			w.Rank, w.PnL, w.Vol, w.HasData = r.Rank, r.PnL, r.Vol, true
-		}
-		out[p] = w
-		time.Sleep(120 * time.Millisecond) // 禮貌間隔
-	}
-	return out
-}
-
 // Assess 是純函式:輸入四區間成績 → 一致性判定(PLAN §3.2/3.3)。不發 HTTP,方便測試。
 func Assess(wallet, name string, w map[string]Window, th Thresholds) Report {
 	all, month := w["ALL"], w["MONTH"]
@@ -185,21 +181,23 @@ func Assess(wallet, name string, w map[string]Window, th Thresholds) Report {
 			}
 		}
 	}
-	if all.PnL != 0 {
+	if all.PnL > 0 {
+		// 只有 ALL 為正才有「近期佔比」意義;ALL≤0 時 month/all 會爆成天文數字或負值。
 		rep.RecentShare = month.PnL / all.PnL
 	}
 
 	switch {
-	case all.Vol < th.MinAllVol || dataWindows < th.MinWindows:
+	case dataWindows < th.MinWindows || (all.Vol > 0 && all.Vol < th.MinAllVol):
+		// vol 常回 0(未提供),只有真的回報了低量才當資料不足,否則靠區間數判斷。
 		rep.Verdict = "資料不足"
-		rep.Reasons = append(rep.Reasons, fmt.Sprintf("有資料區間 %d 個、ALL 量 %.0f 過低", dataWindows, all.Vol))
+		rep.Reasons = append(rep.Reasons, fmt.Sprintf("有資料區間 %d 個、ALL 量 %.0f", dataWindows, all.Vol))
 	case all.PnL > 0 && month.PnL < 0:
 		rep.Verdict = "近期轉弱"
 		rep.Reasons = append(rep.Reasons, "ALL 獲利但 MONTH 轉虧")
 	case month.PnL > all.PnL || rep.RecentShare > th.RecentShareCap:
 		rep.Verdict = "短期爆發"
 		if month.PnL > all.PnL {
-			rep.Reasons = append(rep.Reasons, "MONTH > ALL(先前曾虧損)")
+			rep.Reasons = append(rep.Reasons, "MONTH 損益超過 ALL(獲利集中在近期)")
 		} else {
 			rep.Reasons = append(rep.Reasons, fmt.Sprintf("近期佔比 %.0f%% 偏高", rep.RecentShare*100))
 		}
@@ -220,30 +218,63 @@ var (
 	cachedAt time.Time
 )
 
-// Screen 掃描 CRYPTO 排行榜前 limit 名的一致性,結果快取 10 分鐘。
+// fetchWindows 查單一錢包在四個區間的成績。必須用 user= 逐區間查:MONTH 榜首常在
+// ALL 榜排到幾萬名(近期爆發、歷史平庸),整頁抓不到他,只有 user= 查得到真實跨區間值。
+func fetchWindows(wallet string) map[string]Window {
+	out := make(map[string]Window, 4)
+	for _, p := range periods {
+		w := Window{Period: p}
+		rows, err := fetchLeaderboard(url.Values{"category": {"CRYPTO"}, "timePeriod": {p}, "user": {wallet}})
+		if err == nil && len(rows) > 0 {
+			r := rows[0]
+			w.Rank, w.PnL, w.Vol, w.HasData = r.Rank, r.PnL, r.Vol, true
+		}
+		out[p] = w
+	}
+	return out
+}
+
+// Screen 掃描 CRYPTO MONTH 排行榜前 limit 名的跨區間一致性,結果快取 10 分鐘。
+// 每個候選要 4 次 user= 查詢才有正確跨區間值,序列跑會撞前端 20s 逾時,所以用
+// bounded pool 併發(限 8 條,對對方 API 友善)。ponytail: 併發數寫死 8,要更快再調。
 func Screen(limit int) ([]Report, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	if time.Since(cachedAt) < 10*time.Minute && cached != nil {
 		return cached, nil
 	}
-	lb, err := Leaderboard(limit)
+	cands, err := fetchLeaderboard(url.Values{"category": {"CRYPTO"}, "timePeriod": {"MONTH"}, "limit": {itoa(limit)}})
 	if err != nil {
 		return nil, err
 	}
 	th := Defaults()
-	out := make([]Report, 0, len(lb))
-	for _, r := range lb {
-		if r.Wallet == "" {
+	out := make([]Report, len(cands)) // 各 goroutine 只寫自己那格,無資料競爭
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i, c := range cands {
+		if c.Wallet == "" {
 			continue
 		}
-		rep := Assess(r.Wallet, r.Name, Windows(r.Wallet), th)
-		rep.Windows = nil // payload 精簡:表格用不到逐區間明細
-		out = append(out, rep)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, c row) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			rep := Assess(c.Wallet, c.Name, fetchWindows(c.Wallet), th)
+			rep.Windows = nil // payload 精簡:表格用不到逐區間明細
+			out[i] = rep
+		}(i, c)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].AllPnL > out[j].AllPnL })
-	cached, cachedAt = out, time.Now()
-	return out, nil
+	wg.Wait()
+	res := make([]Report, 0, len(out))
+	for _, r := range out {
+		if r.Wallet != "" { // 略過空錢包留下的空洞
+			res = append(res, r)
+		}
+	}
+	sort.SliceStable(res, func(i, j int) bool { return res[i].AllPnL > res[j].AllPnL })
+	cached, cachedAt = res, time.Now()
+	return res, nil
 }
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
