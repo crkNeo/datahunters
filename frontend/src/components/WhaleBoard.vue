@@ -137,45 +137,45 @@ onUnmounted(() => clearInterval(timer))
 </template>
 
 <style scoped>
-/* 本站無 CSS 變數,全部用實色(對齊 App.vue 的調色:金 #e8b84b、綠 #2ec26b、紅 #ff5c5c) */
-.wl-admin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #0f1116; border: 1px solid #23262d; border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; }
-.wl-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: #e8eaed; cursor: pointer; }
-.wl-toggle small { color: #8b909a; font-weight: 400; }
-.wl-adnote { font-size: 11px; color: #6a6f7a; }
+/* 本站無 CSS 變數,全部用實色(對齊 App.vue 的調色:金 var(--c-gold)、綠 var(--c-up)、紅 var(--c-dn)) */
+.wl-admin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; }
+.wl-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--c-txt); cursor: pointer; }
+.wl-toggle small { color: var(--c-mut); font-weight: 400; }
+.wl-adnote { font-size: 11px; color: var(--c-mut2); }
 /* 標籤切換人 */
 .wl-picker { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
 .wl-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
-  color: #8b909a; background: #1b1e25; border: 1px solid #23262d; border-radius: 20px; padding: 5px 13px; transition: all .12s; }
-.wl-pill:hover { color: #e8eaed; border-color: #33383f; }
-.wl-pill.live { color: #cdd0d6; }
-.wl-pill.on { background: rgba(232,184,75,.14); border-color: #e8b84b; color: #e8b84b; font-weight: 800; }
-.wl-dot { width: 7px; height: 7px; border-radius: 50%; background: #2ec26b; box-shadow: 0 0 6px rgba(46,194,107,.7); flex: 0 0 auto; }
-.wl-card { background: #14161b; border: 1px solid #23262d; border-radius: 14px; padding: 14px 16px; min-width: 0; }
+  color: var(--c-mut); background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: 20px; padding: 5px 13px; transition: all .12s; }
+.wl-pill:hover { color: var(--c-txt); border-color: var(--c-line2); }
+.wl-pill.live { color: var(--c-txt); }
+.wl-pill.on { background: var(--c-gold-soft); border-color: var(--c-gold); color: var(--c-gold); font-weight: 800; }
+.wl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-up); box-shadow: 0 0 6px rgba(55,214,138,.7); flex: 0 0 auto; }
+.wl-card { background: var(--c-surf); border: 1px solid var(--c-line); border-radius: 14px; padding: 14px 16px; min-width: 0; }
 .wl-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .wl-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.wl-name { font-weight: 800; font-size: 17px; color: #e8b84b; }
-.wl-note { font-size: 11px; color: #8b909a; }
+.wl-name { font-weight: 800; font-size: 17px; color: var(--c-gold); }
+.wl-note { font-size: 11px; color: var(--c-mut); }
 .wl-acct { text-align: right; white-space: nowrap; }
-.wl-acct .wl-k { display: block; font-size: 10.5px; color: #6a6f7a; }
-.wl-acct b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; color: #e8eaed; }
+.wl-acct .wl-k { display: block; font-size: 10.5px; color: var(--c-mut2); }
+.wl-acct b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; color: var(--c-txt); }
 /* 表格給 min-width,窄螢幕時在 .tblwrap 內橫向捲動,不擠壓換行 */
 .wl-pos { width: 100%; min-width: 440px; }
 .wl-pos th, .wl-pos td { white-space: nowrap; }
 .wl-pos .mono, .wl-rank .mono, .wl-lev { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.wl-danger { background: #241419; }
-.wl-liq { color: #ff5c5c; font-weight: 700; }
-.wl-lev { font-size: 11px; color: #8b909a; }
-.wl-empty { font-size: 13px; color: #8b909a; padding: 14px 4px; margin: 0; }
+.wl-danger { background: var(--c-dn-bg); }
+.wl-liq { color: var(--c-dn); font-weight: 700; }
+.wl-lev { font-size: 11px; color: var(--c-mut); }
+.wl-empty { font-size: 13px; color: var(--c-mut); padding: 14px 4px; margin: 0; }
 .tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
-.wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: #6a6f7a; }
+.wl-sub { margin-left: 10px; font-size: 11px; font-weight: 400; color: var(--c-mut2); }
 .wl-rank { width: 100%; min-width: 480px; }
 .wl-rank th, .wl-rank td { white-space: nowrap; }
-.wl-known { color: #e8b84b; font-weight: 700; }
-.wl-anon { color: #8b909a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.wl-known { color: var(--c-gold); font-weight: 700; }
+.wl-anon { color: var(--c-mut); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .wl-feed { display: flex; flex-direction: column; gap: 1px; }
-.wl-ev { display: grid; grid-template-columns: 48px 22px 1fr; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid #23262d; font-size: 12.5px; }
+.wl-ev { display: grid; grid-template-columns: 48px 22px 1fr; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--c-line); font-size: 12.5px; }
 .wl-ev:last-child { border-bottom: 0; }
-.wl-evt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #6a6f7a; }
-.wl-evtx { color: #e8eaed; cursor: pointer; }
-.wl-evtx:hover { color: #e8b84b; }
+.wl-evt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--c-mut2); }
+.wl-evtx { color: var(--c-txt); cursor: pointer; }
+.wl-evtx:hover { color: var(--c-gold); }
 </style>
