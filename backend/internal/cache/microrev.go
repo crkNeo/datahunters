@@ -885,18 +885,11 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) MeanRevTick()      { s.microTick(s.meanRevBook) }
 func (s *Store) BollEMATick()      { s.microTick(s.bollEMABook) }
 func (s *Store) PulsarTick()       { s.microTick(s.pulsarBook) }
 func (s *Store) PulsarMarkTick()   { s.microMarkTick(s.pulsarBook) }
 func (s *Store) PulsarV3Tick()     { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick() { s.microMarkTick(s.pulsarV3Book) }
-func (s *Store) PulsarV5Tick()     { s.microTick(s.pulsarV5Book) }
-func (s *Store) PulsarV5MarkTick() { s.microMarkTick(s.pulsarV5Book) }
-func (s *Store) PulsarV6Tick()     { s.microTick(s.pulsarV6Book) }
-func (s *Store) PulsarV6MarkTick() { s.microMarkTick(s.pulsarV6Book) }
-func (s *Store) PulsarV7Tick()     { s.microTick(s.pulsarV7Book) }
-func (s *Store) PulsarV7MarkTick() { s.microMarkTick(s.pulsarV7Book) }
 func (s *Store) PulsarV8Tick()     { s.microTick(s.pulsarV8Book) }
 func (s *Store) PulsarV8MarkTick() { s.microMarkTick(s.pulsarV8Book) }
 func (s *Store) SMCTick() {
@@ -920,7 +913,6 @@ func (s *Store) SMCV2MarkTick() {
 	}
 }
 
-func (s *Store) MeanRevMarkTick() { s.microMarkTick(s.meanRevBook) }
 func (s *Store) BollEMAMarkTick() { s.microMarkTick(s.bollEMABook) }
 
 // keepIf filters trades to those still open (closedOnly=true) or wipes all (false).
@@ -942,10 +934,6 @@ func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
 // unknown book.
 func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 	switch book {
-	case "meanrev":
-		s.meanRevBook.mu.Lock()
-		s.meanRevBook.trades = keepIf(s.meanRevBook.trades, closedOnly)
-		s.meanRevBook.mu.Unlock()
 	case "bollema":
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
@@ -976,18 +964,6 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV3Book.mu.Lock()
 		s.pulsarV3Book.trades = keepIf(s.pulsarV3Book.trades, closedOnly)
 		s.pulsarV3Book.mu.Unlock()
-	case "pulsarv5":
-		s.pulsarV5Book.mu.Lock()
-		s.pulsarV5Book.trades = keepIf(s.pulsarV5Book.trades, closedOnly)
-		s.pulsarV5Book.mu.Unlock()
-	case "pulsarv6":
-		s.pulsarV6Book.mu.Lock()
-		s.pulsarV6Book.trades = keepIf(s.pulsarV6Book.trades, closedOnly)
-		s.pulsarV6Book.mu.Unlock()
-	case "pulsarv7":
-		s.pulsarV7Book.mu.Lock()
-		s.pulsarV7Book.trades = keepIf(s.pulsarV7Book.trades, closedOnly)
-		s.pulsarV7Book.mu.Unlock()
 	case "pulsarv8":
 		s.pulsarV8Book.mu.Lock()
 		s.pulsarV8Book.trades = keepIf(s.pulsarV8Book.trades, closedOnly)
@@ -1040,9 +1016,6 @@ func (s *Store) retrofitMultiTP() {
 			}
 		}
 	}
-	s.meanRevBook.mu.Lock()
-	fill("meanrev", s.meanRevBook.plan, s.meanRevBook.trades)
-	s.meanRevBook.mu.Unlock()
 	s.paperMu.Lock()
 	fill("main", s.paperMain.plan, s.paperMain.trades)
 	fill("gamble", s.paperGamble.plan, s.paperGamble.trades)
@@ -1058,13 +1031,9 @@ func (s *Store) retrofitMultiTP() {
 	}
 }
 
-func (s *Store) MeanRevState() PaperState  { return s.microState(s.meanRevBook) }
 func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV3State() PaperState { return s.microState(s.pulsarV3Book) }
-func (s *Store) PulsarV5State() PaperState { return s.microState(s.pulsarV5Book) }
-func (s *Store) PulsarV6State() PaperState { return s.microState(s.pulsarV6Book) }
-func (s *Store) PulsarV7State() PaperState { return s.microState(s.pulsarV7Book) }
 func (s *Store) PulsarV8State() PaperState { return s.microState(s.pulsarV8Book) }
 func (s *Store) SMCState() PaperState      { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState    { return s.microState(s.smcV2Books...) }

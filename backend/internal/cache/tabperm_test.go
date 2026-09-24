@@ -11,8 +11,8 @@ func TestTabDefaultsMatchOldHardcodedRoles(t *testing.T) {
 	for tab, want := range map[string]string{
 		"ranking": "public", "funding": "public", "sectors": "public",
 		"oi": "member", "signals": "member", "radar": "member", "scorelog": "member",
-		"paper": "vip", "gamble": "vip", "emaonly": "vip", "conv": "vip", "sr": "vip",
-		"bollema": "admin", "meanrev": "admin",
+		"paper": "vip", "emaonly": "vip", "conv": "vip", "sr": "vip", "pulsarv3": "vip",
+		"gamble": "admin", "bollema": "admin", "polyscout": "admin", // 超新星移管理員、跟單篩選為管理員
 		"admin": "admin", "referral": "admin",
 	} {
 		if got := s.TabRole(tab); got != want {

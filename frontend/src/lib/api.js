@@ -55,6 +55,8 @@ export async function authFetch(url, opts = {}) {
       headers,
       data: opts.body,
       responseType: 'arraybuffer',
+      // 預設沿用實例的 20s;慢端點(如 polyscout 掃描)可自帶較長逾時
+      ...(opts.timeout ? { timeout: opts.timeout } : {}),
     })
   } catch (e) {
     // 連線層面的失敗(斷網/逾時)—— 照 fetch 的行為往外丟

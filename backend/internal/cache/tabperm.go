@@ -44,6 +44,7 @@ var tabMeta = []struct {
 	{"unlock", "代幣解鎖", "public", false},
 	{"sectors", "板塊強弱", "public", false},
 	{"robinhood", "Robinhood", "public", false},
+	{"whales", "名人動向", "public", false},
 	{"articles", "文章專欄", "public", false},
 	// 會員
 	{"oi", "OI 儀表板", "member", false},
@@ -52,23 +53,20 @@ var tabMeta = []struct {
 	{"scorelog", "訊號紀錄", "member", false},
 	// VIP
 	{"paper", "星軌", "vip", false},
-	{"gamble", "超新星", "vip", false},
 	{"emaonly", "銀河", "vip", false},
 	{"conv", "冥王星", "vip", false},
 	{"sr", "支撐壓力", "vip", false},
+	{"pulsarv3", "脈衝星", "vip", false}, // 由觀察書晉升 VIP,更名為「脈衝星」
 	// 策略觀察書(預設管理員,可視需要開放給 VIP)
-	{"meanrev", "火星", "admin", false},
+	{"gamble", "超新星", "admin", false},
 	{"bollema", "海王星", "admin", false},
 	{"srmtf", "反轉訊號", "admin", false},
 	{"surge", "爆量脈搏", "admin", false},
-	{"pulsar", "脈衝星", "admin", false},
-	{"pulsarv3", "脈衝星v3", "admin", false},
-	{"pulsarv5", "脈衝星v5", "admin", false},
-	{"pulsarv6", "脈衝星v6", "admin", false},
-	{"pulsarv7", "脈衝星v7", "admin", false},
+	{"pulsar", "脈衝星(舊)", "admin", false},
 	{"pulsarv8", "脈衝星v8", "admin", false},
 	{"orderblock", "訂單塊", "admin", false},
 	{"orderblockv2", "訂單塊v2", "admin", false},
+	{"polyscout", "跟單篩選", "admin", false}, // Polymarket CRYPTO 一致性篩選(管理員)
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
 	{"referral", "推廣管理", "admin", true},
@@ -82,10 +80,10 @@ var validRoles = map[string]bool{"public": true, "member": true, "vip": true, "a
 var tabDefaultKind = map[string]string{
 	"signals": "signal", "radar": "signal", "scorelog": "signal",
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
-	"meanrev": "signal", "bollema": "signal",
-	"srmtf": "signal",
-	"surge": "signal", "pulsar": "signal", "pulsarv3": "signal", "pulsarv5": "signal",
-	"pulsarv6": "signal", "pulsarv7": "signal", "pulsarv8": "signal", "orderblock": "signal", "orderblockv2": "signal",
+	"bollema": "signal",
+	"srmtf":   "signal",
+	"surge":   "signal", "pulsar": "signal", "pulsarv3": "signal",
+	"pulsarv8": "signal", "orderblock": "signal", "orderblockv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -251,11 +249,11 @@ var tabOfRoute = map[string]string{
 	"/api/oi-cache": "oi", "/api/signals": "signals", "/api/radar": "radar",
 	"/api/scorelog": "scorelog", "/api/klines": "oi",
 	"/api/paper": "paper", "/api/gamble": "gamble", "/api/ema-only": "emaonly",
-	"/api/conv": "conv", "/api/sr": "sr",
-	"/api/admin/meanrev": "meanrev", "/api/admin/bollema": "bollema",
-	"/api/srmtf":       "srmtf",
-	"/api/admin/surge": "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3", "/api/pulsarv5": "pulsarv5",
-	"/api/pulsarv6": "pulsarv6", "/api/pulsarv7": "pulsarv7", "/api/pulsarv8": "pulsarv8", "/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
+	"/api/conv": "conv", "/api/sr": "sr", "/api/whales": "whales",
+	"/api/admin/bollema": "bollema",
+	"/api/srmtf":         "srmtf",
+	"/api/admin/surge":   "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3",
+	"/api/pulsarv8": "pulsarv8", "/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

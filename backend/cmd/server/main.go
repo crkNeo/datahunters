@@ -196,6 +196,34 @@ func main() {
 		}
 	}()
 
+	// 名人動向:精選地址的 Hyperliquid 即時倉位 + 動作事件流。首抓建基準、不發事件;
+	// 之後每 45s 抓一次做 diff。推播預設關(後台可開)。
+	go func() {
+		store.WhaleTick()
+		ticker := time.NewTicker(45 * time.Second)
+		for range ticker.C {
+			store.WhaleTick()
+		}
+	}()
+
+	// 自動巨鯨排行:從 HL 排行榜取最大帳戶當候選池(每 6h 刷新),每 3 分鐘查其即時倉位
+	// 依總名目排序取前 20。開機延遲一下再抓(排行榜檔案大,別跟啟動搶頻寬)。
+	go func() {
+		time.Sleep(25 * time.Second)
+		store.RefreshWhalePool()
+		store.WhaleRankTick()
+		rank := time.NewTicker(3 * time.Minute)
+		pool := time.NewTicker(6 * time.Hour)
+		for {
+			select {
+			case <-rank.C:
+				store.WhaleRankTick()
+			case <-pool.C:
+				store.RefreshWhalePool()
+			}
+		}
+	}()
+
 	// spot-ETF daily net flow (Farside scrape) → injected into 快訊 once per new
 	// trading day. Flows update once daily after the US close; poll every 3h.
 	go func() {
@@ -222,26 +250,15 @@ func main() {
 		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.ConvMarkTick()
-			store.MeanRevMarkTick()
 			store.BollEMAMarkTick()
 			store.PulsarMarkTick()
 			store.PulsarV3MarkTick()
-			store.PulsarV5MarkTick()
-			store.PulsarV6MarkTick()
-			store.PulsarV7MarkTick()
 			store.PulsarV8MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
 	}()
 
-	go func() {
-		store.MeanRevTick()
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			store.MeanRevTick()
-		}
-	}()
 	// 布林EMA:4H 突破蓄勢(多空)。
 	go func() {
 		store.BollEMATick()
@@ -254,17 +271,11 @@ func main() {
 	go func() {
 		store.PulsarTick()
 		store.PulsarV3Tick()
-		store.PulsarV5Tick()
-		store.PulsarV6Tick()
-		store.PulsarV7Tick()
 		store.PulsarV8Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
-			store.PulsarV5Tick()
-			store.PulsarV6Tick()
-			store.PulsarV7Tick()
 			store.PulsarV8Tick()
 		}
 	}()
@@ -321,6 +332,17 @@ func main() {
 		for range ticker.C {
 			store.SectorTick()   // hourly-gated 板塊強弱/輪動 — runs before the AI so its snapshot is fresh
 			store.MarketAITick() // hourly-gated 大盤 AI 分析
+		}
+	}()
+
+	// 跟單篩選 · 聰明錢共識:每小時用 AI 彙整 Polymarket 前 20 名交易者的看法 + 整體大綱。
+	// 獨立 goroutine —— 要先抓 Polymarket 倉位(較慢),不擋大盤分析;內部自我閘門到每小時。
+	go func() {
+		time.Sleep(30 * time.Second) // 等網路/AI 就緒
+		store.PolyConsensusTick()    // 首份 seed(顯示、不推播)
+		ticker := time.NewTicker(60 * time.Second)
+		for range ticker.C {
+			store.PolyConsensusTick()
 		}
 	}()
 

@@ -114,6 +114,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/unlock", s.gateTab("unlock", s.handleUnlock))            // DefiLlama token-unlock board
 	mux.HandleFunc("/api/robinhood", s.gateTab("robinhood", s.handleRobinhood))   // Robinhood 上架 board
 	mux.HandleFunc("/api/sectors", s.gateTab("sectors", s.handleSectors))         // 板塊強弱/輪動(每整點)
+	mux.HandleFunc("/api/whales", s.gateTab("whales", s.handleWhales))            // 名人動向(Hyperliquid 即時倉位)
+	mux.HandleFunc("/api/admin/whale-push", s.gate(A, s.handleWhalePush))         // 名人動向推播開關(預設關)
 	mux.HandleFunc("/api/etf", s.gateTab("capital", s.handleETF))                 // 現貨 ETF 每日淨流(Farside)
 	mux.HandleFunc("/api/stablecoins", s.gateTab("capital", s.handleStablecoins)) // 穩定幣供給/資金流(DefiLlama)
 
@@ -148,22 +150,20 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/strat-toggle", s.gate(A, s.handleStratToggle))     // 開/關某策略進場
 	mux.HandleFunc("/api/admin/strat-config", s.gate(A, s.handleStratConfig))     // 策略設定(類型/風控/止損上限/保本/分批)
 	mux.HandleFunc("/api/admin/tab-perms", s.gate(A, s.handleAdminTabPerms))      // 各身分組可見標籤(GET 列表 / POST 修改)
+	mux.HandleFunc("/api/admin/polyscout", s.gate(A, s.handlePolyscout))          // 跟單篩選 · 聰明錢共識(AI 彙整前 20 名)
+	mux.HandleFunc("/api/admin/polyscout-push", s.gate(A, s.handlePolyscoutPush)) // 共識推播開關(預設關閉)
 	// 策略頁:角色改由「標籤權限」決定(預設 冥王星=VIP、其餘觀察書=管理員),
 	// 這樣後台可以把某一本策略開放給 VIP 而不必改程式。
 	mux.HandleFunc("/api/conv", s.gateTab("conv", s.handleConv))                         // 冥王星 (動態ATR均線收斂 4H)
 	mux.HandleFunc("/api/srmtf", s.gateTab("srmtf", s.handleSRMTF))                      // 多週期支壓 (1H+4H 提示)
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))                   // 脈衝星策略
-	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星v3 (ATR + runner)
-	mux.HandleFunc("/api/pulsarv5", s.gateTab("pulsarv5", s.handlePulsarV5))             // 脈衝星v5 (= v1, 固定% TP)
-	mux.HandleFunc("/api/pulsarv6", s.gateTab("pulsarv6", s.handlePulsarV6))             // 脈衝星v6 (v3 + 確認棒)
-	mux.HandleFunc("/api/pulsarv7", s.gateTab("pulsarv7", s.handlePulsarV7))             // 脈衝星v7 (v3 + 最小R)
+	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv8", s.gateTab("pulsarv8", s.handlePulsarV8))             // 脈衝星v8 (v7 + 更強爆量)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
 	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
-	mux.HandleFunc("/api/admin/meanrev", s.gateTab("meanrev", s.handleMeanRev))
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
 
@@ -605,9 +605,40 @@ func (s *Server) handleConv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.ConvState())
 }
 
-// handleMeanRev serves the admin-only 火星(乖離回歸 1h)strategy tracker.
-func (s *Server) handleMeanRev(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.MeanRevState())
+// handleWhales serves the 名人動向 board: watched addresses' live Hyperliquid
+// positions + a diff-based action-event feed.
+func (s *Server) handleWhales(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.WhaleBoard())
+}
+
+// handleWhalePush reads (GET) or sets (POST {on:bool}) the 名人動向 push toggle.
+func (s *Server) handleWhalePush(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			On bool `json:"on"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		s.store.SetWhalePush(body.On)
+	}
+	writeJSON(w, map[string]any{"on": s.store.WhalePushEnabled()})
+}
+
+// handlePolyscout 回傳「聰明錢共識」彙整(admin):每小時由 PolyConsensusTick 用 AI
+// 產生的前 20 名個別看法 + 整體大綱,這裡只讀快取。首份未產出前回空(前端顯示產生中)。
+func (s *Server) handlePolyscout(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PolyConsensusBoard())
+}
+
+// handlePolyscoutPush 讀(GET)或設定(POST {on:bool})聰明錢共識推播開關(預設關閉)。
+func (s *Server) handlePolyscoutPush(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			On bool `json:"on"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		s.store.SetPolyPush(body.On)
+	}
+	writeJSON(w, map[string]any{"on": s.store.PolyPushEnabled()})
 }
 
 // ---- 推薦系統 ----
@@ -731,24 +762,9 @@ func (s *Server) handlePulsar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarState())
 }
 
-// handlePulsarV3 serves the 脈衝星v3 (ATR 自適應 + 追尾 runner) tracker.
+// handlePulsarV3 serves the 脈衝星 (VIP, 原 v3: ATR 自適應 + 追尾 runner) tracker.
 func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV3State())
-}
-
-// handlePulsarV5 serves the 脈衝星v5 (= v1, 固定百分比止盈 5/10/15%) tracker.
-func (s *Server) handlePulsarV5(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV5State())
-}
-
-// handlePulsarV6 serves the 脈衝星v6 (v3 + 確認棒進場) tracker.
-func (s *Server) handlePulsarV6(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV6State())
-}
-
-// handlePulsarV7 serves the 脈衝星v7 (v3 + 最小止損距離) tracker.
-func (s *Server) handlePulsarV7(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV7State())
 }
 
 // handlePulsarV8 serves the 脈衝星v8 (v7 + 更強爆量) tracker.
