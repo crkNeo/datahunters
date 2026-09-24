@@ -1,9 +1,9 @@
 // Package polymarket screens Polymarket CRYPTO-leaderboard wallets for
-// cross-window consistency (PLAN v0.2 功能一). 功能二(closed-position 分析)、Gamma
-// 類別判定、短週期市場偵測先不做 —— 都要等真實 API 實測欄位後再加(見 PLAN §11)。
+// cross-window consistency (PLAN v0.2 功能一) 並附上各錢包目前的預測市場持倉。
+// 功能二(closed-position 分析)、Gamma 類別判定、短週期市場偵測先不做(見 PLAN §11)。
 //
-// ⚠️ Polymarket API 對美國 IP 封鎖,開發機連不到,所以欄位名/單位皆「照企劃書假設、未實測」。
-// JSON 解析刻意寬鬆(容忍多種欄位名),真正跑在能連線的機器上時再依實際回傳微調。
+// 欄位已對真實 API 實測(2026-09):/v1/leaderboard 回物件陣列、數字常為字串;
+// /positions 回持倉陣列。台灣 ISP 依法院命令封鎖此網域,client 自帶 1.1.1.1 解析繞過(見下)。
 package polymarket
 
 import (
@@ -73,6 +73,21 @@ type Report struct {
 	RecentShare     float64           `json:"recent_share"`     // MONTH pnl / ALL pnl
 	Verdict         string            `json:"verdict"`          // 長期穩定 | 短期爆發 | 近期轉弱 | 觀察中 | 資料不足
 	Reasons         []string          `json:"reasons"`
+	Positions       []Position        `json:"positions"` // 目前持倉(給名人動向式的點名看倉)
+}
+
+// Position 是一個錢包在單一預測市場的目前持倉(Polymarket /positions)。
+type Position struct {
+	Title      string  `json:"title"`       // 市場名稱
+	Outcome    string  `json:"outcome"`     // 押的方向:Yes/No/Up/Down
+	Size       float64 `json:"size"`        // 股數
+	AvgPrice   float64 `json:"avg_price"`   // 進場均價(0~1 機率)
+	CurPrice   float64 `json:"cur_price"`   // 現價
+	CurValue   float64 `json:"cur_value"`   // 目前市值(USD)
+	CashPnl    float64 `json:"cash_pnl"`    // 未實現損益(USD)
+	PercentPnl float64 `json:"percent_pnl"` // 損益 %
+	Icon       string  `json:"icon"`        // 市場圖示
+	EndDate    string  `json:"end_date"`    // 到期日
 }
 
 // row 是排行榜的一列(已抽取)。實測欄位:proxyWallet / userName / rank / pnl / vol。
@@ -234,6 +249,37 @@ func fetchWindows(wallet string) map[string]Window {
 	return out
 }
 
+// fetchPositions 抓一個錢包目前的預測市場持倉(依市值大→小,只留還有市值的活倉,
+// 過濾已結算/歸零的死倉)。認不得就回 nil,不讓單一錢包拖垮整批。
+func fetchPositions(wallet string) []Position {
+	q := url.Values{"user": {wallet}, "sortBy": {"CURRENT"}, "sortDirection": {"DESC"}, "limit": {"20"}}
+	req, _ := http.NewRequest("GET", base+"/positions?"+q.Encode(), nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var arr []map[string]any
+	if json.Unmarshal(body, &arr) != nil {
+		return nil
+	}
+	out := make([]Position, 0, len(arr))
+	for _, m := range arr {
+		cv := gf(m, "currentValue")
+		if cv <= 0 {
+			continue // 只留還有市值的活倉
+		}
+		out = append(out, Position{
+			Title: gs(m, "title"), Outcome: gs(m, "outcome"),
+			Size: gf(m, "size"), AvgPrice: gf(m, "avgPrice"), CurPrice: gf(m, "curPrice"),
+			CurValue: cv, CashPnl: gf(m, "cashPnl"), PercentPnl: gf(m, "percentPnl"),
+			Icon: gs(m, "icon"), EndDate: gs(m, "endDate"),
+		})
+	}
+	return out
+}
+
 // Screen 掃描 CRYPTO MONTH 排行榜前 limit 名的跨區間一致性,結果快取 10 分鐘。
 // 每個候選要 4 次 user= 查詢才有正確跨區間值,序列跑會撞前端 20s 逾時,所以用
 // bounded pool 併發(限 8 條,對對方 API 友善)。ponytail: 併發數寫死 8,要更快再調。
@@ -262,6 +308,7 @@ func Screen(limit int) ([]Report, error) {
 			defer func() { <-sem }()
 			rep := Assess(c.Wallet, c.Name, fetchWindows(c.Wallet), th)
 			rep.Windows = nil // payload 精簡:表格用不到逐區間明細
+			rep.Positions = fetchPositions(c.Wallet)
 			out[i] = rep
 		}(i, c)
 	}
