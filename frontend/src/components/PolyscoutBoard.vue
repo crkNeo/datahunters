@@ -47,7 +47,19 @@ function fmtUsd(v) {
 }
 const cents = (v) => (v * 100).toFixed(0) + "¢"
 const pct = (v) => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"
-const fmtTime = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x || "") ? x + " 00:00:00" : (x || "—")
+// 到期顯示:A+B。市場原名若含盤中時段(短線 K 棒,如「…10:30AM-10:35AM ET」),
+// 取區間「結束時刻」= 真正結算時間,顯示「日期 + 時刻 ET」;長天期市場原名沒有時刻,
+// 就只給日期(不再補假的 00:00:00)。
+function fmtExpiry(p) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(p.end_date || "") ? p.end_date : (p.end_date || "")
+  const times = (p.title || "").match(/\d{1,2}(?::\d{2})?\s*[AP]M/gi)
+  if (times && times.length) {
+    const t = times[times.length - 1].replace(/\s+/g, "").toUpperCase() // 取結束時刻,如 10:35AM
+    const et = /\bET\b/i.test(p.title) ? " ET" : ""
+    return date ? `${date} ${t}${et}` : t + et
+  }
+  return date || "—"
+}
 const vclass = { "長期穩定": "v-good", "短期爆發": "v-warn", "近期轉弱": "v-bad", "資料不足": "v-mut", "觀察中": "v-mut" }
 // 方向配色:偏多綠、偏空紅、區間金、中性灰
 const leanClass = (l) => ({ "偏多": "l-up", "偏空": "l-dn", "區間": "l-range", "中性": "l-mut" }[l] || "l-mut")
@@ -116,7 +128,7 @@ function prettyTitle(t) {
               <tbody>
                 <tr v-for="(p, j) in v.positions" :key="j">
                   <td class="pc-mkt"><img v-if="p.icon" :src="p.icon" class="pc-icon" alt="" /><span :title="p.title">{{ prettyTitle(p.title) }}</span></td>
-                  <td class="pc-date mono tsmall">{{ fmtTime(p.end_date) }}</td>
+                  <td class="pc-date mono tsmall">{{ fmtExpiry(p) }}</td>
                   <td><span class="dir" :class="/^(yes|up|long)$/i.test(p.outcome) ? 'short' : 'long'">{{ p.outcome }}</span></td>
                   <td class="r mono">{{ fmtUsd(p.cur_value) }}</td>
                   <td class="r mono tsmall">{{ cents(p.cur_price) }}</td>
