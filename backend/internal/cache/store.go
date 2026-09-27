@@ -179,10 +179,14 @@ type Store struct {
 	rhNew   map[string]int64 // code → first-seen ms (recent-listing badge)
 	rhTime  time.Time
 
-	maiW       *marketai.Client // 大盤 AI 分析 (Groq;免費、可從 VPS 用)
-	maiMu      sync.RWMutex     // guards the market-AI commentary
-	maiText    string           // latest full zh-TW analysis
-	maiSummary string           // first line (push title / one-liner)
+	maiW *marketai.Client // 大盤 AI 分析 (Groq;免費、可從 VPS 用)
+	// 脈衝星v3 進場 AI 信心分數 (pulsarai.go)。sync.Map 零值即可用,免動 NewStore:
+	// aiConf: tradeID → *pulsarAI (已算);aiBusy: tradeID → struct{}{} (計算中,去重)。
+	aiConf     sync.Map
+	aiBusy     sync.Map
+	maiMu      sync.RWMutex // guards the market-AI commentary
+	maiText    string       // latest full zh-TW analysis
+	maiSummary string       // first line (push title / one-liner)
 	maiTime    time.Time
 	maiBucket  int64     // last SUCCESSFUL hour bucket (once-per-hour gate)
 	maiRetryAt time.Time // after a failure, don't retry before this (5-min backoff)

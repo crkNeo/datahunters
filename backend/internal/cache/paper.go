@@ -70,6 +70,11 @@ type PaperTrade struct {
 	Funding    float64    `json:"funding"`            // funding rate at entry (persisted)
 	CurFunding float64    `json:"cur_funding"`        // live funding rate (transient, set at serve)
 	Momentum   string     `json:"momentum,omitempty"` // live momentum light: alive|weak|dead (transient)
+	// AI 進場參考信心 (脈衝星v3 only, transient/未持久化, set at serve; 0 = 尚未算/未啟用).
+	// 綜合「進場品質 + 5R 目標可達性」,由 marketai 依大盤/4H趨勢/上方壓力/資金費率評分。見 pulsarai.go。
+	AIScore   int      `json:"ai_score,omitempty"`
+	AITag     string   `json:"ai_tag,omitempty"`
+	AIReasons []string `json:"ai_reasons,omitempty"`
 	// 保本位 (布林EMA): price reached entry + beAt×(TP−entry) at least once. This is a
 	// CUE ONLY — the stop is NOT moved; TP/SL stay exactly as placed at entry. Latched
 	// (never un-sets) and persisted, since a 30-day hold will outlive a restart.

@@ -63,6 +63,10 @@ const hasTf = computed(() =>
 )
 const tfLabel = (tf) => (tf || '').toUpperCase()
 
+// 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
+const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
+const aiCls = (s) => (s >= 70 ? 'hi' : s >= 40 ? 'mid' : 'lo')
+
 // 進行中「狀態」欄(依 strategy.html mock:達 TP1 / 達 TP2 / 達最終 / 持倉中 / 待觸發)
 function tpStatus(t) {
   if (t.status === 'pending') return '待觸發'
@@ -116,12 +120,23 @@ function tpStatusCls(t) {
     <p v-if="state && state.open.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="state && state.open.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
+          <td v-if="hasAI">
+            <span v-if="t.ai_score" class="aichip" :class="aiCls(t.ai_score)" tabindex="0" @click.stop>
+              {{ t.ai_score }}
+              <span class="ai-pop">
+                <b>AI 參考信心 {{ t.ai_score }}<template v-if="t.ai_tag"> · {{ t.ai_tag }}</template></b>
+                <ul v-if="t.ai_reasons && t.ai_reasons.length"><li v-for="(r, i) in t.ai_reasons" :key="i">{{ r }}</li></ul>
+                <em>綜合「進場品質 + 5R 目標可達性」的 AI 參考,非勝率保證</em>
+              </span>
+            </span>
+            <span v-else class="tsmall">…</span>
+          </td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ fmtPrice(t.cur) }}</td>
           <td class="r" :class="t.status === 'pending' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
@@ -179,4 +194,14 @@ function tpStatusCls(t) {
 .stag.tp { background: var(--c-up-bg); color: var(--c-up); }
 .stag.run { background: var(--c-surf2); color: var(--c-mut); }
 .stag.pend { background: var(--c-gold-soft); color: var(--c-gold-b); }
+/* AI 參考信心 chip(脈衝星v3)。分數色階:高綠 / 中金 / 低紅。hover/focus 顯示理由。 */
+.aichip { position: relative; display: inline-block; min-width: 26px; text-align: center; font-family: var(--f-mono); font-weight: 700; font-size: 12px; border-radius: 6px; padding: 2px 7px; cursor: help; }
+.aichip.hi { background: var(--c-up-bg); color: var(--c-up); }
+.aichip.mid { background: var(--c-gold-soft); color: var(--c-gold-b); }
+.aichip.lo { background: var(--c-dn-bg); color: var(--c-dn); }
+.ai-pop { visibility: hidden; opacity: 0; position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 240px; text-align: left; background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: opacity .12s; font-weight: 400; white-space: normal; }
+.aichip:hover .ai-pop, .aichip:focus .ai-pop { visibility: visible; opacity: 1; }
+.ai-pop b { color: var(--c-txt); font-size: 12px; }
+.ai-pop ul { margin: 6px 0 4px; padding-left: 16px; color: var(--c-mut); font-size: 11.5px; line-height: 1.5; }
+.ai-pop em { display: block; margin-top: 4px; color: var(--c-mut2); font-size: 10.5px; font-style: normal; }
 </style>

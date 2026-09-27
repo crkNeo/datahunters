@@ -880,6 +880,10 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		}
 		st.Stats.Payoff = payoffOf(grossWin, grossLoss, st.Stats.Wins, st.Stats.Losses)
 	}
+	// 脈衝星v3:每個 open 進場單附上 AI 參考信心分數(pulsarai.go);其餘書不受影響。
+	if len(bs) == 1 && bs[0].name == "pulsarv3" {
+		s.attachPulsarAI(st.Open)
+	}
 	return st
 }
 
