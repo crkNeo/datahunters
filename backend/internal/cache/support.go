@@ -284,7 +284,7 @@ func (s *Store) notifySR(coin, kind string, level, price float64) {
 		emoji, title = "🚀", coin+" 突破壓力"
 		body = fmt.Sprintf("%s 1h 收盤 $%s 突破壓力 $%s", coin, fmtPx(price), fmtPx(level))
 	}
-	s.PushSend(emoji+" "+title, body, "/?tab=sr") // all subscribers
+	s.PushSendTopic("msg:sr", emoji+" "+title, body, "/?tab=sr")
 	if s.notifier.Enabled() {
 		go s.notifier.Send(fmt.Sprintf("%s <b>[支撐壓力] %s</b>\n%s", emoji, title, body))
 	}

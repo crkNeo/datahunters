@@ -51,18 +51,37 @@ type stratHist struct {
 	stats PaperStats
 }
 
-// strategyHistFull 撈某策略「全部已結束(可帶時間窗)」並算好統計,結果 15s 快取。
-func (s *Store) strategyHistFull(key string, winMs int64) *stratHist {
+// booksForTF 由策略 key + 週期篩選(""=全部)回傳要查的 book 名。多週期策略(訂單塊)
+// 選 1h/4h 時只留該週期的 book;非法/單週期 tf 時退回全部。
+func booksForTF(key, tf string) []string {
+	books := stratBooks(key)
+	if tf == "" {
+		return books
+	}
+	var out []string
+	for _, b := range books {
+		if bookTF(b) == tf {
+			out = append(out, b)
+		}
+	}
+	if len(out) == 0 {
+		return books
+	}
+	return out
+}
+
+// strategyHistFull 撈某策略「全部已結束(可帶時間窗、可帶週期)」並算好統計,結果 15s 快取。
+func (s *Store) strategyHistFull(key string, winMs int64, tf string) *stratHist {
 	if s.db == nil {
 		return &stratHist{}
 	}
-	ck := fmt.Sprintf("%s|%d", key, winMs)
+	ck := fmt.Sprintf("%s|%d|%s", key, winMs, tf)
 	v, _ := stratHistCache.get(ck, func() (any, error) {
 		var since int64
 		if winMs > 0 {
 			since = time.Now().UnixMilli() - winMs
 		}
-		all := s.db.loadClosedFiltered(stratBooks(key), since)
+		all := s.db.loadClosedFiltered(booksForTF(key, tf), since)
 		multiTP := s.StratConfigOf(key).ExitMode == "split"
 		return &stratHist{all: all, stats: computeClosedStats(all, multiTP)}, nil
 	})
@@ -72,15 +91,15 @@ func (s *Store) strategyHistFull(key string, winMs int64) *stratHist {
 	return v.(*stratHist)
 }
 
-// StrategyHistory 回一頁(size 筆)已結束 + 統計。page 從 1 起。
-func (s *Store) StrategyHistory(key string, winMs int64, page, size int) StratHistoryResult {
+// StrategyHistory 回一頁(size 筆)已結束 + 統計。page 從 1 起;tf ""=全部,"1h"/"4h" 篩週期。
+func (s *Store) StrategyHistory(key string, winMs int64, page, size int, tf string) StratHistoryResult {
 	if size <= 0 || size > 200 {
 		size = 50
 	}
 	if page <= 0 {
 		page = 1
 	}
-	h := s.strategyHistFull(key, winMs)
+	h := s.strategyHistFull(key, winMs, tf)
 	total := len(h.all)
 	pages := (total + size - 1) / size
 	if pages < 1 {

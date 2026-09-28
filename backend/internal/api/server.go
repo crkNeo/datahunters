@@ -202,6 +202,7 @@ func (s *Server) Routes() http.Handler {
 	// web push (PWA notifications)
 	mux.HandleFunc("/api/push/key", s.gate(M, s.handlePushKey))
 	mux.HandleFunc("/api/push/subscribe", s.gate(M, s.handlePushSubscribe))
+	mux.HandleFunc("/api/push/prefs", s.gate(M, s.handlePushPrefs)) // 使用者自選推播類型(逐策略/逐項)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return cors(mux)
@@ -798,7 +799,11 @@ func (s *Server) handleStratHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	writeJSON(w, s.store.StrategyHistory(book, atoi64(q.Get("win")), atoi(q.Get("page")), atoi(q.Get("size"))))
+	tf := q.Get("tf")
+	if tf != "1h" && tf != "4h" {
+		tf = "" // 只接受 1h/4h,其餘視為全部
+	}
+	writeJSON(w, s.store.StrategyHistory(book, atoi64(q.Get("win")), atoi(q.Get("page")), atoi(q.Get("size")), tf))
 }
 
 // handleScoreLogHistory serves one page of the 訊號紀錄 (score-cross log) from DB.

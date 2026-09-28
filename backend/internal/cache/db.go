@@ -108,6 +108,13 @@ CREATE TABLE IF NOT EXISTS push_subs (
   sub      LONGTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 每個使用者的推播類型明確選擇({topic:bool})。沒選過的 topic 用其預設值(目前全部預設
+-- 開啟),所以現有使用者不受影響、日後新增的類型也有合理預設。
+CREATE TABLE IF NOT EXISTS push_prefs (
+  username   VARCHAR(191) PRIMARY KEY,
+  prefs_json LONGTEXT   -- {topic:bool} 明確選擇;沒選的 topic 用其預設值
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 錘子/流星 插針命中紀錄:持久化,重啟不清除。UNIQUE(coin,tf,ts) 讓同一根棒的
 -- 命中不會重複寫入(重啟後首 tick 只建基準,本就不會重測,這是雙保險)。
 CREATE TABLE IF NOT EXISTS pin_hits (
@@ -367,7 +374,8 @@ func (db *DB) setUserRole(username, role, status string) {
 
 func (db *DB) deleteUser(username string) {
 	db.sql.Exec(`DELETE FROM users WHERE username=?`, username)
-	db.sql.Exec(`DELETE FROM push_subs WHERE username=?`, username) // clean their push subs too
+	db.sql.Exec(`DELETE FROM push_subs WHERE username=?`, username)  // clean their push subs too
+	db.sql.Exec(`DELETE FROM push_prefs WHERE username=?`, username) // and their push preferences
 }
 
 func (db *DB) userExists(username string) bool {

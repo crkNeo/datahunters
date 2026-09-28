@@ -73,7 +73,7 @@ func (s *Store) RobinhoodTick() {
 	s.rhMu.Unlock()
 
 	for _, c := range fresh { // alert each newly-tradable coin
-		s.PushSend("🤖 Robinhood 上架", c.Code+" 已可交易", "/?tab=robinhood")
+		s.PushSendTopic("msg:robinhood", "🤖 Robinhood 上架", c.Code+" 已可交易", "/?tab=robinhood")
 		if s.notifier.Enabled() {
 			go s.notifier.Send(fmt.Sprintf("🤖 <b>[Robinhood 上架]</b> %s(%s)\n已可在 Robinhood 交易 · %s", c.Code, c.Name, c.Symbol))
 		}

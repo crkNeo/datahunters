@@ -411,11 +411,11 @@ async function loadReferral() {
 function openReferral() { refShow.value = true; loadReferral(); loadRefRules(); loadVIPStatus() }
 // 個人中心(新版頁,取代舊「我的推廣」modal):切到 account 分頁並載入推廣/VIP/規則資料
 const accountTab = ref('ref') // ref=推廣中心 / vip=會員資格 / set=帳戶設定
-function openAccount() { mainTab.value = 'account'; accountTab.value = 'ref'; loadReferral(); loadRefRules(); loadVIPStatus() }
+function openAccount() { mainTab.value = 'account'; accountTab.value = 'ref'; loadReferral(); loadRefRules(); loadVIPStatus(); loadPushPrefs() }
 // 直接用網址 /account 或重整進來時(未經 openAccount),補載推廣/VIP/規則資料。
 // 同時看 role:直連時 auth 尚未解析(role=public),等 role 解析為會員後再載。
 watch([mainTab, role], ([t, r]) => {
-  if (t === 'account' && r !== 'public' && !refData.value) { loadReferral(); loadRefRules(); loadVIPStatus() }
+  if (t === 'account' && r !== 'public' && !refData.value) { loadReferral(); loadRefRules(); loadVIPStatus(); loadPushPrefs() }
 })
 
 // ---- 申請 VIP(會員在「我的推廣」內)----
@@ -1442,6 +1442,24 @@ async function ensurePush(interactive) {
   } catch (e) { if (interactive) notifState.value = 'denied' }
 }
 async function enableNotifications() { await ensurePush(true) }
+
+// 推播項目自選(逐策略/逐項)。後端已依角色過濾清單並解析各 topic 的有效開關(t.on)。
+const pushTopics = ref([]) // [{key,label,group,on}]
+async function loadPushPrefs() {
+  if (!can('member')) return
+  try {
+    const res = await authFetch('/api/push/prefs')
+    if (res.ok) { pushTopics.value = (await res.json()).topics || [] }
+  } catch (e) { /* secondary */ }
+}
+const pushStratTopics = computed(() => pushTopics.value.filter((t) => t.group === 'strategy'))
+const pushMsgTopics = computed(() => pushTopics.value.filter((t) => t.group === 'message'))
+async function togglePush(t) {
+  t.on = !t.on
+  try {
+    await authFetch('/api/push/prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: t.key, on: t.on }) })
+  } catch (e) { t.on = !t.on /* 回滾 */ }
+}
 async function installApp() {
   if (!deferredPrompt.value) return
   deferredPrompt.value.prompt()
@@ -2381,6 +2399,28 @@ watch([role, tabPerms, authReady], () => {
           <div class="srow"><div class="si">🔑</div><div class="st">修改密碼<small>6–16 碼,含大小寫 + 數字 + 特殊符號</small></div><div class="ac"><button class="acc-sbtn" @click="openPwModal">修改</button></div></div>
           <div class="srow"><div class="si">🚪</div><div class="st">登出<small>目前登入:{{ username }}</small></div><div class="ac"><button class="acc-sbtn danger" @click="logout">登出</button></div></div>
         </div>
+
+        <!-- 推播項目自選:逐策略 / 逐項。清單已依角色過濾,只顯示自己能開的 -->
+        <div class="card" v-if="pushTopics.length">
+          <p class="eyebrow">推播項目</p>
+          <p class="pushnote">勾選想收到的推播,取消勾選就不再通知該類型(需先在上方「推播通知」開啟)。</p>
+          <div v-if="pushStratTopics.length" class="pushgrp">
+            <div class="pushgrp-t">策略</div>
+            <div class="pushtogs">
+              <label v-for="t in pushStratTopics" :key="t.key" class="pushtog" :class="{ on: t.on }">
+                <input type="checkbox" :checked="t.on" @change="togglePush(t)"><span>{{ t.label }}</span>
+              </label>
+            </div>
+          </div>
+          <div v-if="pushMsgTopics.length" class="pushgrp">
+            <div class="pushgrp-t">消息</div>
+            <div class="pushtogs">
+              <label v-for="t in pushMsgTopics" :key="t.key" class="pushtog" :class="{ on: t.on }">
+                <input type="checkbox" :checked="t.on" @change="togglePush(t)"><span>{{ t.label }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -3263,7 +3303,8 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
   .mainnav{
     position:fixed; left:0; top:0; bottom:0; width:var(--side-w);
     display:flex; flex-direction:column; align-items:stretch; gap:2px;
-    overflow-y:auto; margin:0; padding:14px 10px 20px;
+    overflow-y:auto; overscroll-behavior:contain; margin:0;
+    padding:calc(14px + env(safe-area-inset-top)) 10px calc(20px + env(safe-area-inset-bottom));
     background:linear-gradient(180deg,#0c0e14,#0a0b0f);
     border-right:1px solid var(--c-line); z-index:60;
   }
@@ -3299,7 +3340,9 @@ body { margin: 0; background: transparent; color: #e8eaed; font-family: var(--f-
   .side-scrim.on{ display:block; }
   .mainnav{
     position:fixed; left:0; top:0; bottom:0; width:var(--drawer-w); max-width:82vw; z-index:60;
-    overflow-y:auto; margin:0; padding:14px 10px 20px; transform:translateX(-100%); transition:transform .25s ease;
+    overflow-y:auto; overscroll-behavior:contain; margin:0;
+    padding:calc(14px + env(safe-area-inset-top)) 10px calc(20px + env(safe-area-inset-bottom));
+    transform:translateX(-100%); transition:transform .25s ease;
     background:linear-gradient(180deg,#0c0e14,#0a0b0f); border-right:1px solid var(--c-line);
     display:flex; flex-direction:column; align-items:stretch; gap:2px;
   }
@@ -4460,6 +4503,14 @@ footer { padding: 18px 0 30px; text-align: center; }
 .acc-sbtn:hover{ border-color:var(--c-gold-d); }
 .acc-sbtn.done{ color:var(--c-up); border-color:rgba(55,214,138,.4); cursor:default; }
 .acc-sbtn.danger{ color:var(--c-dn); border-color:rgba(255,92,108,.35); }
+/* 推播項目自選 */
+.pushnote{ font-size:12px; color:var(--c-mut); margin:-2px 0 12px; line-height:1.5; }
+.pushgrp{ margin-top:10px; }
+.pushgrp-t{ font-size:11px; letter-spacing:1px; color:var(--c-gold); font-weight:600; margin-bottom:8px; }
+.pushtogs{ display:flex; flex-wrap:wrap; gap:8px; }
+.pushtog{ display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--c-mut); background:var(--c-bg2); border:1px solid var(--c-line2); border-radius:9px; padding:7px 12px; cursor:pointer; user-select:none; transition:border-color .12s,color .12s; }
+.pushtog.on{ color:var(--c-txt); border-color:var(--c-gold-d); }
+.pushtog input{ accent-color:var(--c-gold); cursor:pointer; margin:0; }
 @media (max-width:768px){
   .acc-refstats{ grid-template-columns:1fr; }
   .acc-quick{ margin-left:0; width:100%; }

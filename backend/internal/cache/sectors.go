@@ -127,7 +127,7 @@ func (s *Store) SectorTick() {
 			}
 		}
 		if best.Delta >= sectorRotatePush && best.VsBTC > 0 {
-			s.PushSend("📊 板塊輪動", fmt.Sprintf("%s 板塊轉強(較上小時 +%.1fpp,平均 %+.2f%%)", best.Sector, best.Delta, best.AvgChg), "/?tab=sectors")
+			s.PushSendTopic("msg:sectors", "📊 板塊輪動", fmt.Sprintf("%s 板塊轉強(較上小時 +%.1fpp,平均 %+.2f%%)", best.Sector, best.Delta, best.AvgChg), "/?tab=sectors")
 		}
 	}
 }

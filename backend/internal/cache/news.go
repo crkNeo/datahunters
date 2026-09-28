@@ -150,7 +150,7 @@ func (s *Store) GdeltTick() {
 			if it.Category == "misc" {
 				continue
 			}
-			s.PushSend(it.Label, it.Title, "/?tab=news")
+			s.PushSendTopic("msg:news", it.Label, it.Title, "/?tab=news")
 		}
 	}
 }
@@ -182,7 +182,7 @@ func (s *Store) EtfTick() {
 		}
 		s.gdeltMu.Unlock()
 		if !firstSeed { // don't push the pre-existing latest value on boot
-			s.PushSend(item.Label, item.Title, "/?tab=news")
+			s.PushSendTopic("msg:news", item.Label, item.Title, "/?tab=news")
 		}
 	}
 	if anyOK {

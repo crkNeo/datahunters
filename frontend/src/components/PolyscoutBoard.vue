@@ -26,15 +26,6 @@ onMounted(load)
 const views = computed(() => (d.value && d.value.views) || [])
 const seeding = computed(() => !loading.value && !err.value && views.value.length === 0)
 
-const pushOn = ref(false)
-async function togglePush() {
-  const next = !pushOn.value
-  try {
-    const res = await authFetch("/api/admin/polyscout-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: next }) })
-    if (res.ok) { pushOn.value = !!(await res.json()).on; emit("toast", pushOn.value ? "聰明錢共識推播已開啟" : "聰明錢共識推播已關閉") }
-  } catch (e) { emit("toast", "設定失敗") }
-}
-
 const open = ref("") // 展開中的 wallet
 const toggle = (w) => { open.value = open.value === w ? "" : w }
 const nameOf = (v) => v.name || (v.wallet.slice(0, 6) + "…" + v.wallet.slice(-4))
@@ -89,11 +80,6 @@ function prettyTitle(t) {
         <span v-if="d && d.updated_at" class="mk-count">{{ d.source }} · {{ d.updated_at }}</span>
         <button class="ps-refresh" :disabled="loading" @click="load">{{ loading ? '…' : '↻' }}</button>
       </div>
-    </div>
-
-    <div class="wl-admin">
-      <label class="wl-toggle"><input type="checkbox" :checked="pushOn" @change="togglePush" /> 聰明錢共識推播<small>{{ pushOn ? '(已開啟)' : '(預設關閉)' }}</small></label>
-      <span class="wl-adnote">每小時彙整更新時推播整體大綱</span>
     </div>
 
     <p v-if="err" class="ps-err">✕ {{ err }}</p>

@@ -73,7 +73,7 @@ func (s *Store) MarketAITick() {
 		if r := []rune(body); len(r) > 90 {
 			body = string(r[:90]) + "…"
 		}
-		s.PushSend("🔔整點「大盤分析」", body, "/")
+		s.PushSendTopic("msg:macro", "🔔整點「大盤分析」", body, "/")
 	}
 }
 

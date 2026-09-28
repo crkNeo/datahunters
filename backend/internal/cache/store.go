@@ -653,7 +653,7 @@ func (s *Store) UpbitTick() {
 		}
 		// Web Push opens our own Upbit board tab (not upbit.com); the Telegram
 		// message still links out to the real notice.
-		s.PushSend(tag, zh, "/?tab=upbit")
+		s.PushSendTopic("msg:upbit", tag, zh, "/?tab=upbit")
 		go s.notifier.Send(n.TelegramTextZH(zh))
 	}
 	s.updateUpbitBoard(all)

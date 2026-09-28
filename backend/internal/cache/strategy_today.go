@@ -72,7 +72,7 @@ func (s *Store) StrategyToday() []StratTodayRow {
 		if tier == "admin" {
 			continue // 僅管理員可見的觀察書不進首頁前三名
 		}
-		st := s.strategyHistFull(key, winMs).stats
+		st := s.strategyHistFull(key, winMs, "").stats
 		if st.Closed == 0 {
 			continue // 今日沒有平倉
 		}

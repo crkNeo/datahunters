@@ -97,6 +97,29 @@ func (s *Server) handlePushReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "key": s.store.PushKey()})
 }
 
+// handlePushPrefs (member): GET 回「此角色可切換的 topic 清單 + 各自的有效開關」;
+// PUT {key,on} 設定單一 topic 的開關。topics 已依角色過濾,所以使用者只會看到
+// 自己權限內能開的項目。
+func (s *Server) handlePushPrefs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, map[string]any{"topics": s.store.PushTopicsFor(s.roleOf(r), s.userOf(r))})
+	case http.MethodPut:
+		var in struct {
+			Key string `json:"key"`
+			On  bool   `json:"on"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		s.store.SetPushPref(s.userOf(r), in.Key, in.On)
+		writeJSON(w, map[string]any{"ok": true})
+	default:
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+	}
+}
+
 // handleConfig (public): returns site settings (logo, social links JSON, QR).
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.SiteConfig())

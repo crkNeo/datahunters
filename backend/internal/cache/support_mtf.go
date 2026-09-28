@@ -186,15 +186,7 @@ func (s *Store) notifyPin(h PinHit) {
 		body = fmt.Sprintf("%s %s 收盤 $%s 出現射擊星:小實體 + 長上影線 + 局部高點", h.Coin, h.TF, fmtPx(h.Price))
 	}
 	url := "/?tab=srmtf"
-	if s.TabRole("srmtf") == "admin" {
-		if s.db != nil && s.pushMgr != nil {
-			if subs := s.db.adminSubs(); len(subs) > 0 {
-				go s.pushMgr.SendTo(subs, emoji+" "+title, body, url)
-			}
-		}
-	} else {
-		s.PushSend(emoji+" "+title, body, url)
-	}
+	s.PushSendTopic("strat:srmtf", emoji+" "+title, body, url)
 	if s.notifier.Enabled() {
 		go s.notifier.Send(fmt.Sprintf("%s <b>[插針訊號] %s</b>\n%s", emoji, title, body))
 	}

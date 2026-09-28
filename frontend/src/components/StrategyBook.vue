@@ -38,26 +38,35 @@ defineEmits(['coin', 'exit'])
 // 已結束歷史:後端 DB 分頁(全歷史、依時間窗、統計於全篩選集聚合)。每頁 50 筆。
 const hist = ref({ rows: [], total: 0, pages: 1, page: 1, stats: { closed: 0, win_rate: 0, avg_pnl: 0, total_pnl: 0, tp1: 0, tp2: 0, tp3: 0, multi_tp: false } })
 const page = ref(1)
+// 週期篩選('all'|'1h'|'4h'):進行中在前端過濾,已結束帶 &tf= 交給後端篩(分頁/統計才正確)。
+const tfFilter = ref('all')
 async function fetchHist() {
   if (!props.book) return
   try {
-    const res = await authFetch(`/api/strat-history?book=${encodeURIComponent(props.book)}&win=${props.win || 0}&page=${page.value}&size=50`)
+    const tfq = tfFilter.value !== 'all' ? `&tf=${tfFilter.value}` : ''
+    const res = await authFetch(`/api/strat-history?book=${encodeURIComponent(props.book)}&win=${props.win || 0}&page=${page.value}&size=50${tfq}`)
     if (res.ok) hist.value = await res.json()
   } catch (e) { /* secondary */ }
 }
-watch(() => [props.book, props.win], () => { page.value = 1; fetchHist() })
+watch(() => [props.book, props.win], () => { page.value = 1; tfFilter.value = 'all'; fetchHist() })
 watch(page, fetchHist)
+watch(tfFilter, () => { page.value = 1; fetchHist() })
 onMounted(fetchHist)
 defineExpose({ refresh: () => { page.value = 1; fetchHist() } }) // 清單/手動出場後父層可呼叫
 
 const stats = computed(() => hist.value.stats || {})
 
+// 進行中(open)套週期篩選;沒篩時就是全部。
+const openRows = computed(() => {
+  const rows = props.state?.open || []
+  return tfFilter.value === 'all' ? rows : rows.filter((t) => (t.tf || '') === tfFilter.value)
+})
 // SMC_V2 把「待觸發掛單」(status=pending)也放進 open;它們還沒成交,不是持倉,
 // 不能顯示 TP 進度/損益。以下把兩者分開計數,列上再逐筆用徽章區分。
-const openFilled = computed(() => (props.state?.open || []).filter((t) => t.status !== 'pending').length)
-const openPending = computed(() => (props.state?.open || []).filter((t) => t.status === 'pending').length)
+const openFilled = computed(() => openRows.value.filter((t) => t.status !== 'pending').length)
+const openPending = computed(() => openRows.value.filter((t) => t.status === 'pending').length)
 
-// 多週期策略(如 訂單塊:1h/4h 同頁)才帶 tf 欄位;有才顯示「週期」欄,其餘策略維持原樣。
+// 多週期策略(如 訂單塊:1h/4h 同頁)才帶 tf 欄位;有才顯示「週期」欄與週期篩選,其餘維持原樣。
 const hasTf = computed(() =>
   [...(props.state?.open || []), ...(hist.value.rows || [])].some((t) => t.tf)
 )
@@ -126,13 +135,18 @@ function tpStatusCls(t) {
       </div>
     </div>
 
-    <h3 class="psub" v-if="state && state.open.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
-    <p v-if="state && state.open.length" class="tp-legend">綠色 = 已觸及止盈</p>
-    <div v-if="state && state.open.length" class="tblwrap">
+    <!-- 多週期策略(訂單塊)可篩週期:進行中即時過濾、已結束重查 -->
+    <div v-if="hasTf" class="tffilter">
+      <button v-for="f in [['all', '全部'], ['1h', '1H'], ['4h', '4H']]" :key="f[0]" :class="{ on: tfFilter === f[0] }" @click="tfFilter = f[0]">{{ f[1] }}</button>
+    </div>
+
+    <h3 class="psub" v-if="openRows.length">進行中 ({{ openFilled }})<span v-if="openPending" class="pendcount"> · 待觸發 {{ openPending }}</span></h3>
+    <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
+    <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
       <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
-        <tr v-for="t in state.open" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
+        <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
@@ -218,4 +232,8 @@ function tpStatusCls(t) {
 .ai-pop b { color: var(--c-txt); font-size: 12px; }
 .ai-pop ul { margin: 6px 0 4px; padding-left: 16px; color: var(--c-mut); font-size: 11.5px; line-height: 1.5; }
 .ai-pop em { display: block; margin-top: 4px; color: var(--c-mut2); font-size: 10.5px; font-style: normal; }
+/* 週期篩選(多週期策略:訂單塊) */
+.tffilter { display: flex; gap: 6px; margin: 4px 0 12px; }
+.tffilter button { font-size: 12px; color: var(--c-mut); background: var(--c-bg2); border: 1px solid var(--c-line2); border-radius: 8px; padding: 5px 15px; cursor: pointer; transition: color .12s, border-color .12s; }
+.tffilter button.on { color: var(--c-gold-b); border-color: var(--c-gold-d); background: var(--c-gold-soft); }
 </style>

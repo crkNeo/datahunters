@@ -493,16 +493,9 @@ func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int
 	title := fmt.Sprintf("🎯 %s TP%d 達成", bookLabel(name), leg)
 	body := fmt.Sprintf("%s %s @ $%s · 已平 %.0f%%%s", tr.Coin, dirCN(tr.Dir), fmtPx(lvl), tr.Filled*100, stop)
 	url := "/?tab=" + bookTab(name)
-	if adminOnly {
-		if s.db == nil {
-			return
-		}
-		if subs := s.db.adminSubs(); len(subs) > 0 {
-			go s.pushMgr.SendTo(subs, title, body, url)
-		}
-		return
-	}
-	go s.pushMgr.Send(title, body, url)
+	// 對象由該策略的 topic(角色 + 使用者自選)決定;adminOnly 已隱含在 topic 的最低角色裡。
+	_ = adminOnly
+	s.PushSendTopic(stratTopic(name), title, body, url)
 }
 
 // notifyBEHit fires the 保本位 cue: price reached entry + beAt×(TP−entry).
@@ -514,9 +507,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 	}
 	title := fmt.Sprintf("🛡 %s 已達保本位", bookLabel(name))
 	body := fmt.Sprintf("%s %s @ $%s · 止盈止損不變", tr.Coin, dirCN(tr.Dir), fmtPx(tr.BEPrice))
-	if subs := s.db.adminSubs(); len(subs) > 0 { // admin book → 只推管理員
-		go s.pushMgr.SendTo(subs, title, body, "/?tab="+bookTab(name))
-	}
+	s.PushSendTopic(stratTopic(name), title, body, "/?tab="+bookTab(name))
 }
 
 // bookTab maps a book name to the frontend mainTab, so a push notification can
@@ -588,7 +579,7 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	if b.adminOnly || !s.notifyOn(b.name, "open") { // 後台的「開倉通知」開關
 		return // admin A/B book: silent on open (mirrors 超新星's signals; only its 套保 alerts fire)
 	}
-	s.PushSend(bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
+	s.PushSendTopic(stratTopic(b.name), bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
 		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
 	if !s.notifier.Enabled() {
 		return
@@ -630,15 +621,8 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 	body := fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
 		tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur))
 	url := "/?tab=" + bookTab(book)
-	if s.TabRole(strat) == "admin" { // 只有管理員看得到的策略 → 只推給管理員
-		if s.db != nil && s.pushMgr != nil {
-			if subs := s.db.adminSubs(); len(subs) > 0 {
-				go s.pushMgr.SendTo(subs, title, body, url)
-			}
-		}
-	} else {
-		s.PushSend(title, body, url)
-	}
+	// 對象由該策略 topic 決定:角色不足或使用者關閉此策略者不會收到(管理員專屬策略即只推管理員)。
+	s.PushSendTopic(stratTopic(book), title, body, url)
 	if s.notifier.Enabled() {
 		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s",
 			bookLabel(book), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct,
@@ -664,15 +648,7 @@ func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
 	title := bookLabel(book) + " 開倉"
 	body := fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry))
 	url := "/?tab=" + bookTab(book)
-	if s.TabRole(strat) == "admin" {
-		if s.db != nil && s.pushMgr != nil {
-			if subs := s.db.adminSubs(); len(subs) > 0 {
-				go s.pushMgr.SendTo(subs, title, body, url)
-			}
-		}
-	} else {
-		s.PushSend(title, body, url)
-	}
+	s.PushSendTopic(stratTopic(book), title, body, url)
 	if s.notifier.Enabled() {
 		rr := 0.0
 		if risk := math.Abs(tr.Entry - tr.SL); risk > 0 {
@@ -691,7 +667,7 @@ func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	}
 	// Web Push (independent of Telegram): fires for EVERY close outcome
 	// (tp / sl / trail / reversed / expired).
-	s.PushSend(bookLabel(b.name)+" 平倉",
+	s.PushSendTopic(stratTopic(b.name), bookLabel(b.name)+" 平倉",
 		fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
 			tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur)), "/?tab="+bookTab(b.name))
 	if !s.notifier.Enabled() {

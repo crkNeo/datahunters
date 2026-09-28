@@ -178,12 +178,12 @@ func (s *Store) PolyConsensusTick() {
 	s.polyMu.Unlock()
 	log.Printf("poly-consensus: 已更新(整體=%s/%s,共 %d 人)via %s", data.Lean, data.Confidence, len(data.Views), s.maiW.Provider())
 
-	if seeded && s.PolyPushEnabled() {
+	if seeded { // 對象由 msg:polyscout topic 決定(使用者在推播設定自選,預設開啟)
 		body := data.Summary
 		if r := []rune(body); len(r) > 90 {
 			body = string(r[:90]) + "…"
 		}
-		s.PushSend("🧭 跟單篩選 · 聰明錢共識", body, "/polyscout")
+		s.PushSendTopic("msg:polyscout", "🧭 聰明錢共識", body, "/polyscout")
 	}
 }
 

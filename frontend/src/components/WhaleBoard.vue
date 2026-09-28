@@ -34,15 +34,6 @@ const sel = computed(() => {
 })
 const events = computed(() => (data.value ? data.value.events : []))
 const rank = computed(() => (data.value ? data.value.rank || [] : []))
-const pushOn = ref(false)
-async function togglePush() {
-  const next = !pushOn.value
-  try {
-    const res = await authFetch("/api/admin/whale-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: next }) })
-    if (res.ok) { const d = await res.json(); pushOn.value = !!d.on; emit("toast", pushOn.value ? "名人動向推播已開啟" : "名人動向推播已關閉") }
-  } catch (e) { emit("toast", "設定失敗") }
-}
-
 function fmtUsd(v) {
   const a = Math.abs(v)
   if (a >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B"
@@ -56,7 +47,7 @@ const kindIcon = { open: "🟢", add: "➕", reduce: "➖", close: "✅", flip: 
 const near = (d) => d > 0 && d < 5 // 距強平 <5% → 高亮
 
 let timer = null
-onMounted(() => { load().then(() => { if (data.value) pushOn.value = !!data.value.push_on }); timer = setInterval(load, 30000) })
+onMounted(() => { load(); timer = setInterval(load, 30000) })
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -67,10 +58,6 @@ onUnmounted(() => clearInterval(timer))
       <span class="mk-count" v-if="data">來源 {{ data.source }}</span>
     </div>
 
-    <div v-if="props.admin" class="wl-admin">
-      <label class="wl-toggle"><input type="checkbox" :checked="pushOn" @change="togglePush" /> 名人動向推播<small>{{ pushOn ? '(已開啟)' : '(預設關閉)' }}</small></label>
-      <span class="wl-adnote">開/平/反手時推播給所有訂閱者</span>
-    </div>
 
     <!-- 標籤切換人:綠點=有持倉,灰=監控中(空倉);點名字切換,下方只顯示這一位 -->
     <div v-if="cards.length" class="wl-picker">

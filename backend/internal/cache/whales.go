@@ -132,7 +132,6 @@ func (s *Store) SetWhalePush(on bool) {
 // WhaleTick 抓每個追蹤對象的 Hyperliquid 倉位,與上次快照 diff 出動作事件,
 // 並在推播開啟時推送重要事件(開倉/平倉/反手)。首抓只建立基準、不發事件。
 func (s *Store) WhaleTick() {
-	pushOn := s.WhalePushEnabled()
 	var toPush []WhaleEvent
 	for _, w := range whaleList {
 		pos, acct, err := hyperliquid.FetchPositions(w.Addr)
@@ -175,10 +174,9 @@ func (s *Store) WhaleTick() {
 	s.whaleTime = time.Now()
 	s.whaleMu.Unlock()
 
-	if pushOn {
-		for _, e := range toPush {
-			s.PushSend("🐋 名人動向", e.Text, "/?tab=whales")
-		}
+	// 對象由 msg:whales topic 決定(使用者在推播設定自選,預設開啟)。
+	for _, e := range toPush {
+		s.PushSendTopic("msg:whales", "🐋 名人動向", e.Text, "/?tab=whales")
 	}
 }
 
