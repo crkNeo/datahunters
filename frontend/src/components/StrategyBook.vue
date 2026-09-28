@@ -66,6 +66,16 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
 const aiCls = (s) => (s >= 70 ? 'hi' : s >= 40 ? 'mid' : 'lo')
+// AI 信心浮框:掛在 .tblwrap(overflow:auto)裡的 absolute 浮框會撐大滾動區、又被裁掉。
+// 改成單一浮框 Teleport 到 body + fixed 定位到 chip 下方,才能真的浮在策略上、不影響表格滾動。
+const aiPop = ref({ show: false, top: 0, left: 0, score: 0, tag: '', reasons: [] })
+function showAiPop(e, t) {
+  const r = e.currentTarget.getBoundingClientRect()
+  const w = 240
+  const left = Math.min(r.left, window.innerWidth - w - 8) // 靠右邊時夾回視窗內
+  aiPop.value = { show: true, top: r.bottom + 6, left: Math.max(8, left), score: t.ai_score, tag: t.ai_tag || '', reasons: t.ai_reasons || [] }
+}
+function hideAiPop() { aiPop.value.show = false }
 
 // 進行中「狀態」欄(依 strategy.html mock:達 TP1 / 達 TP2 / 達最終 / 持倉中 / 待觸發)
 function tpStatus(t) {
@@ -127,13 +137,9 @@ function tpStatusCls(t) {
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
           <td v-if="hasAI">
-            <span v-if="t.ai_score" class="aichip" :class="aiCls(t.ai_score)" tabindex="0" @click.stop>
+            <span v-if="t.ai_score" class="aichip" :class="aiCls(t.ai_score)" tabindex="0" @click.stop
+              @mouseenter="showAiPop($event, t)" @mouseleave="hideAiPop" @focus="showAiPop($event, t)" @blur="hideAiPop">
               {{ t.ai_score }}
-              <span class="ai-pop">
-                <b>AI 參考信心 {{ t.ai_score }}<template v-if="t.ai_tag"> · {{ t.ai_tag }}</template></b>
-                <ul v-if="t.ai_reasons && t.ai_reasons.length"><li v-for="(r, i) in t.ai_reasons" :key="i">{{ r }}</li></ul>
-                <em>綜合「進場品質 + 5R 目標可達性」的 AI 參考,非勝率保證</em>
-              </span>
             </span>
             <span v-else class="tsmall">…</span>
           </td>
@@ -178,6 +184,15 @@ function tpStatusCls(t) {
 
     <p v-if="state && !state.open.length && !hist.total" class="loading">{{ emptyText }}</p>
     <p v-else-if="!state" class="loading">載入中…</p>
+
+    <!-- AI 信心浮框:單一實例 Teleport 到 body,fixed 定位,浮在策略上、不撐大表格滾動區 -->
+    <Teleport to="body">
+      <div v-if="aiPop.show" class="ai-pop" :style="{ top: aiPop.top + 'px', left: aiPop.left + 'px' }">
+        <b>AI 參考信心 {{ aiPop.score }}<template v-if="aiPop.tag"> · {{ aiPop.tag }}</template></b>
+        <ul v-if="aiPop.reasons.length"><li v-for="(r, i) in aiPop.reasons" :key="i">{{ r }}</li></ul>
+        <em>綜合「進場品質 + 5R 目標可達性」的 AI 參考,非勝率保證</em>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -199,8 +214,7 @@ function tpStatusCls(t) {
 .aichip.hi { background: var(--c-up-bg); color: var(--c-up); }
 .aichip.mid { background: var(--c-gold-soft); color: var(--c-gold-b); }
 .aichip.lo { background: var(--c-dn-bg); color: var(--c-dn); }
-.ai-pop { visibility: hidden; opacity: 0; position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 240px; text-align: left; background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: opacity .12s; font-weight: 400; white-space: normal; }
-.aichip:hover .ai-pop, .aichip:focus .ai-pop { visibility: visible; opacity: 1; }
+.ai-pop { position: fixed; z-index: 60; width: 240px; text-align: left; background: var(--c-surf2); border: 1px solid var(--c-line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.35); font-weight: 400; white-space: normal; }
 .ai-pop b { color: var(--c-txt); font-size: 12px; }
 .ai-pop ul { margin: 6px 0 4px; padding-left: 16px; color: var(--c-mut); font-size: 11.5px; line-height: 1.5; }
 .ai-pop em { display: block; margin-top: 4px; color: var(--c-mut2); font-size: 10.5px; font-style: normal; }
