@@ -82,7 +82,7 @@ function prettyTitle(t) {
 <template>
   <section>
     <div class="mk-head">
-      <h2>跟單篩選 · 聰明錢共識
+      <h2>聰明錢共識
         <span class="help" tabindex="0">?<span class="help-pop">每小時由 AI 彙整 Polymarket CRYPTO 排行榜<b>前 20 名交易者目前的持倉</b>,判讀他們「現在覺得市場會怎麼走」:<b>上方=整體大綱與信心,下方=每個人的個別看法</b>(點開看佐證倉位)。<br>重點是<b>方向與看法</b>而非進場價 —— 等看到倉,現價常已貼近結算、跟進沒空間。<br>⚠️ 純資訊,<b>非投資建議、跟單風險自負</b>。</span></span>
       </h2>
       <div class="pc-head-r">

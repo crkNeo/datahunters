@@ -1665,7 +1665,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星', pulsar: '脈衝星(舊)',
-  pulsarv8: '脈衝星v8', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '跟單篩選',
+  pulsarv8: '脈衝星v8', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -2256,7 +2256,7 @@ watch([role, tabPerms, authReady], () => {
             訂單塊v2<em v-if="orderblockv2 && orderblockv2.open.length" class="navbadge">{{ orderblockv2.open.length }}</em><i v-if="!canTab('orderblockv2')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf', lk: !canTab('srmtf') }" @click="navTo('srmtf', loadSRMTF)">反轉訊號<i v-if="!canTab('srmtf')" class="navlk">🔒</i></button>
-          <button v-if="inGroup('polyscout', grp[0])" :class="{ active: mainTab === 'polyscout', lk: !canTab('polyscout') }" @click="navTo('polyscout')">跟單篩選<i v-if="!canTab('polyscout')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('polyscout', grp[0])" :class="{ active: mainTab === 'polyscout', lk: !canTab('polyscout') }" @click="navTo('polyscout')">聰明錢共識<i v-if="!canTab('polyscout')" class="navlk">🔒</i></button>
         </div>
       </div>
       </template>
