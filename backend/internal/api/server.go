@@ -160,6 +160,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsar", s.gateTab("pulsar", s.handlePulsar))                   // 脈衝星策略
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv8", s.gateTab("pulsarv8", s.handlePulsarV8))             // 脈衝星v8 (v7 + 更強爆量)
+	mux.HandleFunc("/api/pulsarv9", s.gateTab("pulsarv9", s.handlePulsarV9))             // 脈衝星v9 (v3 + 寬止損才要真爆量)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
@@ -771,6 +772,11 @@ func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV8 serves the 脈衝星v8 (v7 + 更強爆量) tracker.
 func (s *Server) handlePulsarV8(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV8State())
+}
+
+// handlePulsarV9 serves the 脈衝星v9 (v3 + 寬止損才要求真爆量) tracker.
+func (s *Server) handlePulsarV9(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV9State())
 }
 
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.

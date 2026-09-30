@@ -505,21 +505,35 @@ func surgeV7Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 // 截尾基線(v3 只要 2.5×),鎖定「真暴漲」等級的爆量,不做溫吞的量增。只做多。
 func surgeV8Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
 	d, e, s, t, ok0 := surgeV7Signal(cs)
-	if !ok0 {
+	if !ok0 || !hasStrongVol(cs) { // 爆量不夠兇 = 不是真暴漲 → 不進場
 		return
 	}
+	return d, e, s, t, true
+}
+
+// hasStrongVol:近6根有一根量 ≥ strongVolMult × 截尾基線(真暴漲等級的爆量)。
+func hasStrongVol(cs []exchange.Candle) bool {
 	base := trimmedBaseVol(cs)
 	if base <= 0 {
-		return
+		return false
 	}
-	n := len(cs)
-	peak := 0.0
-	for i := n - 6; i < n; i++ {
-		if i >= 0 && cs[i].Volume > peak {
-			peak = cs[i].Volume
+	for i := len(cs) - 6; i < len(cs); i++ {
+		if i >= 0 && cs[i].Volume >= strongVolMult*base {
+			return true
 		}
 	}
-	if peak < strongVolMult*base { // 爆量不夠兇 = 不是真暴漲 → 不進場
+	return false
+}
+
+// surgeV9Signal — 脈衝星v9:「止損越寬,越要真爆量」。= v3,但原始 R ≥ minRPct 的寬止損
+// 設定必須有真爆量(hasStrongVol)才進;窄止損照收。數據依據(09/14–09/30,R 正規化扣成本):
+// 窄止損 +0.067R/筆、寬止損有爆量 +0.056R、寬止損沒爆量 −0.038R —— 只丟唯一虧錢的那組。
+func surgeV9Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	d, e, s, t, ok0 := surgeV3Signal(cs)
+	if !ok0 || e <= 0 {
+		return
+	}
+	if (e-s)/e*100 >= minRPct && !hasStrongVol(cs) { // 錯了很貴,就要先看到真爆量
 		return
 	}
 	return d, e, s, t, true
@@ -896,6 +910,8 @@ func (s *Store) PulsarV3Tick()     { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick() { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV8Tick()     { s.microTick(s.pulsarV8Book) }
 func (s *Store) PulsarV8MarkTick() { s.microMarkTick(s.pulsarV8Book) }
+func (s *Store) PulsarV9Tick()     { s.microTick(s.pulsarV9Book) }
+func (s *Store) PulsarV9MarkTick() { s.microMarkTick(s.pulsarV9Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -972,6 +988,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV8Book.mu.Lock()
 		s.pulsarV8Book.trades = keepIf(s.pulsarV8Book.trades, closedOnly)
 		s.pulsarV8Book.mu.Unlock()
+	case "pulsarv9":
+		s.pulsarV9Book.mu.Lock()
+		s.pulsarV9Book.trades = keepIf(s.pulsarV9Book.trades, closedOnly)
+		s.pulsarV9Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1039,5 +1059,6 @@ func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) 
 func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV3State() PaperState { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV8State() PaperState { return s.microState(s.pulsarV8Book) }
+func (s *Store) PulsarV9State() PaperState { return s.microState(s.pulsarV9Book) }
 func (s *Store) SMCState() PaperState      { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState    { return s.microState(s.smcV2Books...) }

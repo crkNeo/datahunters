@@ -254,6 +254,7 @@ func main() {
 			store.PulsarMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV8MarkTick()
+			store.PulsarV9MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
@@ -272,11 +273,13 @@ func main() {
 		store.PulsarTick()
 		store.PulsarV3Tick()
 		store.PulsarV8Tick()
+		store.PulsarV9Tick()
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
 			store.PulsarV8Tick()
+			store.PulsarV9Tick()
 		}
 	}()
 	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。

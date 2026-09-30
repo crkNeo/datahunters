@@ -699,6 +699,15 @@ async function loadPulsarV3() {
     /* secondary */
   }
 }
+const pulsarv9 = ref(null)
+async function loadPulsarV9() {
+  try {
+    const res = await authFetch('/api/pulsarv9')
+    if (res.ok) pulsarv9.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 const pulsarv8 = ref(null)
 async function loadPulsarV8() {
   try {
@@ -777,6 +786,10 @@ const microMeta = {
   pulsarv3: {
     title: '脈衝星', load: loadPulsarV3, get: () => pulsarv3.value,
     help: '‼️此策略只做多單，小止損換大盈利‼️<br>此為幣種分享，不代表任何投資建議，建議搭配技術分析進場。<br><br>建議使用總本金：1%<br>建議槓桿：25x-30x',
+  },
+  pulsarv9: {
+    title: '脈衝星v9 · 寬止損才要真爆量 · 15m', load: loadPulsarV9, get: () => pulsarv9.value,
+    help: '<b>= 脈衝星v3,多一條規則:「止損越寬,越要真爆量」。</b><br><b>【規則】</b>止損距離 R &lt; 3%(窄止損)→ 照 v3 進場;R ≥ 3%(寬止損)→ 必須近 6 根有一根量 ≥ 4× 截尾基線才進。<br><b>【依據】</b>09/14–09/30 以風險正規化(R 倍數、扣成本)比較:窄止損 +0.067R/筆、寬止損有爆量 +0.056R/筆、<b>寬止損沒爆量 −0.038R/筆(唯一虧錢的一組)</b>。v9 只丟掉這一組。<br><b>【其餘完全同 v3】</b>選幣、ATR 濾網、TP=1R/2R+追尾 50/25/25、4h/24h 逾時、4h 冷卻。<br><br>⚠️ 觀察用書,跟 v3 / v8 對照。窄止損的優勢對手續費/滑點較敏感。預設靜默、不接實盤。非投資建議。',
   },
   pulsarv8: {
     title: '脈衝星v8 · v7+真爆量 · 15m', load: loadPulsarV8, get: () => pulsarv8.value,
@@ -1377,6 +1390,7 @@ function loadAll() {
   if (canTab('pulsar')) loadPulsar()
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv8')) loadPulsarV8()
+  if (canTab('pulsarv9')) loadPulsarV9()
   if (canTab('orderblock')) loadOrderBlock()
   if (canTab('orderblockv2')) loadOrderBlockV2()
   if (canTab('surge')) loadSurge()
@@ -1470,7 +1484,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv8', 'pulsarv9', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1619,7 +1633,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', pulsarv9: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1683,7 +1697,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星', pulsar: '脈衝星(舊)',
-  pulsarv8: '脈衝星v8', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
+  pulsarv8: '脈衝星v8', pulsarv9: '脈衝星v9', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1703,7 +1717,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv8: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
+  bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv8: 'signal', pulsarv9: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1711,7 +1725,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'orderblock', 'orderblockv2', 'srmtf',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'pulsarv9', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2266,6 +2280,9 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('pulsarv8', grp[0])" :class="{ active: mainTab === 'pulsarv8', lk: !canTab('pulsarv8') }" @click="navTo('pulsarv8', loadPulsarV8)">
             脈衝星v8<em v-if="pulsarv8 && pulsarv8.open.length" class="navbadge">{{ pulsarv8.open.length }}</em><i v-if="!canTab('pulsarv8')" class="navlk">🔒</i>
+          </button>
+          <button v-if="inGroup('pulsarv9', grp[0])" :class="{ active: mainTab === 'pulsarv9', lk: !canTab('pulsarv9') }" @click="navTo('pulsarv9', loadPulsarV9)">
+            脈衝星v9<em v-if="pulsarv9 && pulsarv9.open.length" class="navbadge">{{ pulsarv9.open.length }}</em><i v-if="!canTab('pulsarv9')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock', lk: !canTab('orderblock') }" @click="navTo('orderblock', loadOrderBlock)">
             訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em><i v-if="!canTab('orderblock')" class="navlk">🔒</i>
