@@ -239,7 +239,9 @@ func main() {
 	// 冥王星 (動態ATR均線收斂) 4H strategy: evaluated once per closed 4H bar.
 	go func() {
 		store.ConvTick()
-		ticker := time.NewTicker(2 * time.Minute)
+		// 15s:評估先用「K棒 bucket」判斷,未換棒就直接 return(不打 REST),所以頻率拉高
+		// 幾乎零成本,只把「偵測到收盤→開倉」的延遲從最多 2 分鐘壓到 ≤15 秒。
+		ticker := time.NewTicker(15 * time.Second)
 		for range ticker.C {
 			store.ConvTick()
 		}
@@ -263,7 +265,7 @@ func main() {
 	// 布林EMA:4H 突破蓄勢(多空)。
 	go func() {
 		store.BollEMATick()
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(15 * time.Second) // 見 ConvTick 註解:換棒才打 REST,拉高頻率只縮短開倉延遲
 		for range ticker.C {
 			store.BollEMATick()
 		}
@@ -274,7 +276,7 @@ func main() {
 		store.PulsarV3Tick()
 		store.PulsarV8Tick()
 		store.PulsarV9Tick()
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(15 * time.Second) // 見 ConvTick 註解:換棒才打 REST,拉高頻率只縮短開倉延遲
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
@@ -286,7 +288,7 @@ func main() {
 	go func() {
 		store.SMCTick()
 		store.SMCV2Tick()
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(15 * time.Second) // 見 ConvTick 註解:換棒才打 REST,拉高頻率只縮短開倉延遲
 		for range ticker.C {
 			store.SMCTick()
 			store.SMCV2Tick()
