@@ -286,7 +286,7 @@ func NewStore(coins []string) *Store {
 	s.pulsarBook = &microBook{name: "pulsar", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, cooldown: 16, keep: 500, plan: tpMomentum, universe: s.surgeHotCoins, signal: surgeSignal}
 	// 脈衝星(VIP,原 v3):ATR 自適應進出場 + 追尾 runner。主倉 4h 逾時(expiry 16);runner(Legs≥2)改用
 	// runnerExpiry 96 根 = 24h,突破 4h 讓小倉測後續跑動。plan=tpPulsarV3(1R/2R + 追尾)。
-	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal}
+	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV3Signal, signalWhy: surgeV3Why}
 	// 脈衝星v8:= v7 + 更強爆量門檻(近6根一根量 ≥4×基線)—— 在「已在動」之上再鎖定「真暴漲」等級的量。
 	s.pulsarV8Book = &microBook{name: "pulsarv8", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins, signal: surgeV8Signal}
 	// 脈衝星v9:= v3,但寬止損(R≥3%)必須有真爆量(≥4×基線)才進;窄止損照收。

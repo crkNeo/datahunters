@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,8 @@ type microBook struct {
 	maxSLPct     float64 // skip entries whose SL distance exceeds this % of entry (0 = no filter)
 	beAt         float64 // >0: 保本位 cue at entry + beAt×(TP−entry). NOTIFY-ONLY — never moves the stop.
 	signal       func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
+	// signalWhy (optional, diagnostics only): 當 signal 不成立時回傳子原因給 log。nil = 不報子原因。
+	signalWhy func(cs []exchange.Candle) string
 	// exitSignal (optional): checked on each bar close for an OPEN position — return
 	// true to close it at that close ("reversed"). Used for signal-based exits like
 	// 2155多's 死叉 (EMA21 crosses back below EMA55). nil = no signal exit.
@@ -451,6 +454,86 @@ func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return "long", roundPx(price), roundPx(price - stopDist), roundPx(price + 5*stopDist), true
 }
 
+// surgeV3Why 回傳 surgeV3Signal「為何不成立」的子原因(""=會成立)。純診斷用,只餵給 log。
+// ⚠️ 關卡順序與常數需與上面的 surgeV3Signal 保持一致;這裡只是攤開報「哪一關擋的」,
+// 不參與實際進場判斷(改 surgeV3Signal 的門檻時記得同步這裡)。
+func surgeV3Why(cs []exchange.Candle) string {
+	const (
+		pinBodyMin   = 0.5
+		pinWickMax   = 1.0
+		entryVolMult = 1.2
+		freshVolMult = 2.5
+		freshWithin  = 6
+		kExt         = 8.0
+		slMinATR     = 0.8
+		slMaxATR     = 4.0
+		barMaxATR    = 3.0
+	)
+	n := len(cs)
+	if n < 40 {
+		return "資料不足"
+	}
+	price := cs[n-1].Close
+	last := cs[n-1]
+	atr := robustATR(cs, 14, 2)
+	if atr <= 0 {
+		return "ATR無效"
+	}
+	e5 := emaSeries(cs, 5)
+	e20 := emaSeries(cs, 20)
+	if !(e5[n-1] > e20[n-1] && price > cs[n-2].Close) {
+		return "動能不足(EMA5未過EMA20或未收漲)"
+	}
+	rng := last.High - last.Low
+	body := last.Close - last.Open
+	if rng <= 0 || body <= 0 || body < pinBodyMin*rng || (last.High-last.Close) > pinWickMax*body {
+		return "非反插針(實體不足或上影過長)"
+	}
+	if rng > barMaxATR*atr {
+		return "拋物線頂(單根過大)"
+	}
+	base := trimmedBaseVol(cs)
+	if base > 0 && last.Volume < entryVolMult*base {
+		return "量能不足(進場根<1.2×基線)"
+	}
+	fresh := false
+	for i := n - freshWithin; i < n; i++ {
+		if i >= 0 && base > 0 && cs[i].Volume >= freshVolMult*base {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		return "新鮮度不足(近6根無≥2.5×爆量)"
+	}
+	low20 := cs[n-1].Low
+	for i := n - 20; i < n; i++ {
+		if i >= 0 && cs[i].Low < low20 {
+			low20 = cs[i].Low
+		}
+	}
+	if (price - low20) > kExt*atr {
+		return "追高(距20根低>8×ATR)"
+	}
+	low10 := cs[n-1].Low
+	for i := n - 10; i < n; i++ {
+		if i >= 0 && cs[i].Low < low10 {
+			low10 = cs[i].Low
+		}
+	}
+	stopDist := price - low10
+	if stopDist > slMaxATR*atr {
+		return "止損過寬(>4×ATR)"
+	}
+	if stopDist < slMinATR*atr {
+		stopDist = slMinATR * atr
+	}
+	if stopDist <= 0 {
+		return "止損無效"
+	}
+	return ""
+}
+
 // confirmSurgeV3Signal — 脈衝星v6:v3 + 確認棒進場。針對「訊號根是誘多、下一根就秒回調」
 // 的假突破:v3 設定必須在「前一根(N-1)」成立,再看「這一根(N)」是否確認 —— 收在訊號根
 // 之上且沒跌破設定的止損,才進場。晚一根、用結構低當止損,濾掉一進場就倒的單。只做多。
@@ -578,7 +661,8 @@ func (s *Store) microTick(b *microBook) {
 	expOpenMs := (bkt - 1) * int64(b.barSec) * 1000 // 剛收盤那根「應有」的開盤時戳(ms)
 	evaluated, errs, stale := 0, 0, 0
 	opened, held := 0, 0
-	reasons := map[string]int{} // 沒開的幣 → 被哪個關卡擋下(逐項計數)
+	reasons := map[string]int{} // 沒開的幣 → 被哪個關卡擋下(逐項計數,基礎分類)
+	var details []string        // 每個沒開的幣 → coin:原因(含子原因)
 	for _, coin := range coins {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil || len(cs) < 2 {
@@ -593,22 +677,36 @@ func (s *Store) microTick(b *microBook) {
 			stale++ // 交易所新棒還沒生成 → 丟掉的其實是剛收盤那根,評估到的是更舊的一根
 		}
 		evaluated++
-		switch r := s.microRun(b, coin, cs, now); r {
-		case "":
+		r := s.microRun(b, coin, cs, now)
+		switch {
+		case r == "":
 			opened++
-		case "持倉中":
+		case r == "持倉中":
 			held++
 		default:
-			reasons[r]++
+			base, _, _ := strings.Cut(r, ":") // 聚合只看基礎分類(訊號不符/冷卻中…),明細才帶子原因
+			reasons[base]++
+			details = append(details, coin+":"+r)
 		}
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
 	barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
 	if stale > 0 {
 		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
-	} else {
-		log.Printf("策略[%s] %s %s 收盤:熱名單 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
+		return
 	}
+	log.Printf("策略[%s] %s %s 收盤:熱名單 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
+	if len(details) > 0 { // 每個沒開的幣逐一列出原因(上限 30 個,避免大宇宙策略洗版)
+		log.Printf("  └ [%s] 未開明細:%s", b.name, joinCapped(details, 30))
+	}
+}
+
+// joinCapped 以空白接起最多 n 個,超過則附「…+剩餘」。
+func joinCapped(xs []string, n int) string {
+	if len(xs) <= n {
+		return strings.Join(xs, "  ")
+	}
+	return strings.Join(xs[:n], "  ") + fmt.Sprintf("  …+%d", len(xs)-n)
 }
 
 // fmtRejects 依固定順序把「沒開的原因」計數組成簡短字串(全 0 時回空字串)。
@@ -704,6 +802,11 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		default:
 			if dir, entry, sl, tp, ok = b.signal(cs); !ok {
 				reason = "訊號不符"
+				if b.signalWhy != nil { // 有子原因函式(如 v3)→ 標出被哪個子條件擋的
+					if w := b.signalWhy(cs); w != "" {
+						reason = "訊號不符:" + w
+					}
+				}
 			} else if !s.microSLOK(b, entry, sl) {
 				reason = "止損不可行"
 			} else if !s.microTPOK(b, entry, tp) {
