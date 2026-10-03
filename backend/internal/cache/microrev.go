@@ -558,6 +558,7 @@ func (s *Store) microTick(b *microBook) {
 	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)
 		base = b.universe()
 	}
+	hotN := len(base)                        // 熱名單(可進場候選)幣數 —— 與「持倉補掃」分開記,log 才看得懂
 	coins := append([]string(nil), base...) // 複製,下面要 append 不能動到共用切片
 	// 關鍵:一定要處理「有未平倉部位的幣」,即使它已掉出宇宙/熱名單 —— 否則逾時、
 	// 訊號出場(死叉)、收盤 TP/SL 這些只在 microRun(收 K)跑的邏輯永遠不會觸發,
@@ -594,10 +595,11 @@ func (s *Store) microTick(b *microBook) {
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
 	barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
+	held := len(coins) - hotN // 熱名單以外、因有持倉才補掃的幣(精確:= 候選清單扣掉熱名單)
 	if stale > 0 {
 		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
 	} else {
-		log.Printf("策略[%s] %s %s 收盤:正常評估 %d 幣%s", b.name, b.tf, barT, evaluated, failNote(errs))
+		log.Printf("策略[%s] %s %s 收盤:熱名單 %d 幣可進場 + 持倉 %d 幣 → 評估 %d 幣%s", b.name, b.tf, barT, hotN, held, evaluated, failNote(errs))
 	}
 }
 
