@@ -2993,9 +2993,9 @@ watch([role, tabPerms, authReady], () => {
             <td v-if="mainTab !== 'emaonly'"><span class="momlight" :class="momClass(t.momentum)">{{ momText(t.momentum) }}</span></td>
             <td class="r tsmall">{{ fmtFund(t.cur_funding) }}</td>
             <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.legs >= 1" class="vtag"> 保本</small></td>
-            <td class="r tp-cell" :class="{ hit: t.legs >= 1 }">{{ t.tp1 ? fmtPrice(t.tp1) : '—' }}</td>
-            <td class="r tp-cell" :class="{ hit: t.legs >= 2 }">{{ t.tp2 ? fmtPrice(t.tp2) : '—' }}</td>
-            <td class="r tp-cell" :class="{ hit: t.legs >= 3 }">{{ fmtPrice(t.tp) }}</td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
+            <td class="r tp-cell" :class="{ hit: t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
             <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
             <td class="r">{{ fmtDur(holdMs(t)) }}</td>
             <td v-if="can('admin')" class="r"><button class="exitbtn" @click.stop="mainTab === 'emaonly' ? manualExit(t) : manualExitStrat(curPaperBook, t.id, loadPaper)">手動出場</button></td>
@@ -4615,6 +4615,8 @@ footer { padding: 18px 0 30px; text-align: center; }
 <style>
 .tp-cell{ font-family:var(--f-mono); color:var(--c-mut); }
 .tp-cell.hit{ color:var(--c-up); background:var(--c-up-bg); font-weight:600; }
+.tppct{ display:block; font-size:10px; font-weight:400; color:var(--c-mut2); line-height:1.3; }
+.tp-cell.hit .tppct{ color:var(--c-up); opacity:.75; }
 </style>
 
 <!-- ============ optimize:策略頁精簡標頭(VIP徽章 + #標籤)============ -->

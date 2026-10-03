@@ -164,9 +164,9 @@ function tpStatusCls(t) {
           </td>
           <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
           <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }">{{ t.tp1 ? fmtPrice(t.tp1) : '—' }}</td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }">{{ t.tp2 ? fmtPrice(t.tp2) : '—' }}</td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }">{{ fmtPrice(t.tp) }}</td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
+          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
           <td><span class="stag" :class="tpStatusCls(t)">{{ tpStatus(t) }}</span></td>
           <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           <td v-if="canExit" class="r"><button v-if="t.status !== 'pending'" class="exitbtn" @click.stop="$emit('exit', t.id)">手動出場</button><small v-else class="tsmall">—</small></td>
@@ -218,6 +218,8 @@ function tpStatusCls(t) {
 .tp-legend { font-size: 11px; color: var(--c-mut2); margin: 0 0 8px; }
 .tp-cell { font-family: var(--f-mono); color: var(--c-mut); }
 .tp-cell.hit { color: var(--c-up); background: var(--c-up-bg); font-weight: 600; }
+.tppct { display: block; font-size: 10px; font-weight: 400; color: var(--c-mut2); line-height: 1.3; }
+.tp-cell.hit .tppct { color: var(--c-up); opacity: .75; }
 /* 狀態 tag */
 .stag { font-size: 11px; font-weight: 600; border-radius: 6px; padding: 2px 8px; font-family: var(--f-mono); white-space: nowrap; }
 .stag.tp { background: var(--c-up-bg); color: var(--c-up); }
