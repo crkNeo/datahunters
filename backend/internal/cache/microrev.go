@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"sync"
@@ -573,18 +574,39 @@ func (s *Store) microTick(b *microBook) {
 		}
 	}
 	b.mu.Unlock()
+	expOpenMs := (bkt - 1) * int64(b.barSec) * 1000 // 剛收盤那根「應有」的開盤時戳(ms)
+	evaluated, errs, stale := 0, 0, 0
 	for _, coin := range coins {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil || len(cs) < 2 {
+			errs++
 			continue
 		}
 		cs = cs[:len(cs)-1] // drop the still-forming bar
 		if len(cs) < b.minBars {
 			continue
 		}
+		if cs[len(cs)-1].Ts != expOpenMs {
+			stale++ // 交易所新棒還沒生成 → 丟掉的其實是剛收盤那根,評估到的是更舊的一根
+		}
+		evaluated++
 		s.microRun(b, coin, cs, now)
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
+	barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
+	if stale > 0 {
+		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
+	} else {
+		log.Printf("策略[%s] %s %s 收盤:正常評估 %d 幣%s", b.name, b.tf, barT, evaluated, failNote(errs))
+	}
+}
+
+// failNote 把抓取失敗數變成簡短後綴(0 失敗時不顯示)。
+func failNote(errs int) string {
+	if errs == 0 {
+		return ""
+	}
+	return fmt.Sprintf(",抓取失敗 %d", errs)
 }
 
 func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now time.Time) {
