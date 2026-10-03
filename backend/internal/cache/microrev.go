@@ -577,6 +577,8 @@ func (s *Store) microTick(b *microBook) {
 	b.mu.Unlock()
 	expOpenMs := (bkt - 1) * int64(b.barSec) * 1000 // 剛收盤那根「應有」的開盤時戳(ms)
 	evaluated, errs, stale := 0, 0, 0
+	opened, held := 0, 0
+	reasons := map[string]int{} // 沒開的幣 → 被哪個關卡擋下(逐項計數)
 	for _, coin := range coins {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil || len(cs) < 2 {
@@ -591,16 +593,34 @@ func (s *Store) microTick(b *microBook) {
 			stale++ // 交易所新棒還沒生成 → 丟掉的其實是剛收盤那根,評估到的是更舊的一根
 		}
 		evaluated++
-		s.microRun(b, coin, cs, now)
+		switch r := s.microRun(b, coin, cs, now); r {
+		case "":
+			opened++
+		case "持倉中":
+			held++
+		default:
+			reasons[r]++
+		}
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
 	barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
-	held := len(coins) - hotN // 熱名單以外、因有持倉才補掃的幣(精確:= 候選清單扣掉熱名單)
 	if stale > 0 {
 		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
 	} else {
-		log.Printf("策略[%s] %s %s 收盤:熱名單 %d 幣可進場 + 持倉 %d 幣 → 評估 %d 幣%s", b.name, b.tf, barT, hotN, held, evaluated, failNote(errs))
+		log.Printf("策略[%s] %s %s 收盤:熱名單 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
 	}
+}
+
+// fmtRejects 依固定順序把「沒開的原因」計數組成簡短字串(全 0 時回空字串)。
+func fmtRejects(r map[string]int) string {
+	order := []string{"訊號不符", "冷卻中", "止損不可行", "止盈不可行", "品質閘門", "大盤過濾", "股票代幣過濾", "策略停用", "同家族持有"}
+	out := ""
+	for _, k := range order {
+		if r[k] > 0 {
+			out += fmt.Sprintf(" · %s %d", k, r[k])
+		}
+	}
+	return out
 }
 
 // failNote 把抓取失敗數變成簡短後綴(0 失敗時不顯示)。
@@ -611,7 +631,9 @@ func failNote(errs int) string {
 	return fmt.Sprintf(",抓取失敗 %d", errs)
 }
 
-func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now time.Time) {
+// microRun 評估單一幣;回傳「給 log 的結果碼」:""=本根開倉 / "持倉中"=已有部位(只做管理)
+// / 其餘字串=這根沒開的原因(被哪個關卡擋下)。
+func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now time.Time) string {
 	last := cs[len(cs)-1]
 	barMs := b.barSec * 1000
 	if b.famMu != nil {
@@ -627,7 +649,9 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	}
 	var dirty *PaperTrade
 	opened, closed := false, false
+	reason := "" // 給 log 的結果碼(見函式說明)
 	if open != nil {
+		reason = "持倉中"
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
 		exit, outcome, px := false, "", 0.0
@@ -667,9 +691,32 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 			open.PnLPct = round2(settledPnL(open, last.Close))
 		}
 		dirty = open
-	} else if s.StrategyEnabled(b.strat()) && !microCooling(b, coin, last.Ts, barMs) && !familyHolds(b, coin) {
-		if dir, entry, sl, tp, ok := b.signal(cs); ok && s.microSLOK(b, entry, sl) && s.microTPOK(b, entry, tp) &&
-			(b.gate == nil || b.gate(coin, cs)) && s.marketAllows(b.strat(), dir) && s.stockAllowed(b.strat(), coin) { // 品質閘門 + 大盤過濾 + 股票代幣過濾
+	} else {
+		// 逐關卡檢查並記下「擋在哪」(順序與原本的 && 短路一致,行為不變,只是攤開好記 reason)。
+		dir, entry, sl, tp, ok := "", 0.0, 0.0, 0.0, false
+		switch {
+		case !s.StrategyEnabled(b.strat()):
+			reason = "策略停用"
+		case microCooling(b, coin, last.Ts, barMs):
+			reason = "冷卻中"
+		case familyHolds(b, coin):
+			reason = "同家族持有"
+		default:
+			if dir, entry, sl, tp, ok = b.signal(cs); !ok {
+				reason = "訊號不符"
+			} else if !s.microSLOK(b, entry, sl) {
+				reason = "止損不可行"
+			} else if !s.microTPOK(b, entry, tp) {
+				reason = "止盈不可行"
+			} else if b.gate != nil && !b.gate(coin, cs) {
+				reason = "品質閘門"
+			} else if !s.marketAllows(b.strat(), dir) {
+				reason = "大盤過濾"
+			} else if !s.stockAllowed(b.strat(), coin) {
+				reason = "股票代幣過濾"
+			}
+		}
+		if reason == "" { // 全數通過 → 開倉
 			tr := &PaperTrade{
 				ID:     fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
 				Coin:   coin,
@@ -716,6 +763,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	if closed {
 		s.notifyCloseBook(b.name, dirty, now, false) // force=false → 吃「平倉通知」開關
 	}
+	return reason
 }
 
 // microSLOK reports whether the entry's stop distance is within the book's
