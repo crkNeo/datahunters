@@ -542,27 +542,17 @@ func surgeV9Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 
 // ---- generic engine ----
 
-// barSettleSec 是「換棒後至少要過多久才評估」的秒數。收盤瞬間交易所可能還沒生出下一根
-// 新棒,此時 cs[:len-1] 會把「剛收盤那根」當成形成中丟掉 → 評估到更舊的棒 → 漏判。
-// 等過 settle 再評估(此時新棒必已生成),就不受 ticker 相位貼近收盤的影響。
-const barSettleSec = 20
-
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
 func (s *Store) microTick(b *microBook) {
 	bkt := time.Now().UTC().Unix() / b.barSec
 	if bkt == b.bucket {
 		return
 	}
-	if !b.seeded { // boot: 立刻建基準(不抓 K);從下一根起才評估
-		b.bucket = bkt
+	b.bucket = bkt
+	if !b.seeded { // boot: just set the baseline; only bars that close from now on can open trades
 		b.seeded = true
 		return
 	}
-	// settle:太貼近收盤就先不處理、也不吃掉 bucket,等下一個(已過 settle 的)tick 再評估。
-	if time.Now().UTC().Unix()%b.barSec < barSettleSec {
-		return
-	}
-	b.bucket = bkt
 	now := time.Now().UTC()
 	base := s.emaCoins()
 	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)

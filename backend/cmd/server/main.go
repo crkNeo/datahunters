@@ -239,9 +239,9 @@ func main() {
 	// 冥王星 (動態ATR均線收斂) 4H strategy: evaluated once per closed 4H bar.
 	go func() {
 		store.ConvTick()
-		// 4H 策略,2 分鐘延遲相對整根棒可忽略;正確性由評估端的 settle(barSettleSec)保證,
-		// 不會因太貼近收盤而丟棒。
-		ticker := time.NewTicker(2 * time.Minute)
+		// 1 分鐘偵測一次換棒。若收盤 log 出現 ⚠️(新棒未生成),代表這個開機相位剛好貼近收盤,
+		// 重啟換個相位即可;頻繁出現再考慮 settle 機制。
+		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.ConvTick()
 		}
@@ -265,7 +265,7 @@ func main() {
 	// 布林EMA:4H 突破蓄勢(多空)。
 	go func() {
 		store.BollEMATick()
-		ticker := time.NewTicker(2 * time.Minute) // 4H 策略,2 分鐘延遲可忽略;正確性由 settle 保證
+		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.BollEMATick()
 		}
@@ -276,9 +276,7 @@ func main() {
 		store.PulsarV3Tick()
 		store.PulsarV8Tick()
 		store.PulsarV9Tick()
-		// 15m 策略,2 分鐘延遲太久(佔一根棒 13%)。20s 配合評估端 settle:換棒後太早的 tick
-		// 會自動跳過(不吃 bucket),等過 settle 的 tick 才評估 → 開倉延遲 ~20–40s 且不會丟棒。
-		ticker := time.NewTicker(20 * time.Second)
+		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
@@ -290,7 +288,7 @@ func main() {
 	go func() {
 		store.SMCTick()
 		store.SMCV2Tick()
-		ticker := time.NewTicker(2 * time.Minute) // 1h/4h 策略,2 分鐘延遲可忽略;正確性由 settle 保證
+		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.SMCTick()
 			store.SMCV2Tick()

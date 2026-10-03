@@ -171,16 +171,11 @@ func (s *Store) ConvTick() {
 	if b4 == s.conv4hBucket {
 		return
 	}
-	if !s.convSeeded { // boot: 立刻建基準,不回補開機前那根
-		s.conv4hBucket = b4
+	s.conv4hBucket = b4
+	if !s.convSeeded { // boot: set the baseline only; don't backfill entries from the pre-startup bar
 		s.convSeeded = true
 		return
 	}
-	// settle:換棒後太貼近收盤先不處理、也不吃掉 bucket(見 microTick 的 barSettleSec 說明)。
-	if now.Unix()%(4*3600) < barSettleSec {
-		return
-	}
-	s.conv4hBucket = b4
 	expOpenMs := (b4 - 1) * 4 * 3600 * 1000 // 剛收盤那根 4h 棒「應有」的開盤時戳(ms)
 	evaluated, errs, stale := 0, 0, 0
 	for _, coin := range s.emaCoins() {
