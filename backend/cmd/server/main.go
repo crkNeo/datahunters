@@ -239,10 +239,8 @@ func main() {
 	// 冥王星 (動態ATR均線收斂) 4H strategy: evaluated once per closed 4H bar.
 	go func() {
 		store.ConvTick()
-		// ⚠️ 勿把這個間隔改到很短(如 15s)。評估在換棒時會 cs[:len-1] 丟掉「形成中」那根,
-		// 假設交易所已生出下一根新棒;若在收盤後幾秒內就觸發(短間隔+不湊巧的相位),新棒還沒
-		// 出現,會把剛收盤那根當成形成中丟掉 → 評估到舊棒 → 整段時間都不開單。2 分鐘能確保
-		// 評估時早已越過邊界、新棒已生成。要縮短延遲請改用「越過邊界 N 秒後才評估」的 settle 機制。
+		// 4H 策略,2 分鐘延遲相對整根棒可忽略;正確性由評估端的 settle(barSettleSec)保證,
+		// 不會因太貼近收盤而丟棒。
 		ticker := time.NewTicker(2 * time.Minute)
 		for range ticker.C {
 			store.ConvTick()
@@ -267,7 +265,7 @@ func main() {
 	// 布林EMA:4H 突破蓄勢(多空)。
 	go func() {
 		store.BollEMATick()
-		ticker := time.NewTicker(2 * time.Minute) // 勿改短:見 ConvTick 的 ⚠️ 說明(收盤後太早評估會丟棒)
+		ticker := time.NewTicker(2 * time.Minute) // 4H 策略,2 分鐘延遲可忽略;正確性由 settle 保證
 		for range ticker.C {
 			store.BollEMATick()
 		}
@@ -278,7 +276,9 @@ func main() {
 		store.PulsarV3Tick()
 		store.PulsarV8Tick()
 		store.PulsarV9Tick()
-		ticker := time.NewTicker(2 * time.Minute) // 勿改短:見 ConvTick 的 ⚠️ 說明(收盤後太早評估會丟棒)
+		// 15m 策略,2 分鐘延遲太久(佔一根棒 13%)。20s 配合評估端 settle:換棒後太早的 tick
+		// 會自動跳過(不吃 bucket),等過 settle 的 tick 才評估 → 開倉延遲 ~20–40s 且不會丟棒。
+		ticker := time.NewTicker(20 * time.Second)
 		for range ticker.C {
 			store.PulsarTick()
 			store.PulsarV3Tick()
@@ -290,7 +290,7 @@ func main() {
 	go func() {
 		store.SMCTick()
 		store.SMCV2Tick()
-		ticker := time.NewTicker(2 * time.Minute) // 勿改短:見 ConvTick 的 ⚠️ 說明(收盤後太早評估會丟棒)
+		ticker := time.NewTicker(2 * time.Minute) // 1h/4h 策略,2 分鐘延遲可忽略;正確性由 settle 保證
 		for range ticker.C {
 			store.SMCTick()
 			store.SMCV2Tick()
