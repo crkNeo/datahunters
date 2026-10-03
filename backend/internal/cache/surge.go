@@ -360,3 +360,19 @@ func (s *Store) surgeHotCoins() []string {
 	copy(out, s.surge.hot)
 	return out
 }
+
+// surgeBoardCoins is the WIDER strategy universe — the whole 脈搏面板 (board): every
+// coin with a real pulse (surge ≥1.2×, capped at surgeBoardMax=60), sorted by surge.
+// 比 surgeHotCoins(≥3× 的前幾名)廣,讓脈衝星不只盯「有火的前幾名」。
+func (s *Store) surgeBoardCoins() []string {
+	if s.surge == nil {
+		return nil
+	}
+	s.surge.mu.Lock()
+	defer s.surge.mu.Unlock()
+	out := make([]string, len(s.surge.board))
+	for i, r := range s.surge.board {
+		out[i] = r.Coin
+	}
+	return out
+}

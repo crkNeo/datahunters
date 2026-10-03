@@ -664,8 +664,17 @@ func (s *Store) microTick(b *microBook) {
 	reasons := map[string]int{} // 沒開的幣 → 被哪個關卡擋下(逐項計數,基礎分類)
 	var details []string        // 每個沒開的幣 → coin:原因(含子原因)
 	for _, coin := range coins {
-		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
-		if err != nil || len(cs) < 2 {
+		// 走短 TTL 快取:脈衝星家族 4 本同一根會抓同一批(coin|15m|200),只有第一本真的打 REST,
+		// 其餘命中快取 → 放寬到整個脈搏面板也不會把請求量 ×4。
+		v, err := s.candleCache.get(fmt.Sprintf("%s|%s|%d", coin, b.tf, b.klimit), func() (any, error) {
+			return s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
+		})
+		if err != nil {
+			errs++
+			continue
+		}
+		cs := v.([]exchange.Candle)
+		if len(cs) < 2 {
 			errs++
 			continue
 		}
@@ -695,7 +704,7 @@ func (s *Store) microTick(b *microBook) {
 		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
 		return
 	}
-	log.Printf("策略[%s] %s %s 收盤:熱名單 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
+	log.Printf("策略[%s] %s %s 收盤:候選 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
 	if len(details) > 0 { // 每個沒開的幣逐一列出原因(上限 30 個,避免大宇宙策略洗版)
 		log.Printf("  └ [%s] 未開明細:%s", b.name, joinCapped(details, 30))
 	}
