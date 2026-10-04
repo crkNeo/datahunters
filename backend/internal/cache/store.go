@@ -142,14 +142,16 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	bollEMABook  *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
-	surge        *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
-	pulsarBook   *microBook   // 脈衝星(舊):建在爆量熱名單上的觀察策略 (microrev.go)
-	pulsarV3Book *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
-	pulsarV8Book *microBook   // 脈衝星v8:v7 + 更強爆量門檻(鎖定真暴漲)(microrev.go)
-	pulsarV9Book *microBook   // 脈衝星v9:v3 + 寬止損才要求真爆量(microrev.go)
-	smcBooks     []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
-	smcV2Books   []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
+	bollEMABook   *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
+	surge         *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
+	pulsarBook    *microBook   // 脈衝星(舊):建在爆量熱名單上的觀察策略 (microrev.go)
+	pulsarV3Book  *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
+	pulsarV8Book  *microBook   // 脈衝星v8:v7 + 更強爆量門檻(鎖定真暴漲)(microrev.go)
+	pulsarV9Book  *microBook   // 脈衝星v9:v3 + 寬止損才要求真爆量(microrev.go)
+	pulsarV10Book *microBook   // 脈衝星v10:爆量後首次回踩 EMA20 才進(microrev.go)
+	pulsarV11Book *microBook   // 脈衝星v11:v3 + 止損可行性改用突破當下 ATR(早鳥)(microrev.go)
+	smcBooks      []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
+	smcV2Books    []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -293,6 +295,10 @@ func NewStore(coins []string) *Store {
 	s.pulsarV8Book = &microBook{name: "pulsarv8", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV8Signal}
 	// 脈衝星v9:= v3,但寬止損(R≥3%)必須有真爆量(≥4×基線)才進;窄止損照收。
 	s.pulsarV9Book = &microBook{name: "pulsarv9", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV9Signal}
+	// 脈衝星v10:爆量後不追,等第一次回踩 EMA20 守住才進,止損放回踩低點下方。其餘同 v3 家族。
+	s.pulsarV10Book = &microBook{name: "pulsarv10", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV10Signal}
+	// 脈衝星v11:= v3,止損可行性改用 max(截尾ATR, 近5根ATR) → 剛起漲就能進;寬止損沿用 v9 要真爆量。
+	s.pulsarV11Book = &microBook{name: "pulsarv11", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV11Signal}
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
@@ -326,6 +332,8 @@ func NewStore(coins []string) *Store {
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV8Book.trades = db.loadTrades("pulsarv8")
 		s.pulsarV9Book.trades = db.loadTrades("pulsarv9")
+		s.pulsarV10Book.trades = db.loadTrades("pulsarv10")
+		s.pulsarV11Book.trades = db.loadTrades("pulsarv11")
 		for _, b := range s.smcBooks {
 			b.trades = db.loadTrades(b.name)
 		}

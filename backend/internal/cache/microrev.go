@@ -370,6 +370,13 @@ func trimmedBaseVol(cs []exchange.Candle) float64 {
 //	止損可行性:(close−近10根低) 需 ≤ 3×ATR(否則不進場),< 0.8×ATR 則推寬到 0.8×ATR
 //	回傳 tp = 進場 + 5R 佔位(runner 追尾,setupTP rMult 需要 TP3 在 2R 之外)
 func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	return surgeV3Core(cs, false)
+}
+
+// surgeV3Core 是 v3 的進場本體。fastCap=true(脈衝星v11)時,只有「止損可行性上限」改用
+// max(截尾ATR, 近5根不截尾ATR) —— 讓剛突破、ATR 還停在盤整水位時不會被「止損過寬」擋掉;
+// 拋物線護欄、不追高、止損下限仍用截尾 ATR,不跟著放鬆。
+func surgeV3Core(cs []exchange.Candle, fastCap bool) (dir string, entry, sl, tp float64, ok bool) {
 	const (
 		pinBodyMin   = 0.5
 		pinWickMax   = 1.0
@@ -441,7 +448,13 @@ func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 		}
 	}
 	stopDist := price - low10
-	if stopDist > slMaxATR*atr { // 止損太寬 → 不進場(不夾進結構)
+	capATR := atr
+	if fastCap {
+		if f := robustATR(cs, 5, 0); f > capATR {
+			capATR = f
+		}
+	}
+	if stopDist > slMaxATR*capATR { // 止損太寬 → 不進場(不夾進結構)
 		return
 	}
 	if stopDist < slMinATR*atr { // 太緊 → 往外推,放在雜訊之外
@@ -623,6 +636,103 @@ func surgeV9Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return d, e, s, t, true
 }
 
+// surgeV10Signal — 脈衝星v10「爆量後首次回踩」。不追突破根,等爆量後第一次回到 EMA20 守住
+// 才進,買在回檔、止損放回踩低點下方(通常比 v3 的近10根低近得多)。只做多。
+//
+//	爆量根:近 2~10 根內一根收陽、量 ≥ 2.5× 截尾基線(取量最大那根),之後至少一根回踩
+//	趨勢:EMA20 仍上彎(高於 3 根前);不要求 EMA5 > EMA20(回踩時 EMA5 常會下來)
+//	回踩:本根最低 ≤ EMA20 + 0.5×ATR(碰到均線區)且收盤 ≥ EMA20(守住)
+//	仍在回檔:收盤 < 爆量後最高點;爆量後每根收盤都在 EMA20 之上(趨勢沒破)
+//	量縮:爆量後各根均量 ≤ 0.6× 爆量根量(賣壓不重)
+//	止跌:本根收陽,或下影 ≥ 全距一半
+//	止損:回踩最低 − 0.2×ATR,下限 0.8×ATR、上限 4×max(ATR, 近5根ATR)
+func surgeV10Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	const (
+		spikeVolMult = 2.5
+		spikeFrom    = 10  // 爆量根最遠在幾根前
+		spikeTo      = 2   // 爆量根最近在幾根前(之後至少要有一根回踩)
+		touchATR     = 0.5 // 碰到 EMA20 的容許距離(×ATR)
+		pbVolMax     = 0.6 // 回踩段均量 ≤ 爆量根量 × 此值
+		slBufATR     = 0.2
+		slMinATR     = 0.8
+		slMaxATR     = 4.0
+	)
+	n := len(cs)
+	if n < 40 {
+		return
+	}
+	last := cs[n-1]
+	price := last.Close
+	atr := robustATR(cs, 14, 2)
+	base := trimmedBaseVol(cs)
+	if atr <= 0 || base <= 0 {
+		return
+	}
+	k := -1 // 爆量根
+	for i := n - spikeFrom; i <= n-spikeTo; i++ {
+		if i >= 0 && cs[i].Close > cs[i].Open && cs[i].Volume >= spikeVolMult*base && (k < 0 || cs[i].Volume > cs[k].Volume) {
+			k = i
+		}
+	}
+	if k < 0 {
+		return
+	}
+	e20 := emaSeries(cs, 20)
+	ema := e20[n-1]
+	if !(ema > e20[n-4]) { // EMA20 仍上彎
+		return
+	}
+	if !(last.Low <= ema+touchATR*atr && price >= ema) { // 碰均線區且守住
+		return
+	}
+	hi, pbLow, pbVol := cs[k].High, last.Low, 0.0
+	for i := k + 1; i < n; i++ {
+		if cs[i].Close < e20[i] { // 回踩途中曾收破 EMA20 = 不是「首次回踩守住」
+			return
+		}
+		if cs[i].High > hi {
+			hi = cs[i].High
+		}
+		if cs[i].Low < pbLow {
+			pbLow = cs[i].Low
+		}
+		pbVol += cs[i].Volume
+	}
+	if price >= hi { // 已創新高 = 不是回踩
+		return
+	}
+	if pbVol/float64(n-1-k) > pbVolMax*cs[k].Volume { // 回踩沒量縮
+		return
+	}
+	rng := last.High - last.Low
+	if rng <= 0 || !(last.Close > last.Open || math.Min(last.Open, last.Close)-last.Low >= 0.5*rng) {
+		return
+	}
+	stopDist := price - (pbLow - slBufATR*atr)
+	capATR := math.Max(atr, robustATR(cs, 5, 0))
+	if stopDist > slMaxATR*capATR {
+		return
+	}
+	if stopDist < slMinATR*atr {
+		stopDist = slMinATR * atr
+	}
+	return "long", roundPx(price), roundPx(price - stopDist), roundPx(price + 5*stopDist), true
+}
+
+// surgeV11Signal — 脈衝星v11「早鳥 ATR」。= v3,但止損可行性上限改用突破當下的 ATR
+// (surgeV3Core fastCap),讓 v3 在剛起漲、止損距離相對盤整 ATR 很大時也能進;拋物線/不追高
+// 護欄不放鬆。早進的單止損通常偏寬,所以沿用 v9:R ≥ minRPct 的寬止損必須有真爆量才進。
+func surgeV11Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	d, e, s, t, ok0 := surgeV3Core(cs, true)
+	if !ok0 || e <= 0 {
+		return
+	}
+	if (e-s)/e*100 >= minRPct && !hasStrongVol(cs) {
+		return
+	}
+	return d, e, s, t, true
+}
+
 // ---- generic engine ----
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
@@ -641,7 +751,7 @@ func (s *Store) microTick(b *microBook) {
 	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)
 		base = b.universe()
 	}
-	hotN := len(base)                        // 熱名單(可進場候選)幣數 —— 與「持倉補掃」分開記,log 才看得懂
+	hotN := len(base)                       // 熱名單(可進場候選)幣數 —— 與「持倉補掃」分開記,log 才看得懂
 	coins := append([]string(nil), base...) // 複製,下面要 append 不能動到共用切片
 	// 關鍵:一定要處理「有未平倉部位的幣」,即使它已掉出宇宙/熱名單 —— 否則逾時、
 	// 訊號出場(死叉)、收盤 TP/SL 這些只在 microRun(收 K)跑的邏輯永遠不會觸發,
@@ -1087,15 +1197,19 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) BollEMATick()      { s.microTick(s.bollEMABook) }
-func (s *Store) PulsarTick()       { s.microTick(s.pulsarBook) }
-func (s *Store) PulsarMarkTick()   { s.microMarkTick(s.pulsarBook) }
-func (s *Store) PulsarV3Tick()     { s.microTick(s.pulsarV3Book) }
-func (s *Store) PulsarV3MarkTick() { s.microMarkTick(s.pulsarV3Book) }
-func (s *Store) PulsarV8Tick()     { s.microTick(s.pulsarV8Book) }
-func (s *Store) PulsarV8MarkTick() { s.microMarkTick(s.pulsarV8Book) }
-func (s *Store) PulsarV9Tick()     { s.microTick(s.pulsarV9Book) }
-func (s *Store) PulsarV9MarkTick() { s.microMarkTick(s.pulsarV9Book) }
+func (s *Store) BollEMATick()       { s.microTick(s.bollEMABook) }
+func (s *Store) PulsarTick()        { s.microTick(s.pulsarBook) }
+func (s *Store) PulsarMarkTick()    { s.microMarkTick(s.pulsarBook) }
+func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
+func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
+func (s *Store) PulsarV8Tick()      { s.microTick(s.pulsarV8Book) }
+func (s *Store) PulsarV8MarkTick()  { s.microMarkTick(s.pulsarV8Book) }
+func (s *Store) PulsarV9Tick()      { s.microTick(s.pulsarV9Book) }
+func (s *Store) PulsarV9MarkTick()  { s.microMarkTick(s.pulsarV9Book) }
+func (s *Store) PulsarV10Tick()     { s.microTick(s.pulsarV10Book) }
+func (s *Store) PulsarV10MarkTick() { s.microMarkTick(s.pulsarV10Book) }
+func (s *Store) PulsarV11Tick()     { s.microTick(s.pulsarV11Book) }
+func (s *Store) PulsarV11MarkTick() { s.microMarkTick(s.pulsarV11Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1176,6 +1290,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV9Book.mu.Lock()
 		s.pulsarV9Book.trades = keepIf(s.pulsarV9Book.trades, closedOnly)
 		s.pulsarV9Book.mu.Unlock()
+	case "pulsarv10":
+		s.pulsarV10Book.mu.Lock()
+		s.pulsarV10Book.trades = keepIf(s.pulsarV10Book.trades, closedOnly)
+		s.pulsarV10Book.mu.Unlock()
+	case "pulsarv11":
+		s.pulsarV11Book.mu.Lock()
+		s.pulsarV11Book.trades = keepIf(s.pulsarV11Book.trades, closedOnly)
+		s.pulsarV11Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1239,10 +1361,12 @@ func (s *Store) retrofitMultiTP() {
 	}
 }
 
-func (s *Store) BollEMAState() PaperState  { return s.microState(s.bollEMABook) }
-func (s *Store) PulsarState() PaperState   { return s.microState(s.pulsarBook) }
-func (s *Store) PulsarV3State() PaperState { return s.microState(s.pulsarV3Book) }
-func (s *Store) PulsarV8State() PaperState { return s.microState(s.pulsarV8Book) }
-func (s *Store) PulsarV9State() PaperState { return s.microState(s.pulsarV9Book) }
-func (s *Store) SMCState() PaperState      { return s.microState(s.smcBooks...) }
-func (s *Store) SMCV2State() PaperState    { return s.microState(s.smcV2Books...) }
+func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
+func (s *Store) PulsarState() PaperState    { return s.microState(s.pulsarBook) }
+func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
+func (s *Store) PulsarV8State() PaperState  { return s.microState(s.pulsarV8Book) }
+func (s *Store) PulsarV9State() PaperState  { return s.microState(s.pulsarV9Book) }
+func (s *Store) PulsarV10State() PaperState { return s.microState(s.pulsarV10Book) }
+func (s *Store) PulsarV11State() PaperState { return s.microState(s.pulsarV11Book) }
+func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
+func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }
