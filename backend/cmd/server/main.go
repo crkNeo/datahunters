@@ -259,6 +259,8 @@ func main() {
 			store.PulsarV9MarkTick()
 			store.PulsarV10MarkTick()
 			store.PulsarV11MarkTick()
+			store.PulsarV12MarkTick()
+			store.PulsarV13MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
@@ -280,6 +282,8 @@ func main() {
 		store.PulsarV9Tick()
 		store.PulsarV10Tick()
 		store.PulsarV11Tick()
+		store.PulsarV12Tick()
+		store.PulsarV13Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarTick()
@@ -288,6 +292,17 @@ func main() {
 			store.PulsarV9Tick()
 			store.PulsarV10Tick()
 			store.PulsarV11Tick()
+			store.PulsarV12Tick()
+			store.PulsarV13Tick()
+		}
+	}()
+	// 脈衝星v12/v13 盤中進場:每分鐘用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程)。
+	// 兩本接連跑,第二本直接命中 30 秒快取,不會多打一倍 REST。
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.PulsarV12IntraTick()
+			store.PulsarV13IntraTick()
 		}
 	}()
 	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。

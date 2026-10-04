@@ -48,7 +48,7 @@ type followPos struct {
 // observeOnlyBooks are observation strategies that must NOT be swept in by the
 // "all" wildcard — they only go live if named explicitly in BITUNIX_BOOKS. Keeps
 // a strategy we're still validating (脈衝星) from placing real orders by accident.
-var observeOnlyBooks = map[string]bool{"pulsar": true, "pulsarv10": true, "pulsarv11": true}
+var observeOnlyBooks = map[string]bool{"pulsar": true, "pulsarv10": true, "pulsarv11": true, "pulsarv12": true, "pulsarv13": true}
 
 func (a *bitunixAccount) wants(book string) bool {
 	if a.books[book] { // 明確點名 → 一律生效(含 observe-only)

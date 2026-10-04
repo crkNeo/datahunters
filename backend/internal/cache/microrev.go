@@ -42,6 +42,9 @@ type microBook struct {
 	maxSLPct     float64 // skip entries whose SL distance exceeds this % of entry (0 = no filter)
 	beAt         float64 // >0: 保本位 cue at entry + beAt×(TP−entry). NOTIFY-ONLY — never moves the stop.
 	signal       func(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool)
+	// intraSignal (盤中書,脈衝星v12/v13):非 nil 時進場改由 microIntraTick 每分鐘用「形成中的那根」
+	// 評估(elapsedSec = 該根已經過的秒數),條件成立就以當下價進場;收盤的 microTick 只管持倉、不進場。
+	intraSignal func(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool)
 	// signalWhy (optional, diagnostics only): 當 signal 不成立時回傳子原因給 log。nil = 不報子原因。
 	signalWhy func(cs []exchange.Candle) string
 	// exitSignal (optional): checked on each bar close for an OPEN position — return
@@ -762,7 +765,113 @@ func surgeV11Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok
 	return d, e, s, t, true
 }
 
+// surgeV12Signal — 脈衝星v12「盤中即進」:把 v3 的條件直接套在還沒收完的那根上,
+// 這一刻成立就進(量看這根到目前為止實際成交的量,不推估)。最早,但收盤前可能被砸成長上影。
+func surgeV12Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
+	return surgeV3Core(cs, false)
+}
+
+// surgeV13Signal — 脈衝星v13「盤中＋護欄」:v12 再加三道,擋掉大部分「衝高被砸」:
+//
+//	這根已開始滿 5 分鐘 ｜ 現價突破前一根最高點 ｜ 現價離本根最高點的回落 ≤ 本根全距 30%
+func surgeV13Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
+	const (
+		minElapsed  = 300 // 秒
+		maxDrawback = 0.3 // 離本根高點回落上限(×本根全距)
+	)
+	n := len(cs)
+	if elapsedSec < minElapsed || n < 2 {
+		return
+	}
+	last, prev := cs[n-1], cs[n-2]
+	rng := last.High - last.Low
+	if last.Close <= prev.High || rng <= 0 || last.High-last.Close > maxDrawback*rng {
+		return
+	}
+	return surgeV3Core(cs, false)
+}
+
 // ---- generic engine ----
+
+// microIntraTick 是盤中書的進場掃描(每分鐘呼叫):對宇宙內沒有持倉的幣抓含「形成中那根」的
+// K 線,條件成立就以當下價開倉。抓取走 30 秒快取、key 與收盤書分開(收盤書要的是已收的棒),
+// v12/v13 同一分鐘內接連跑時第二本直接命中快取。
+func (s *Store) microIntraTick(b *microBook) {
+	if b.intraSignal == nil || b.universe == nil || !s.StrategyEnabled(b.strat()) {
+		return
+	}
+	now := time.Now().UTC()
+	opened := 0
+	for _, coin := range b.universe() {
+		b.mu.Lock()
+		busy := false
+		for _, tr := range b.trades {
+			if tr.Coin == coin && tr.Status == "open" {
+				busy = true
+				break
+			}
+		}
+		b.mu.Unlock()
+		if busy {
+			continue
+		}
+		v, err := s.klineCache.get(fmt.Sprintf("intra|%s|%s|%d", coin, b.tf, b.klimit), func() (any, error) {
+			return s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
+		})
+		if err != nil {
+			continue
+		}
+		cs, _ := v.([]exchange.Candle)
+		if len(cs) < b.minBars+1 {
+			continue
+		}
+		elapsed := (now.UnixMilli() - cs[len(cs)-1].Ts) / 1000
+		if elapsed < 0 || elapsed >= b.barSec { // 最後一根不是「現在這根」(交易所還沒切新棒)→ 跳過
+			continue
+		}
+		if s.microIntraOpen(b, coin, cs, elapsed, now) {
+			opened++
+		}
+		time.Sleep(25 * time.Millisecond) // pace the REST batch
+	}
+	if opened > 0 {
+		log.Printf("策略[%s] 盤中進場 %d 筆", b.name, opened)
+	}
+}
+
+// microIntraOpen 在持鎖下重新確認沒持倉/沒冷卻,跑盤中訊號與共用關卡,通過就開倉。
+// 進場時間記「實際觸發的時刻」(不是收盤),逾時/冷卻沿用收盤書的根數計算。
+func (s *Store) microIntraOpen(b *microBook, coin string, cs []exchange.Candle, elapsed int64, now time.Time) bool {
+	if b.famMu != nil {
+		b.famMu.Lock()
+	}
+	b.mu.Lock()
+	var tr *PaperTrade
+	held := false
+	for _, t := range b.trades {
+		if t.Coin == coin && t.Status == "open" {
+			held = true
+			break
+		}
+	}
+	if !held && !microCooling(b, coin, now.UnixMilli(), b.barSec*1000) && !familyHolds(b, coin) {
+		if dir, entry, sl, tp, ok := b.intraSignal(cs, elapsed); ok && s.microEntryVeto(b, coin, cs, dir, entry, sl, tp) == "" {
+			tr = s.openMicroTrade(b, coin, dir, entry, sl, tp, now, now)
+		}
+	}
+	b.mu.Unlock()
+	if b.famMu != nil {
+		b.famMu.Unlock()
+	}
+	if tr == nil {
+		return false
+	}
+	if s.db != nil {
+		s.db.upsertTrade(b.name, tr)
+	}
+	s.notifyOpenBook(b.name, tr)
+	return true
+}
 
 // microTick evaluates one book once per newly closed bar over 銀河 coins.
 func (s *Store) microTick(b *microBook) {
@@ -779,6 +888,9 @@ func (s *Store) microTick(b *microBook) {
 	base := s.emaCoins()
 	if b.universe != nil { // 脈衝星:掃爆量熱名單(可含 top-80 以外的幣)
 		base = b.universe()
+	}
+	if b.intraSignal != nil { // 盤中書:進場交給 microIntraTick,收盤只處理持倉
+		base = nil
 	}
 	hotN := len(base)                       // 熱名單(可進場候選)幣數 —— 與「持倉補掃」分開記,log 才看得懂
 	coins := append([]string(nil), base...) // 複製,下面要 append 不能動到共用切片
@@ -955,48 +1067,15 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 						reason = "訊號不符:" + w
 					}
 				}
-			} else if !s.microSLOK(b, entry, sl) {
-				reason = "止損不可行"
-			} else if !s.microTPOK(b, entry, tp) {
-				reason = "止盈不可行"
-			} else if b.gate != nil && !b.gate(coin, cs) {
-				reason = "品質閘門"
-			} else if !s.marketAllows(b.strat(), dir) {
-				reason = "大盤過濾"
-			} else if !s.stockAllowed(b.strat(), coin) {
-				reason = "股票代幣過濾"
+			} else {
+				reason = s.microEntryVeto(b, coin, cs, dir, entry, sl, tp)
 			}
 		}
 		if reason == "" { // 全數通過 → 開倉
-			tr := &PaperTrade{
-				ID:     fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
-				Coin:   coin,
-				Dir:    dir,
-				Entry:  entry,
-				SL:     sl,
-				TP:     tp,
-				Cur:    entry,
-				Status: "open",
-				// 進場時間記「該根 K 棒的收盤時刻」(= 開盤 + 一根),因為進場是在收盤才確認/成交。
-				// 例:15m 的 13:45 K 棒在 14:00 收盤確認進場 → 顯示 14:00,而不是 13:45。
-				OpenTime: time.UnixMilli(last.Ts + barMs).UTC(),
-			}
-			plan, _ := s.tpFor(b.strat(), b.plan)
-			setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
-			if b.tpLevels != nil && plan != nil {
-				// 明確三價位止盈(2155多):TP1/TP2/最終各自獨立,覆蓋 plan 的 a/b 位置,
-				// 但仍沿用 plan 的分批比例(w1/w2/w3)與保本緩衝。
-				tr.TP1, tr.TP2, tr.TP = b.tpLevels(tr.Entry, tr.SL)
-			}
-			if b.tpLevels4 != nil && plan != nil {
-				// 四段斐波止盈(訂單塊 SMC):TP1/TP2/TP3 三個分批位,tr.TP 維持訊號給的
-				// 最終目標(fib2.0)。從 SL(fib-0.13)與 tr.TP(fib2.0)還原斐波格再算三段。
-				tr.TP1, tr.TP2, tr.TP3 = b.tpLevels4(tr.Entry, tr.SL, tr.TP)
-			}
-			b.trades = append(b.trades, tr)
-			dirty = tr
+			// 進場時間記「該根 K 棒的收盤時刻」(= 開盤 + 一根),因為進場是在收盤才確認/成交。
+			// 例:15m 的 13:45 K 棒在 14:00 收盤確認進場 → 顯示 14:00,而不是 13:45。
+			dirty = s.openMicroTrade(b, coin, dir, entry, sl, tp, time.UnixMilli(last.Ts+barMs).UTC(), now)
 			opened = true
-			microTrim(b)
 		}
 	}
 	b.mu.Unlock()
@@ -1015,6 +1094,54 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		s.notifyCloseBook(b.name, dirty, now, false) // force=false → 吃「平倉通知」開關
 	}
 	return reason
+}
+
+// microEntryVeto 跑「訊號成立之後」的各道關卡,回傳擋下的原因("" = 全數通過)。
+// 收盤進場(microRun)與盤中進場(microIntraOpen)共用,順序不可改(log 計數依此)。
+func (s *Store) microEntryVeto(b *microBook, coin string, cs []exchange.Candle, dir string, entry, sl, tp float64) string {
+	switch {
+	case !s.microSLOK(b, entry, sl):
+		return "止損不可行"
+	case !s.microTPOK(b, entry, tp):
+		return "止盈不可行"
+	case b.gate != nil && !b.gate(coin, cs):
+		return "品質閘門"
+	case !s.marketAllows(b.strat(), dir):
+		return "大盤過濾"
+	case !s.stockAllowed(b.strat(), coin):
+		return "股票代幣過濾"
+	}
+	return ""
+}
+
+// openMicroTrade 建立一筆新單、算好分批止盈位並登記進 book。呼叫端持 b.mu。
+func (s *Store) openMicroTrade(b *microBook, coin, dir string, entry, sl, tp float64, openTime, now time.Time) *PaperTrade {
+	tr := &PaperTrade{
+		ID:       fmt.Sprintf("%s|%s|%d", b.name, coin, now.UnixMilli()),
+		Coin:     coin,
+		Dir:      dir,
+		Entry:    entry,
+		SL:       sl,
+		TP:       tp,
+		Cur:      entry,
+		Status:   "open",
+		OpenTime: openTime,
+	}
+	plan, _ := s.tpFor(b.strat(), b.plan)
+	setupTP(tr, plan) // compute TP1/TP2 (分批止盈) at entry — nil when admin turned it off
+	if b.tpLevels != nil && plan != nil {
+		// 明確三價位止盈(2155多):TP1/TP2/最終各自獨立,覆蓋 plan 的 a/b 位置,
+		// 但仍沿用 plan 的分批比例(w1/w2/w3)與保本緩衝。
+		tr.TP1, tr.TP2, tr.TP = b.tpLevels(tr.Entry, tr.SL)
+	}
+	if b.tpLevels4 != nil && plan != nil {
+		// 四段斐波止盈(訂單塊 SMC):TP1/TP2/TP3 三個分批位,tr.TP 維持訊號給的
+		// 最終目標(fib2.0)。從 SL(fib-0.13)與 tr.TP(fib2.0)還原斐波格再算三段。
+		tr.TP1, tr.TP2, tr.TP3 = b.tpLevels4(tr.Entry, tr.SL, tr.TP)
+	}
+	b.trades = append(b.trades, tr)
+	microTrim(b)
+	return tr
 }
 
 // microSLOK reports whether the entry's stop distance is within the book's
@@ -1226,19 +1353,25 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) BollEMATick()       { s.microTick(s.bollEMABook) }
-func (s *Store) PulsarTick()        { s.microTick(s.pulsarBook) }
-func (s *Store) PulsarMarkTick()    { s.microMarkTick(s.pulsarBook) }
-func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
-func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
-func (s *Store) PulsarV8Tick()      { s.microTick(s.pulsarV8Book) }
-func (s *Store) PulsarV8MarkTick()  { s.microMarkTick(s.pulsarV8Book) }
-func (s *Store) PulsarV9Tick()      { s.microTick(s.pulsarV9Book) }
-func (s *Store) PulsarV9MarkTick()  { s.microMarkTick(s.pulsarV9Book) }
-func (s *Store) PulsarV10Tick()     { s.microTick(s.pulsarV10Book) }
-func (s *Store) PulsarV10MarkTick() { s.microMarkTick(s.pulsarV10Book) }
-func (s *Store) PulsarV11Tick()     { s.microTick(s.pulsarV11Book) }
-func (s *Store) PulsarV11MarkTick() { s.microMarkTick(s.pulsarV11Book) }
+func (s *Store) BollEMATick()        { s.microTick(s.bollEMABook) }
+func (s *Store) PulsarTick()         { s.microTick(s.pulsarBook) }
+func (s *Store) PulsarMarkTick()     { s.microMarkTick(s.pulsarBook) }
+func (s *Store) PulsarV3Tick()       { s.microTick(s.pulsarV3Book) }
+func (s *Store) PulsarV3MarkTick()   { s.microMarkTick(s.pulsarV3Book) }
+func (s *Store) PulsarV8Tick()       { s.microTick(s.pulsarV8Book) }
+func (s *Store) PulsarV8MarkTick()   { s.microMarkTick(s.pulsarV8Book) }
+func (s *Store) PulsarV9Tick()       { s.microTick(s.pulsarV9Book) }
+func (s *Store) PulsarV9MarkTick()   { s.microMarkTick(s.pulsarV9Book) }
+func (s *Store) PulsarV10Tick()      { s.microTick(s.pulsarV10Book) }
+func (s *Store) PulsarV10MarkTick()  { s.microMarkTick(s.pulsarV10Book) }
+func (s *Store) PulsarV11Tick()      { s.microTick(s.pulsarV11Book) }
+func (s *Store) PulsarV11MarkTick()  { s.microMarkTick(s.pulsarV11Book) }
+func (s *Store) PulsarV12Tick()      { s.microTick(s.pulsarV12Book) }
+func (s *Store) PulsarV12MarkTick()  { s.microMarkTick(s.pulsarV12Book) }
+func (s *Store) PulsarV12IntraTick() { s.microIntraTick(s.pulsarV12Book) }
+func (s *Store) PulsarV13Tick()      { s.microTick(s.pulsarV13Book) }
+func (s *Store) PulsarV13MarkTick()  { s.microMarkTick(s.pulsarV13Book) }
+func (s *Store) PulsarV13IntraTick() { s.microIntraTick(s.pulsarV13Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1327,6 +1460,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV11Book.mu.Lock()
 		s.pulsarV11Book.trades = keepIf(s.pulsarV11Book.trades, closedOnly)
 		s.pulsarV11Book.mu.Unlock()
+	case "pulsarv12":
+		s.pulsarV12Book.mu.Lock()
+		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
+		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv13":
+		s.pulsarV13Book.mu.Lock()
+		s.pulsarV13Book.trades = keepIf(s.pulsarV13Book.trades, closedOnly)
+		s.pulsarV13Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1397,5 +1538,7 @@ func (s *Store) PulsarV8State() PaperState  { return s.microState(s.pulsarV8Book
 func (s *Store) PulsarV9State() PaperState  { return s.microState(s.pulsarV9Book) }
 func (s *Store) PulsarV10State() PaperState { return s.microState(s.pulsarV10Book) }
 func (s *Store) PulsarV11State() PaperState { return s.microState(s.pulsarV11Book) }
+func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
+func (s *Store) PulsarV13State() PaperState { return s.microState(s.pulsarV13Book) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

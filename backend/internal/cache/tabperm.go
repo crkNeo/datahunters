@@ -67,6 +67,8 @@ var tabMeta = []struct {
 	{"pulsarv9", "脈衝星v9", "admin", false},
 	{"pulsarv10", "脈衝星v10", "admin", false},
 	{"pulsarv11", "脈衝星v11", "admin", false},
+	{"pulsarv12", "脈衝星v12", "admin", false},
+	{"pulsarv13", "脈衝星v13", "admin", false},
 	{"orderblock", "訂單塊", "admin", false},
 	{"orderblockv2", "訂單塊v2", "admin", false},
 	{"polyscout", "聰明錢共識", "admin", false}, // Polymarket CRYPTO 一致性篩選(管理員)
@@ -86,7 +88,7 @@ var tabDefaultKind = map[string]string{
 	"bollema": "signal",
 	"srmtf":   "signal",
 	"surge":   "signal", "pulsar": "signal", "pulsarv3": "signal",
-	"pulsarv8": "signal", "pulsarv9": "signal", "pulsarv10": "signal", "pulsarv11": "signal", "orderblock": "signal", "orderblockv2": "signal",
+	"pulsarv8": "signal", "pulsarv9": "signal", "pulsarv10": "signal", "pulsarv11": "signal", "pulsarv12": "signal", "pulsarv13": "signal", "orderblock": "signal", "orderblockv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -256,7 +258,7 @@ var tabOfRoute = map[string]string{
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
 	"/api/admin/surge":   "surge", "/api/pulsar": "pulsar", "/api/pulsarv3": "pulsarv3",
-	"/api/pulsarv8": "pulsarv8", "/api/pulsarv9": "pulsarv9", "/api/pulsarv10": "pulsarv10", "/api/pulsarv11": "pulsarv11", "/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
+	"/api/pulsarv8": "pulsarv8", "/api/pulsarv9": "pulsarv9", "/api/pulsarv10": "pulsarv10", "/api/pulsarv11": "pulsarv11", "/api/pulsarv12": "pulsarv12", "/api/pulsarv13": "pulsarv13", "/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.
