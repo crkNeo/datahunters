@@ -336,6 +336,26 @@ func robustATR(cs []exchange.Candle, period, trimTop int) float64 {
 	return sum / float64(len(keep))
 }
 
+// macdHist 回傳 MACD(12,26,9) 柱狀圖序列(MACD 線 − 訊號線),與 cs 對齊。
+func macdHist(cs []exchange.Candle) []float64 {
+	n := len(cs)
+	out := make([]float64, n)
+	if n == 0 {
+		return out
+	}
+	e12, e26 := emaSeries(cs, 12), emaSeries(cs, 26)
+	k := 2.0 / 10.0 // 訊號線 EMA9
+	sig := e12[0] - e26[0]
+	for i := 0; i < n; i++ {
+		m := e12[i] - e26[i]
+		if i > 0 {
+			sig = m*k + sig*(1-k)
+		}
+		out[i] = m - sig
+	}
+	return out
+}
+
 // trimmedBaseVol = mean volume of bars [n-30, n-10) (the quiet window before the
 // recent surge) after dropping the 2 highest — a spike-robust baseline so both the
 // entry-volume and freshness checks measure against the真正 quiet level.
@@ -640,11 +660,14 @@ func surgeV9Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 // 才進,買在回檔、止損放回踩低點下方(通常比 v3 的近10根低近得多)。只做多。
 //
 //	爆量根:近 2~10 根內一根收陽、量 ≥ 2.5× 截尾基線(取量最大那根),之後至少一根回踩
+//	爆量品質:爆量根上影線 < 實體(長上影 = 衝高被砸的出貨量,之後的回踩不做)
 //	趨勢:EMA20 仍上彎(高於 3 根前);不要求 EMA5 > EMA20(回踩時 EMA5 常會下來)
 //	回踩:本根最低 ≤ EMA20 + 0.5×ATR(碰到均線區)且收盤 ≥ EMA20(守住)
 //	仍在回檔:收盤 < 爆量後最高點;爆量後每根收盤都在 EMA20 之上(趨勢沒破)
 //	量縮:爆量後各根均量 ≤ 0.6× 爆量根量(賣壓不重)
 //	止跌:本根收陽,或下影 ≥ 全距一半
+//	動能:MACD 柱翻紅(<0)且比前一根更低 → 不接(空方動能還在擴大)。柱在零軸上方收斂不擋 ——
+//	      爆量後回踩時訊號線會追上來,柱幾乎必然下降,用「只要下降就擋」會讓本策略幾乎不觸發。
 //	止損:回踩最低 − 0.2×ATR,下限 0.8×ATR、上限 4×max(ATR, 近5根ATR)
 func surgeV10Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
 	const (
@@ -677,6 +700,9 @@ func surgeV10Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok
 	if k < 0 {
 		return
 	}
+	if cs[k].High-cs[k].Close >= cs[k].Close-cs[k].Open { // 爆量根長上影 = 出貨爆量
+		return
+	}
 	e20 := emaSeries(cs, 20)
 	ema := e20[n-1]
 	if !(ema > e20[n-4]) { // EMA20 仍上彎
@@ -706,6 +732,9 @@ func surgeV10Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok
 	}
 	rng := last.High - last.Low
 	if rng <= 0 || !(last.Close > last.Open || math.Min(last.Open, last.Close)-last.Low >= 0.5*rng) {
+		return
+	}
+	if h := macdHist(cs); h[n-1] < 0 && h[n-1] < h[n-2] { // MACD 柱翻紅且還在擴大 = 空方動能增強
 		return
 	}
 	stopDist := price - (pbLow - slBufATR*atr)

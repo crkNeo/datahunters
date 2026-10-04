@@ -25,8 +25,9 @@ func quietBars(n int, px float64) []exchange.Candle {
 	return out
 }
 
-// pullbackSetup 造「盤整 → 緩漲 → 爆量根 → 量縮回踩」,最後一根(由 last 決定)落在 EMA20 附近。
-func pullbackSetup(pbVol float64, last func(ema float64, i int) exchange.Candle) []exchange.Candle {
+// pullbackSetup 造「盤整 → 緩漲 → 爆量根 → 量縮回踩」,最後一根由 last 決定(拿得到 EMA20 與前一根)。
+// spikeWick = 爆量根上影線長度(實體固定 3.0);回踩 pbBars 根、每根收低 pbStep。
+func pullbackSetup(pbVol, spikeWick float64, pbBars int, pbStep float64, last func(ema float64, prev exchange.Candle, i int) exchange.Candle) []exchange.Candle {
 	cs := quietBars(40, 100)
 	px := 100.0
 	for j := 0; j < 6; j++ { // 緩漲,讓 EMA20 上彎
@@ -35,24 +36,34 @@ func pullbackSetup(pbVol float64, last func(ema float64, i int) exchange.Candle)
 		px += 0.6
 	}
 	i := len(cs) // 爆量根:收陽、量 6×
-	cs = append(cs, bar(i, px, px+3.2, px-0.1, px+3.0, 600))
+	cs = append(cs, bar(i, px, px+3.0+spikeWick, px-0.1, px+3.0, 600))
 	px += 3.0
-	for j := 0; j < 3; j++ { // 量縮回踩
+	for j := 0; j < pbBars; j++ { // 量縮回踩
 		i := len(cs)
-		cs = append(cs, bar(i, px, px+0.1, px-1.0, px-0.9, pbVol))
-		px -= 0.9
+		cs = append(cs, bar(i, px, px+0.1, px-pbStep-0.1, px-pbStep, pbVol))
+		px -= pbStep
 	}
 	ema := emaSeries(cs, 20)[len(cs)-1]
-	return append(cs, last(ema, len(cs)))
+	return append(cs, last(ema, cs[len(cs)-1], len(cs)))
 }
 
-// 碰到 EMA20 守住、收陽的錘子 → 應進場;止損在回踩低點下方、R 遠小於爆量前的 swing low。
-func hammerAt(ema float64, i int) exchange.Candle {
-	return bar(i, ema+0.3, ema+0.7, ema-0.1, ema+0.6, 120)
+// 下探到 EMA20 區、收陽的錘子 → 應進場。
+func hammerAt(ema float64, prev exchange.Candle, i int) exchange.Candle {
+	c := prev.Close + 0.3
+	return bar(i, prev.Close, c+0.1, ema+0.2, c, 120)
+}
+
+// 貼著 EMA20 收小陽。
+func hugEMA(ema float64, _ exchange.Candle, i int) exchange.Candle {
+	return bar(i, ema+0.15, ema+0.3, ema+0.05, ema+0.25, 120)
 }
 
 func TestSurgeV10FirstPullback(t *testing.T) {
-	cs := pullbackSetup(150, hammerAt)
+	// 快速回踩 3 根:MACD 柱還在零軸上方、往下收斂 —— 這種情況要放行(柱幾乎必然下降)
+	cs := pullbackSetup(150, 0.2, 3, 0.9, hammerAt)
+	if h := macdHist(cs); !(h[len(h)-1] > 0 && h[len(h)-1] < h[len(h)-2]) {
+		t.Fatalf("測試前提:柱應為正且下降, got %v → %v", h[len(h)-2], h[len(h)-1])
+	}
 	dir, e, sl, tp, ok := surgeV10Signal(cs)
 	if !ok || dir != "long" {
 		t.Fatalf("回踩 EMA20 守住應進場, got ok=%v dir=%q", ok, dir)
@@ -67,17 +78,36 @@ func TestSurgeV10FirstPullback(t *testing.T) {
 
 func TestSurgeV10Rejects(t *testing.T) {
 	// 回踩沒量縮(回踩量 ≥ 爆量根 0.6×)→ 不進
-	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(500, hammerAt)); ok {
+	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(500, 0.2, 3, 0.9, hammerAt)); ok {
 		t.Error("回踩量太大不該進")
 	}
+	// 爆量根長上影(上影 ≥ 實體)= 出貨爆量 → 不進
+	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, 3.5, 3, 0.9, hammerAt)); ok {
+		t.Error("爆量根長上影不該進")
+	}
+	// 慢慢回踩 7 根:MACD 柱已翻紅且還在擴大 → 不進(同情境短回踩 5 根柱仍為正 → 進)
+	slow := pullbackSetup(150, 0.2, 7, 0.4, hugEMA)
+	if h := macdHist(slow); !(h[len(h)-1] < 0 && h[len(h)-1] < h[len(h)-2]) {
+		t.Fatalf("測試前提:柱應翻紅且擴大, got %v → %v", h[len(h)-2], h[len(h)-1])
+	}
+	if _, _, _, _, ok := surgeV10Signal(slow); ok {
+		t.Error("MACD 柱翻紅擴大不該進")
+	}
+	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, 0.2, 5, 0.4, hugEMA)); !ok {
+		t.Error("對照組(柱仍為正)應進場")
+	}
 	// 收盤跌破 EMA20 → 不進
-	breakdown := func(ema float64, i int) exchange.Candle { return bar(i, ema+0.2, ema+0.3, ema-0.8, ema-0.5, 120) }
-	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, breakdown)); ok {
+	breakdown := func(ema float64, _ exchange.Candle, i int) exchange.Candle {
+		return bar(i, ema+0.2, ema+0.3, ema-0.8, ema-0.5, 120)
+	}
+	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, 0.2, 3, 0.9, breakdown)); ok {
 		t.Error("收在 EMA20 下方不該進")
 	}
 	// 離 EMA20 很遠(沒回踩到)→ 不進
-	far := func(ema float64, i int) exchange.Candle { return bar(i, ema+2.0, ema+2.6, ema+1.8, ema+2.5, 120) }
-	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, far)); ok {
+	far := func(ema float64, _ exchange.Candle, i int) exchange.Candle {
+		return bar(i, ema+2.0, ema+2.6, ema+1.8, ema+2.5, 120)
+	}
+	if _, _, _, _, ok := surgeV10Signal(pullbackSetup(150, 0.2, 3, 0.9, far)); ok {
 		t.Error("沒碰到 EMA20 不該進")
 	}
 	// 沒有爆量根(純盤整)→ 不進
@@ -119,7 +149,7 @@ func TestSurgeV11EarlierThanV3(t *testing.T) {
 
 // v3 的行為不能因為抽出 surgeV3Core 而改變。
 func TestSurgeV3CoreDefaultUnchanged(t *testing.T) {
-	for _, cs := range [][]exchange.Candle{breakoutSetup(600), pullbackSetup(150, hammerAt), quietBars(60, 100)} {
+	for _, cs := range [][]exchange.Candle{breakoutSetup(600), pullbackSetup(150, 0.2, 3, 0.9, hammerAt), quietBars(60, 100)} {
 		_, e1, s1, t1, ok1 := surgeV3Signal(cs)
 		_, e2, s2, t2, ok2 := surgeV3Core(cs, false)
 		if ok1 != ok2 || e1 != e2 || s1 != s2 || t1 != t2 {
