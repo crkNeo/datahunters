@@ -15,7 +15,7 @@ import (
 const (
 	oiAbnPct         = 10.0           // |1h OI 變化%| ≥ 視為異常(OI 一小時跳動 ≥10% 很醒目)
 	cvdAbnPct        = 25.0           // |CVD%| ≥ 視為異常(單邊吃單 ≥25% 全窗量)
-	sigAlertCooldown = 2 * time.Hour  // 同一幣再次通知的最短間隔
+	sigAlertCooldown = 1 * time.Hour  // 同一幣再次通知的最短間隔
 	sigAlertMax      = 20             // 單則訊息最多列幾檔,守 Telegram 4096 字
 )
 
