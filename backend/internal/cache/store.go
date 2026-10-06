@@ -54,6 +54,9 @@ type Store struct {
 	altToday     int
 	altYesterday int
 
+	sigAlertMu   sync.Mutex           // guards sigAlertLast
+	sigAlertLast map[string]time.Time // 多空推薦異常(OI/CVD)上次通知時刻,同幣冷卻去重
+
 	radarMu      sync.RWMutex // guards the breakout-radar cache
 	radarCompute sync.Mutex   // singleflight: only one computeRadar at a time
 	radar        RadarData
@@ -268,6 +271,7 @@ func NewStore(coins []string) *Store {
 		detailCache:       newTTLCache(30 * time.Second),
 		klineCache:        newTTLCache(30 * time.Second),
 		candleCache:       newTTLCache(90 * time.Second), // 蓋得住家族 4 本在同一根內跑完;下一根(15m 後)自然過期重抓
+		sigAlertLast:      map[string]time.Time{},
 		oiCache:           newTTLCache(10 * time.Minute),
 		klCache:           newTTLCache(8 * time.Minute),
 	}

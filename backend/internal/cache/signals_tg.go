@@ -2,82 +2,107 @@ package cache
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
-// signals_tg.go: 把當前「多空推薦」(綜合評分 |分數|≥門檻,與 /api/signals 同口徑)彙整成
-// 一則訊息推到 Telegram。取代原本的「策略逐筆開平倉」Telegram 推播。整點呼叫一次。
+// signals_tg.go: 多空推薦 → Telegram。不等整點,改成「當前快照出現異常 OI 或 CVD 就即時通知」。
+// 每分鐘掃一次最新快照,挑出 |1h OI 變化| 或 |CVD%| 超過門檻的幣,整批推一則;同一幣在冷卻
+// 時間內不重複通知(避免同一波異常洗版)。
 
 const (
-	sigTGThreshold = 20 // |分數| 門檻,與 handleSignals(多空推薦)一致
-	sigTGPerSide   = 25 // 每邊最多列幾檔,避免超過 Telegram 4096 字上限
+	oiAbnPct         = 10.0           // |1h OI 變化%| ≥ 視為異常(OI 一小時跳動 ≥10% 很醒目)
+	cvdAbnPct        = 25.0           // |CVD%| ≥ 視為異常(單邊吃單 ≥25% 全窗量)
+	sigAlertCooldown = 2 * time.Hour  // 同一幣再次通知的最短間隔
+	sigAlertMax      = 20             // 單則訊息最多列幾檔,守 Telegram 4096 字
 )
 
-// SignalsTGTick 推一則多空推薦彙整到 Telegram(Telegram 未設定或目前無符合標的時為 no-op)。
-func (s *Store) SignalsTGTick() {
+type anomalyHit struct {
+	coin   string
+	sn     Snapshot
+	oiAbn  bool
+	cvdAbn bool
+}
+
+// anomalyHits 掃描快照,回傳本輪「新異常(OI 或 CVD 超標)且通過冷卻」的幣,並更新冷卻時刻。
+func (s *Store) anomalyHits(data map[string]Snapshot, now time.Time) []anomalyHit {
+	var hits []anomalyHit
+	s.sigAlertMu.Lock()
+	defer s.sigAlertMu.Unlock()
+	for coin, sn := range data {
+		oiAbn := math.Abs(sn.OIChg1h) >= oiAbnPct
+		cvdAbn := math.Abs(sn.CVDRatio) >= cvdAbnPct
+		if !oiAbn && !cvdAbn {
+			continue
+		}
+		if last, ok := s.sigAlertLast[coin]; ok && now.Sub(last) < sigAlertCooldown {
+			continue // 冷卻中,不重複
+		}
+		s.sigAlertLast[coin] = now
+		hits = append(hits, anomalyHit{coin, sn, oiAbn, cvdAbn})
+	}
+	return hits
+}
+
+// SignalAlertTick 掃當前快照,對 OI 或 CVD 異常的幣即時推 Telegram(同幣冷卻內不重複)。
+// Telegram 未設定、或本輪沒有新異常時為 no-op。每分鐘呼叫一次。
+func (s *Store) SignalAlertTick() {
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
-	if txt := s.signalsTGText(); txt != "" {
-		s.notifier.Send(txt)
+	hits := s.anomalyHits(s.allData(), time.Now())
+	if len(hits) == 0 {
+		return
 	}
+	s.notifier.Send(anomalyText(hits, time.Now()))
 }
 
-type sigTGRow struct {
-	coin               string
-	score              int
-	quality            string
-	oi, okx, cvd, funr float64
+// allData 取當前快照(去掉 updated 時刻,給內部掃描用)。
+func (s *Store) allData() map[string]Snapshot {
+	d, _ := s.All()
+	return d
 }
 
-// signalsTGText 組多空推薦訊息;無任何符合標的時回空字串(呼叫端不送)。
-func (s *Store) signalsTGText() string {
-	data, upd := s.All()
-	var longs, shorts []sigTGRow
-	for coin, sn := range data {
-		if sn.Score > -sigTGThreshold && sn.Score < sigTGThreshold { // 分數不夠醒目 → 跳過
-			continue
-		}
-		r := sigTGRow{coin, sn.Score, sn.Quality, sn.OIChg1h, sn.OKXChg, sn.CVDRatio, sn.Funding}
-		if sn.Score > 0 {
-			longs = append(longs, r)
-		} else {
-			shorts = append(shorts, r)
-		}
-	}
-	if len(longs) == 0 && len(shorts) == 0 {
-		return ""
-	}
-	byStrength := func(rs []sigTGRow) {
-		sort.Slice(rs, func(i, j int) bool { return absInt(rs[i].score) > absInt(rs[j].score) })
-	}
-	byStrength(longs)
-	byStrength(shorts)
-
+// anomalyText 把本輪異常的幣組成 Telegram 訊息(依分數強度排序,上限 sigAlertMax 檔)。
+func anomalyText(hits []anomalyHit, now time.Time) string {
+	sort.Slice(hits, func(i, j int) bool { return absInt(hits[i].sn.Score) > absInt(hits[j].sn.Score) })
 	var b strings.Builder
-	fmt.Fprintf(&b, "📊 <b>多空推薦</b> · %s\n綜合評分 |分數|≥%d,依強度排序\n", upd.Local().Format("01/02 15:04"), sigTGThreshold)
-	writeSide := func(title string, rs []sigTGRow) {
-		fmt.Fprintf(&b, "\n%s(%d)\n", title, len(rs))
-		if len(rs) == 0 {
-			b.WriteString("—\n")
-			return
-		}
-		n := len(rs)
-		if n > sigTGPerSide {
-			n = sigTGPerSide
-		}
-		for _, r := range rs[:n] {
-			fmt.Fprintf(&b, "<code>%-5s %+3d %s OI%+.1f%% 價%+.1f%% CVD%.2f 費%+.3f%%</code>\n",
-				r.coin, r.score, r.quality, r.oi, r.okx, r.cvd, r.funr*100)
-		}
-		if len(rs) > n {
-			fmt.Fprintf(&b, "…還有 %d 檔\n", len(rs)-n)
-		}
+	fmt.Fprintf(&b, "⚡ <b>異常訊號</b> · %s\nOI 或 CVD 異常(OI|Δ1h|≥%.0f%% 或 |CVD|≥%.0f%%)\n\n",
+		now.Local().Format("01/02 15:04"), oiAbnPct, cvdAbnPct)
+	n := len(hits)
+	if n > sigAlertMax {
+		n = sigAlertMax
 	}
-	writeSide("🟢 <b>做多</b>", longs)
-	writeSide("🔴 <b>做空</b>", shorts)
+	for _, h := range hits[:n] {
+		oi := fmt.Sprintf("OI%+.1f%%", h.sn.OIChg1h)
+		if h.oiAbn {
+			oi += "⚠"
+		}
+		cvd := fmt.Sprintf("CVD%+.0f%%", h.sn.CVDRatio)
+		if h.cvdAbn {
+			cvd += "⚠"
+		}
+		fmt.Fprintf(&b, "<code>%-5s %s %+3d %s %s 價%+.1f%% 費%+.3f%%</code>\n",
+			h.coin, biasCN(h.sn.Bias), h.sn.Score, oi, cvd, h.sn.OKXChg, h.sn.Funding*100)
+	}
+	if len(hits) > n {
+		fmt.Fprintf(&b, "…還有 %d 檔\n", len(hits)-n)
+	}
 	return b.String()
+}
+
+// biasCN 把 long/short/neutral 轉成多空標籤。
+func biasCN(bias string) string {
+	switch bias {
+	case "long":
+		return "做多"
+	case "short":
+		return "做空"
+	default:
+		return "中性"
+	}
 }
 
 func absInt(x int) int {

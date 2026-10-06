@@ -1,27 +1,47 @@
 package cache
 
 import (
-	"strings"
 	"testing"
+	"time"
 )
 
-func TestSignalsTGText(t *testing.T) {
-	s := &Store{data: map[string]Snapshot{
-		"BTC": {Score: 85, Bias: "long", Quality: "高", OIChg1h: 2.3, OKXChg: 1.5, CVDRatio: 1.8, Funding: 0.0001},
-		"ETH": {Score: -72, Bias: "short", Quality: "中", OIChg1h: -1.1, OKXChg: -2.0, CVDRatio: 0.6, Funding: -0.0002},
-		"SOL": {Score: 10}, // |分數|<20 → 應被排除
-	}}
-	txt := s.signalsTGText()
-	for _, want := range []string{"多空推薦", "做多", "做空", "BTC", "ETH", "+85", "-72"} {
-		if !strings.Contains(txt, want) {
-			t.Errorf("text missing %q\n--- got ---\n%s", want, txt)
-		}
+func TestAnomalyHits(t *testing.T) {
+	s := &Store{sigAlertLast: map[string]time.Time{}}
+	data := map[string]Snapshot{
+		"BTC": {Score: 40, OIChg1h: 18.0, CVDRatio: 5},   // OI 異常
+		"ETH": {Score: -30, OIChg1h: 2.0, CVDRatio: -40}, // CVD 異常
+		"SOL": {Score: 80, OIChg1h: 3.0, CVDRatio: 10},   // 都正常 → 不觸發
+		"BNB": {Score: 10, OIChg1h: 12.0, CVDRatio: -50}, // 兩者皆異常
 	}
-	if strings.Contains(txt, "SOL") {
-		t.Error("SOL(分數10)應低於門檻被排除")
+	now := time.Now()
+	hits := s.anomalyHits(data, now)
+
+	got := map[string]anomalyHit{}
+	for _, h := range hits {
+		got[h.coin] = h
 	}
-	// 無任何符合標的 → 空字串(呼叫端不送)
-	if (&Store{data: map[string]Snapshot{"X": {Score: 5}}}).signalsTGText() != "" {
-		t.Error("無符合標的時應回空字串")
+	if _, ok := got["SOL"]; ok {
+		t.Error("SOL 正常,不該觸發")
+	}
+	if len(got) != 3 {
+		t.Fatalf("應觸發 3 檔(BTC/ETH/BNB),實際 %d", len(got))
+	}
+	if !got["BTC"].oiAbn || got["BTC"].cvdAbn {
+		t.Error("BTC 應只有 OI 異常")
+	}
+	if got["ETH"].oiAbn || !got["ETH"].cvdAbn {
+		t.Error("ETH 應只有 CVD 異常")
+	}
+	if !got["BNB"].oiAbn || !got["BNB"].cvdAbn {
+		t.Error("BNB 應兩者皆異常")
+	}
+
+	// 冷卻:同一輪(now)再掃一次,應全部被冷卻擋下
+	if again := s.anomalyHits(data, now); len(again) != 0 {
+		t.Errorf("冷卻內不該重複觸發,實際 %d", len(again))
+	}
+	// 超過冷卻後應可再觸發
+	if later := s.anomalyHits(data, now.Add(sigAlertCooldown+time.Minute)); len(later) != 3 {
+		t.Errorf("超過冷卻應再觸發 3 檔,實際 %d", len(later))
 	}
 }
