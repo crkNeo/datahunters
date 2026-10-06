@@ -24,6 +24,9 @@ type tpPlan struct {
 	// runnerExpiry). Lets the small runner test the extended move past the 4h core cap.
 	trailAfterTP2 bool
 	trailR        float64
+	// holdBE (銀河):TP1 後把停損固定在保本(開倉附近)就好,不要因 TP2/TP3 再把停損上移到
+	// TP1/TP2。讓單子在保本之上保留空間跑到最終目標,而不是被 TP1 的停損在回踩時掃掉。
+	holdBE bool
 }
 
 // Presets from the design discussion.
@@ -48,6 +51,10 @@ var (
 	// a/b 只是佔位 —— 實際 TP1/TP2/TP3 由 smcFibTPLevels 依斐波格覆蓋。沿路套保:TP1→保本、
 	// TP2→TP1、TP3→TP2(見 stepTP)。
 	tpSMCFib = &tpPlan{a: 0.40, b: 0.70, w1: 0.25, w2: 0.25, w3: 0.25, beBuf: 0.0005, minSplitPct: 0.008}
+
+	// 銀河(emaonly,1:1):分段同 tpMomentum,但 holdBE —— TP1 後停損固定在保本就好,
+	// 不要因 TP2 把停損上移到 TP1。讓單子在保本之上有空間跑到 1:1 最終目標。
+	tpEMAHoldBE = &tpPlan{a: 0.40, b: 0.70, w1: 0.40, w2: 0.30, w3: 0.30, beBuf: 0.0005, minSplitPct: 0.008, holdBE: true}
 )
 
 // setupTP computes TP1/TP2 for a freshly opened trade from its entry + final TP
@@ -118,14 +125,18 @@ func stepTP(tr *PaperTrade, price float64, p *tpPlan, be bool, now time.Time) bo
 			tr.Realized += p.w2 * pnl(tr.Dir, tr.Entry, tr.TP2)
 			tr.Filled += p.w2
 			tr.Legs = 2
-			tr.SL = tr.TP1 // TP2 → lock the stop at TP1
+			if !p.holdBE {
+				tr.SL = tr.TP1 // TP2 → lock the stop at TP1(holdBE 的策略:停損維持保本,不上移)
+			}
 			mirrorLeg(tr, p.w2)
 		}
 		if tr.TP3 > 0 && tr.Legs < 3 && reached(tr.TP3) { // 四段策略的第三段(訂單塊 SMC);三段書 TP3=0 不進來
 			tr.Realized += p.w3 * pnl(tr.Dir, tr.Entry, tr.TP3)
 			tr.Filled += p.w3
 			tr.Legs = 3
-			tr.SL = tr.TP2 // TP3 → 止損移到 TP2(沿路套保)
+			if !p.holdBE {
+				tr.SL = tr.TP2 // TP3 → 止損移到 TP2(沿路套保;holdBE 的策略維持保本)
+			}
 			mirrorLeg(tr, p.w3)
 		}
 	}

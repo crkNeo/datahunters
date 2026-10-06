@@ -277,7 +277,7 @@ func (s *Store) tickBook(b *paperBook, radar RadarData, px map[string]float64, p
 			before := tr.Legs
 			stepTP(tr, p, plan, beOn, now)
 			if tr.Status == "open" && tr.Legs > before { // partial TP1/TP2 filled (TP3 close → close alert covers it)
-				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
+				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs, plan)
 			}
 		} else if b.trail > 0 {
 			// self-heal R/Peak after a restart (not persisted): R from TP/entry,
@@ -487,18 +487,25 @@ func bookLabel(name string) string {
 // notifyTPHit sends a Web Push (軟體, no Telegram) when a 分批止盈 leg fills
 // (TP1/TP2/TP3). Public books push to everyone; admin books to admins only. The
 // message is built synchronously (reads tr) and sent async so it never blocks the tick.
-func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int) {
+func (s *Store) notifyTPHit(name string, tr *PaperTrade, adminOnly bool, leg int, plan *tpPlan) {
 	if s.pushMgr == nil || !s.notifyOn(name, "tp") { // 後台的「分段止盈通知」開關
 		return
 	}
+	holdBE := plan != nil && plan.holdBE // 銀河:TP1 後停損維持保本,不再上移
 	lvl, stop := tr.TP, ""
 	switch leg {
 	case 1:
 		lvl, stop = tr.TP1, " · 止損移保本"
 	case 2:
 		lvl, stop = tr.TP2, " · 止損移 TP1"
+		if holdBE {
+			stop = " · 止損維持保本"
+		}
 	case 3:
 		lvl, stop = tr.TP3, " · 止損移 TP2" // 四段策略(訂單塊)的第三段
+		if holdBE {
+			stop = " · 止損維持保本"
+		}
 	}
 	title := fmt.Sprintf("🎯 %s TP%d 達成", bookLabel(name), leg)
 	body := fmt.Sprintf("%s %s @ $%s · 已平 %.0f%%%s", tr.Coin, dirCN(tr.Dir), fmtPx(lvl), tr.Filled*100, stop)

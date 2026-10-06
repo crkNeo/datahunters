@@ -1278,7 +1278,7 @@ func (s *Store) microMarkTick(b *microBook) {
 			dirty = append(dirty, tr) // persist on any leg change, BE latch, or final close
 		}
 		if tr.Legs > before { // a TP (TP1/TP2/TP3) just filled → 軟體通知 (admin book)
-			s.notifyTPHit(b.name, tr, true, tr.Legs)
+			s.notifyTPHit(b.name, tr, true, tr.Legs, plan)
 		}
 		if beFired {
 			beCues = append(beCues, tr) // 通知在鎖外送出

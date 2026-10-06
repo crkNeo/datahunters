@@ -343,6 +343,7 @@ func (s *Store) tpFor(name string, base *tpPlan) (*tpPlan, bool) {
 		a: c.SplitA / 100, b: c.SplitB / 100,
 		w1: w1, w2: w2, w3: w3,
 		beBuf: c.BeBufPct / 100, minSplitPct: minSplit,
+		holdBE: base != nil && base.holdBE, // 保留 base 的 holdBE(銀河:TP1 後停損維持保本)
 	}, true
 }
 

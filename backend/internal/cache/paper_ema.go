@@ -271,7 +271,7 @@ func (s *Store) tickEMAOnly(px map[string]float64, now time.Time) {
 			before := tr.Legs
 			stepTP(tr, p, plan, beOn, now) // 分批止盈: partial TPs + trailing stop on live price
 			if tr.Status == "open" && tr.Legs > before {
-				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs)
+				s.notifyTPHit(b.name, tr, b.adminOnly, tr.Legs, plan)
 			}
 		} else {
 			// 同 paper.go:停損可能已被保本上調,結果交給 slOutcome 判定。

@@ -288,7 +288,7 @@ func NewStore(coins []string) *Store {
 	s.paperGamble.maxSLPct = 12          // FILTER@12%: skip SL>12% entries (回測最高報酬 +56%)
 	s.paperGamble.expiry = 6 * time.Hour // 超新星改用短逾時(原超新星v2 的邏輯):24h→6h,動能不快出現就是死單
 	s.paperMain.plan = tpMomentum
-	s.paperEMA.plan = tpMomentum
+	s.paperEMA.plan = tpEMAHoldBE // 銀河:TP1 後停損固定保本,不因 TP2 上移到 TP1
 	// admin A/B observation books: same 超新星 entries + 分批止盈, each isolating ONE
 	// candidate fix so it can be compared against the base 超新星.
 	// 脈衝星(舊):建在爆量熱名單(surge.go)上的觀察策略。宇宙 = surgeHotCoins(可含 top-80 以外),

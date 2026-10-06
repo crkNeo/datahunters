@@ -306,7 +306,7 @@ func (s *Store) ConvMarkTick() {
 		}
 		if tr.Legs > before { // a TP just filled → 軟體通知
 			// adminOnly=false: 冥王星移到 VIP 後與 星軌/超新星/銀河 同級,推播對象跟它們一致(全體)。
-			s.notifyTPHit("conv", tr, false, tr.Legs)
+			s.notifyTPHit("conv", tr, false, tr.Legs, convPlan)
 		}
 	}
 	s.convMu.Unlock()
