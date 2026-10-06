@@ -591,22 +591,7 @@ func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
 	}
 	s.PushSendTopic(stratTopic(b.name), bookLabel(b.name)+" 開倉", // Web Push (independent of Telegram)
 		fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)), "/?tab="+bookTab(b.name))
-	if !s.notifier.Enabled() {
-		return
-	}
-	if b.name == "emaonly" {
-		sig := "金叉 + 站上EMA50"
-		if tr.Dir == "short" {
-			sig = "死叉 + 跌破EMA50"
-		}
-		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n訊號 %s(1h 收K)\n進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%) · 盈虧比 1:1(SL=前20根極值)",
-			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), sig, fmtPx(tr.Entry),
-			fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL)))
-		return
-	}
-	go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n點火 %d · 進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%)\n進場 OI %+.2f%% · CVD %+.2f%% · 費率 %+.4f%%",
-		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), tr.Score, fmtPx(tr.Entry),
-		fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), tr.OI, tr.CVD, tr.Funding*100))
+	// Telegram 策略推播已停用(改由 Telegram 推「多空推薦」整點彙整);Web Push 不受影響。
 }
 
 // notifyCloseBook is the 平倉 notification keyed by BOOK NAME, so it works for
@@ -633,11 +618,7 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 	url := "/?tab=" + bookTab(book)
 	// 對象由該策略 topic 決定:角色不足或使用者關閉此策略者不會收到(管理員專屬策略即只推管理員)。
 	s.PushSendTopic(stratTopic(book), title, body, url)
-	if s.notifier.Enabled() {
-		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s",
-			bookLabel(book), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct,
-			fmtDur(now.Sub(tr.OpenTime)), fmtPx(tr.Entry), fmtPx(tr.Cur)))
-	}
+	// Telegram 策略推播已停用;Web Push 不受影響。
 	return true
 }
 
@@ -659,15 +640,7 @@ func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
 	body := fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry))
 	url := "/?tab=" + bookTab(book)
 	s.PushSendTopic(stratTopic(book), title, body, url)
-	if s.notifier.Enabled() {
-		rr := 0.0
-		if risk := math.Abs(tr.Entry - tr.SL); risk > 0 {
-			rr = math.Abs(tr.TP-tr.Entry) / risk
-		}
-		go s.notifier.Send(fmt.Sprintf("🟢 <b>[%s] 開倉</b> %s %s\n進場 $%s · TP $%s (%+.2f%%) · SL $%s (%+.2f%%) · 盈虧比 1:%.2f",
-			bookLabel(book), tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry),
-			fmtPx(tr.TP), pnl(tr.Dir, tr.Entry, tr.TP), fmtPx(tr.SL), pnl(tr.Dir, tr.Entry, tr.SL), rr))
-	}
+	// Telegram 策略推播已停用;Web Push 不受影響。
 	return true
 }
 
@@ -680,17 +653,7 @@ func (s *Store) notifyTradeClose(b *paperBook, tr *PaperTrade, now time.Time) {
 	s.PushSendTopic(stratTopic(b.name), bookLabel(b.name)+" 平倉",
 		fmt.Sprintf("%s %s · 損益 %+.2f%% · 出場 $%s",
 			tr.Coin, dirCN(tr.Dir), tr.PnLPct, fmtPx(tr.Cur)), "/?tab="+bookTab(b.name))
-	if !s.notifier.Enabled() {
-		return
-	}
-	hold := fmtDur(now.Sub(tr.OpenTime))
-	if b.name == "emaonly" {
-		go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s",
-			bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, fmtPx(tr.Entry), fmtPx(tr.Cur)))
-		return
-	}
-	go s.notifier.Send(fmt.Sprintf("🔴 <b>[%s] 平倉</b> %s %s\n結果 %s · 損益 %+.2f%% · 持倉 %s\n進 $%s → 出 $%s · 進場 OI %+.2f%% / CVD %+.2f%% / 費率 %+.4f%%",
-		bookLabel(b.name), tr.Coin, dirCN(tr.Dir), outcomeCN(tr.Outcome), tr.PnLPct, hold, fmtPx(tr.Entry), fmtPx(tr.Cur), tr.OI, tr.CVD, tr.Funding*100))
+	// Telegram 策略推播已停用;Web Push 不受影響。
 }
 
 func pnl(dir string, entry, cur float64) float64 {

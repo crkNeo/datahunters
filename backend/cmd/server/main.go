@@ -305,6 +305,16 @@ func main() {
 			store.PulsarV13IntraTick()
 		}
 	}()
+	// 多空推薦 → Telegram:整點把「當前綜合評分」彙整成一則推播(取代策略逐筆開平倉的 TG 推播)。
+	// 開機等首次 Refresh 把分數算好再推第一則,之後每小時一次。
+	go func() {
+		time.Sleep(90 * time.Second)
+		store.SignalsTGTick()
+		ticker := time.NewTicker(1 * time.Hour)
+		for range ticker.C {
+			store.SignalsTGTick()
+		}
+	}()
 	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。
 	go func() {
 		store.SMCTick()
