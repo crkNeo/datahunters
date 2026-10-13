@@ -56,7 +56,8 @@ func (s *Store) v14LongGate(coin string, cs []exchange.Candle) bool {
 }
 
 func (s *Store) v14ShortGate(coin string, cs []exchange.Candle) bool {
-	return v14ShortOK(s.v14Tags(coin, cs))
+	_, _, _, _, pathA := blowOffShortSignal(cs) // 不是 A 就是 B(衝高那根還在跑)
+	return v14ShortOK(s.v14Tags(coin, cs), !pathA)
 }
 
 // v14LongOK 多單濾網(點火順勢)。「錢在進來」要有憑證(OI/CVD 抓不到就不進);
@@ -88,9 +89,14 @@ func v14LongOK(t EntryTags, cs []exchange.Candle) bool {
 //
 //	成交額夠 ｜ 擁擠:費率 ≥ +0.05% 或 散戶做多 ≥ 65% ｜ 力竭:近 1h 賣方主導(CVD < 0)且 1h OI 沒再增加
 //	BTC 1h 沒漲超過 2%
-func v14ShortOK(t EntryTags) bool {
+//
+// forming = 路徑 B(衝高那根還在跑):那根裡大多是衝高時的買盤,1h CVD/OI 幾乎不可能已轉弱,
+// 所以 B 的「力竭」改由價格本身證明(爆量上影 ≥ 實體、已從高點回落過半,見 blowOffFormingShort),
+// 這裡只看擁擠、成交額與 BTC。
+func v14ShortOK(t EntryTags, forming bool) bool {
 	crowded := t.Funding >= v14HotFunding || t.LongAcct >= v14CrowdShort
-	return t.Vol24 >= v14MinVolShort && crowded && t.CVD1h < 0 && t.OI1h <= 0 && t.BTC1h <= v14BTCLimit
+	exhausted := forming || (t.CVD1h < 0 && t.OI1h <= 0)
+	return t.Vol24 >= v14MinVolShort && crowded && exhausted && t.BTC1h <= v14BTCLimit
 }
 
 // recentBlowOff:最後一根之前的 6 根裡,量最大的那根若是爆量(≥ 2.5× 截尾基線)且上影 ≥ 實體
@@ -112,60 +118,89 @@ func recentBlowOff(cs []exchange.Candle) bool {
 	return c.Volume >= 2.5*base && upper >= math.Abs(c.Close-c.Open)
 }
 
-// blowOffShortIntra 是空單腿的盤中版本:最後一根是還在跑的 K,現價(它的 Close)一跌破就進。
-// 爆量長上影那根必須是已收的(2~6 根前),形狀才確定。
+// 空單共用常數。
+const (
+	boRunupBars    = 48 // 12h(15m × 48)
+	boMinRunup12h  = 0.15
+	boMinRunup24h  = 0.25
+	boSpikeVolMult = 2.5
+	boSlBufATR     = 0.2
+	boSlMinATR     = 0.8
+	boMaxSLPct     = 0.08
+	boDrawback     = 0.5 // 激進路徑:現價從本根高點回落 ≥ 本根全距一半
+)
+
+// blowOffShortIntra 是空單腿的盤中進場(每分鐘呼叫,最後一根是還在跑的 K,它的 Close = 現價)。
+// 兩條路誰先成立就進:
+//
+//	A. 爆量長上影那根已經收完(2~6 根前),現價跌破它的實體中點與前兩根最低(blowOffShortSignal)
+//	B. 最激進:衝高的那根還在跑就判斷 —— 這根到目前為止已爆量、做出 12h 高點、上影已 ≥ 實體、
+//	   現價已從本根高點回落 ≥ 本根全距一半(blowOffFormingShort)。收盤前可能被拉回去,假訊號較多。
 func blowOffShortIntra(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
-	return blowOffShortSignal(cs)
+	if dir, entry, sl, tp, ok = blowOffShortSignal(cs); ok {
+		return
+	}
+	return blowOffFormingShort(cs)
 }
 
-// blowOffShortSignal — 雙子星空單腿。抓 CTR / AIO 那種「爆量衝高被砸」之後的回落。
-// 盤中(blowOffShortIntra)時最後一根是形成中的 K,「本根收盤」= 現價。
-//
-//	① 剛急漲:最高點比 12h 前的收盤高 ≥ 15%,或比 24h 前高 ≥ 25%
-//	② 出貨爆量:2~6 根前(不含本根)有一根量 ≥ 2.5× 截尾基線、上影 ≥ 實體,而且它就是做出這段高點的那根(差 0.5% 內)
-//	③ 確認轉弱:本根收盤(現價)跌破爆量根實體中點,也跌破前兩根的最低點
-//	止損:這段最高點 + 0.2×ATR(至少 0.8×ATR);止損超過 8% 不做 ｜ tp = 5R 佔位(1R/2R 分批 + 追蹤)
-func blowOffShortSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	const (
-		runupBars    = 48 // 12h
-		minRunup12h  = 0.15
-		minRunup24h  = 0.25
-		spikeVolMult = 2.5
-		spikeFrom    = 6
-		spikeTo      = 2
-		slBufATR     = 0.2
-		slMinATR     = 0.8
-		maxSLPct     = 0.08
-	)
+// blowOffRunup 檢查「剛急漲」(最高點比 12h 前收盤高 ≥ 15%,或比 24h 前高 ≥ 25%),
+// 成立時回傳近 12h 最高點、截尾 ATR 與截尾基線量。
+func blowOffRunup(cs []exchange.Candle) (hi, atr, base float64, ok bool) {
 	n := len(cs)
 	if n < 60 {
 		return
 	}
-	atr := robustATR(cs, 14, 2)
-	base := trimmedBaseVol(cs)
+	atr = robustATR(cs, 14, 2)
+	base = trimmedBaseVol(cs)
 	if atr <= 0 || base <= 0 {
 		return
 	}
-	hi := 0.0 // 近 12h 最高點
-	for i := n - runupBars; i < n; i++ {
+	for i := n - boRunupBars; i < n; i++ {
 		hi = math.Max(hi, cs[i].High)
 	}
-	ago12 := cs[n-1-runupBars].Close
-	runup := ago12 > 0 && hi/ago12-1 >= minRunup12h
-	if n > 2*runupBars { // 有 24h 資料才看 24h
-		if ago24 := cs[n-1-2*runupBars].Close; ago24 > 0 && hi/ago24-1 >= minRunup24h {
-			runup = true
+	ago12 := cs[n-1-boRunupBars].Close
+	ok = ago12 > 0 && hi/ago12-1 >= boMinRunup12h
+	if n > 2*boRunupBars { // 有 24h 資料才看 24h
+		if ago24 := cs[n-1-2*boRunupBars].Close; ago24 > 0 && hi/ago24-1 >= boMinRunup24h {
+			ok = true
 		}
 	}
-	if !runup {
+	return
+}
+
+// blowOffShortAt 在 price 進空:止損 = 這段最高點 + 0.2×ATR(至少 0.8×ATR),超過 8% 不做;tp = 5R 佔位。
+func blowOffShortAt(price, hi, atr float64) (dir string, entry, sl, tp float64, ok bool) {
+	stopDist := hi + boSlBufATR*atr - price
+	if stopDist < boSlMinATR*atr {
+		stopDist = boSlMinATR * atr
+	}
+	if price <= 0 || stopDist <= 0 || stopDist/price > boMaxSLPct {
 		return
 	}
+	return "short", roundPx(price), roundPx(price + stopDist), roundPx(price - 5*stopDist), true
+}
+
+// isBlowOffBar:爆量(≥ 2.5× 基線)、做出這段高點(差 0.5% 內)、上影 ≥ 實體。
+func isBlowOffBar(c exchange.Candle, hi, base float64) bool {
+	upper := c.High - math.Max(c.Open, c.Close)
+	return c.Volume >= boSpikeVolMult*base && c.High >= hi*0.995 && upper >= math.Abs(c.Close-c.Open)
+}
+
+// blowOffShortSignal — 雙子星空單腿(路徑 A)。抓 CTR / AIO 那種「爆量衝高被砸」之後的回落。
+// 盤中時最後一根是形成中的 K,「本根收盤」= 現價。
+//
+//	① 剛急漲:最高點比 12h 前的收盤高 ≥ 15%,或比 24h 前高 ≥ 25%
+//	② 出貨爆量:2~6 根前(已收)有一根爆量長上影 K,而且它就是做出這段高點的那根
+//	③ 確認轉弱:本根收盤(現價)跌破爆量根實體中點,也跌破前兩根的最低點
+func blowOffShortSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	hi, atr, base, up := blowOffRunup(cs)
+	if !up {
+		return
+	}
+	n := len(cs)
 	k := -1
-	for i := n - spikeFrom; i <= n-spikeTo; i++ {
-		c := cs[i]
-		upper := c.High - math.Max(c.Open, c.Close)
-		if c.Volume >= spikeVolMult*base && upper >= math.Abs(c.Close-c.Open) && c.High >= hi*0.995 &&
-			(k < 0 || c.Volume > cs[k].Volume) {
+	for i := n - 6; i <= n-2; i++ {
+		if isBlowOffBar(cs[i], hi, base) && (k < 0 || cs[i].Volume > cs[k].Volume) {
 			k = i
 		}
 	}
@@ -177,13 +212,20 @@ func blowOffShortSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64
 	if !(last.Close < mid && last.Close < math.Min(cs[n-2].Low, cs[n-3].Low)) {
 		return
 	}
-	price := last.Close
-	stopDist := hi + slBufATR*atr - price
-	if stopDist < slMinATR*atr {
-		stopDist = slMinATR * atr
-	}
-	if stopDist <= 0 || stopDist/price > maxSLPct {
+	return blowOffShortAt(last.Close, hi, atr)
+}
+
+// blowOffFormingShort — 雙子星空單腿(路徑 B,最激進):衝高的那根還沒收完就判斷。
+// 這根到目前為止的實際成交量 ≥ 2.5× 基線、做出 12h 高點、上影已 ≥ 實體、現價已從本根高點回落 ≥ 本根全距一半。
+func blowOffFormingShort(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	hi, atr, base, up := blowOffRunup(cs)
+	if !up {
 		return
 	}
-	return "short", roundPx(price), roundPx(price + stopDist), roundPx(price - 5*stopDist), true
+	c := cs[len(cs)-1]
+	rng := c.High - c.Low
+	if rng <= 0 || !isBlowOffBar(c, hi, base) || c.High-c.Close < boDrawback*rng {
+		return
+	}
+	return blowOffShortAt(c.Close, hi, atr)
 }

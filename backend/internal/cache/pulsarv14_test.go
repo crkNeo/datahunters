@@ -90,7 +90,7 @@ func TestV14Gates(t *testing.T) {
 	}
 
 	okShort := EntryTags{Vol24: 2e7, Funding: 0.0006, LongAcct: 0.5, CVD1h: -5, OI1h: -1, BTC1h: 0.5}
-	if !v14ShortOK(okShort) {
+	if !v14ShortOK(okShort, false) {
 		t.Fatal("基準空單應通過")
 	}
 	for name, mod := range map[string]func(*EntryTags){
@@ -102,13 +102,27 @@ func TestV14Gates(t *testing.T) {
 	} {
 		x := okShort
 		mod(&x)
-		if v14ShortOK(x) {
+		if v14ShortOK(x, false) {
 			t.Errorf("空單 %s 應擋下", name)
 		}
 	}
+	// 路徑 B(衝高那根還在跑):不要求 1h CVD/OI 轉弱,但仍要擁擠
+	stillBuying := okShort
+	stillBuying.CVD1h, stillBuying.OI1h = 8, 3
+	if !v14ShortOK(stillBuying, true) {
+		t.Error("路徑 B 不該被 1h CVD/OI 擋")
+	}
+	if v14ShortOK(stillBuying, false) {
+		t.Error("路徑 A 仍要 1h CVD/OI 轉弱")
+	}
+	notCrowded := stillBuying
+	notCrowded.Funding, notCrowded.LongAcct = 0.0001, 0.5
+	if v14ShortOK(notCrowded, true) {
+		t.Error("路徑 B 仍要擁擠")
+	}
 	crowdOnly := okShort
 	crowdOnly.Funding, crowdOnly.LongAcct = 0.0001, 0.7 // 費率不高,但散戶擁擠也算
-	if !v14ShortOK(crowdOnly) {
+	if !v14ShortOK(crowdOnly, false) {
 		t.Error("散戶擁擠應算擁擠")
 	}
 }
@@ -160,5 +174,32 @@ func TestBlowOffShortIntra(t *testing.T) {
 	} // 還在 117.8 之上
 	if _, _, _, _, ok := blowOffShortIntra(blowOffSetup(123, 119, 900, notYet), 180); ok {
 		t.Error("現價還沒跌破 → 不該進")
+	}
+}
+
+// 路徑 B(最激進):衝高的那根還在跑,已爆量、上影 ≥ 實體、現價從高點回落過半 → 盤中就進空。
+func TestBlowOffFormingShort(t *testing.T) {
+	mk := func(high, close, vol float64) []exchange.Candle {
+		cs := quietBars(50, 100)
+		px := 100.0
+		for j := 0; j < 12; j++ {
+			i := len(cs)
+			cs = append(cs, bar(i, px, px+1.6, px-0.1, px+1.5, 200))
+			px += 1.5
+		}
+		return append(cs, bar(len(cs), 118, high, 117.9, close, vol)) // 形成中的衝高 K
+	}
+	dir, e, sl, _, ok := blowOffShortIntra(mk(123, 119.5, 900), 420)
+	if !ok || dir != "short" || !(sl > 123 && (sl-e)/e < 0.08) {
+		t.Fatalf("衝高被砸中 → 應盤中進空, got ok=%v e=%v sl=%v", ok, e, sl)
+	}
+	if _, _, _, _, ok := blowOffShortSignal(mk(123, 119.5, 900)); ok {
+		t.Error("路徑 A 需要已收的爆量 K,這裡應不成立(確認進場是靠路徑 B)")
+	}
+	if _, _, _, _, ok := blowOffShortIntra(mk(123, 122.5, 900), 420); ok {
+		t.Error("還在高點附近(沒被砸)不該進")
+	}
+	if _, _, _, _, ok := blowOffShortIntra(mk(123, 119.5, 200), 420); ok {
+		t.Error("量跟前面急漲時差不多(還沒爆)不該進")
 	}
 }
