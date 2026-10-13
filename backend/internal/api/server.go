@@ -165,6 +165,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv11", s.gateTab("pulsarv11", s.handlePulsarV11))          // 脈衝星v11 (早鳥 ATR)
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
 	mux.HandleFunc("/api/pulsarv13", s.gateTab("pulsarv13", s.handlePulsarV13))          // 脈衝星v13 (盤中+護欄)
+	mux.HandleFunc("/api/pulsarv14", s.gateTab("pulsarv14", s.handlePulsarV14))          // 脈衝星v14 雙子星 (多空)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
@@ -807,6 +808,11 @@ func (s *Server) handlePulsarV12(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV13 serves the 脈衝星v13 (盤中 + 護欄) tracker.
 func (s *Server) handlePulsarV13(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV13State())
+}
+
+// handlePulsarV14 serves the 脈衝星v14 雙子星 (多單腿 + 空單腿) tracker.
+func (s *Server) handlePulsarV14(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV14State())
 }
 
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.

@@ -486,6 +486,8 @@ func bookLabel(name string) string {
 		return "脈衝星v12"
 	case "pulsarv13":
 		return "脈衝星v13"
+	case "pulsarv14", "pulsarv14s":
+		return "脈衝星v14"
 	case "orderblock", "orderblock_4h":
 		return "訂單塊"
 	case "orderblockv2", "orderblockv2_4h":
@@ -545,6 +547,8 @@ func bookTab(name string) string {
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
+	case "pulsarv14", "pulsarv14s": // 雙子星兩腿共用一個分頁
+		return "pulsarv14"
 	case "orderblockv2_4h":
 		return "orderblockv2"
 	}
@@ -816,19 +820,22 @@ func (s *Store) StratTeaser(book string) StratTeaserData {
 // main|gamble|emaonly.
 func (s *Store) ExportTrades(book string) []*PaperTrade {
 	if s.db != nil {
-		if t := s.db.loadTrades(book); len(t) > 0 {
-			return t
+		var all []*PaperTrade
+		for _, name := range stratBooks(book) { // 多本策略(雙子星兩腿)一起匯出
+			all = append(all, s.db.loadTrades(name)...)
+		}
+		if len(all) > 0 {
+			return all
 		}
 	}
-	if mb := s.pulsarBookByName(book); mb != nil { // 脈衝星家族:沒 DB 時退回記憶體
-		mb.mu.Lock()
-		defer mb.mu.Unlock()
-		out := make([]*PaperTrade, len(mb.trades))
-		copy(out, mb.trades)
+	if IsPulsarBook(book) { // 脈衝星家族:沒 DB 時退回記憶體
+		var out []*PaperTrade
+		for _, mb := range s.pulsarBooksByName(book) {
+			mb.mu.Lock()
+			out = append(out, mb.trades...)
+			mb.mu.Unlock()
+		}
 		return out
-	}
-	if IsPulsarBook(book) {
-		return nil
 	}
 	s.paperMu.Lock()
 	defer s.paperMu.Unlock()
@@ -852,13 +859,24 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13":
+	case "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13", "pulsarv14":
 		return true
 	}
 	return false
 }
 
-// pulsarBookByName 依名稱取脈衝星家族的 book(非家族或未初始化回 nil)。
+// pulsarBooksByName 依名稱取脈衝星家族的 book(雙子星回兩腿;非家族回 nil)。
+func (s *Store) pulsarBooksByName(book string) []*microBook {
+	if book == "pulsarv14" {
+		return s.pulsarV14Books
+	}
+	if b := s.pulsarBookByName(book); b != nil {
+		return []*microBook{b}
+	}
+	return nil
+}
+
+// pulsarBookByName 依名稱取脈衝星家族的單一 book(非家族或未初始化回 nil)。
 func (s *Store) pulsarBookByName(book string) *microBook {
 	switch book {
 	case "pulsar":

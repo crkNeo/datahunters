@@ -1378,6 +1378,23 @@ func (s *Store) PulsarV12IntraTick() { s.microIntraTick(s.pulsarV12Book) }
 func (s *Store) PulsarV13Tick()      { s.microTick(s.pulsarV13Book) }
 func (s *Store) PulsarV13MarkTick()  { s.microMarkTick(s.pulsarV13Book) }
 func (s *Store) PulsarV13IntraTick() { s.microIntraTick(s.pulsarV13Book) }
+
+// 脈衝星v14 雙子星:兩腿一起跑;IntraTick 只有多單腿有盤中訊號(空單腿 intraSignal=nil 直接略過)。
+func (s *Store) PulsarV14Tick() {
+	for _, b := range s.pulsarV14Books {
+		s.microTick(b)
+	}
+}
+func (s *Store) PulsarV14MarkTick() {
+	for _, b := range s.pulsarV14Books {
+		s.microMarkTick(b)
+	}
+}
+func (s *Store) PulsarV14IntraTick() {
+	for _, b := range s.pulsarV14Books {
+		s.microIntraTick(b)
+	}
+}
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1424,10 +1441,12 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
 		s.bollEMABook.mu.Unlock()
-	case "orderblock", "orderblockv2": // 一個開關清兩個週期(1h/4h)
+	case "orderblock", "orderblockv2", "pulsarv14": // 一個開關清多本(訂單塊 1h/4h、雙子星多/空兩腿)
 		books := s.smcBooks
 		if book == "orderblockv2" {
 			books = s.smcV2Books
+		} else if book == "pulsarv14" {
+			books = s.pulsarV14Books
 		}
 		for _, b := range books {
 			b.mu.Lock()
@@ -1546,5 +1565,6 @@ func (s *Store) PulsarV10State() PaperState { return s.microState(s.pulsarV10Boo
 func (s *Store) PulsarV11State() PaperState { return s.microState(s.pulsarV11Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
 func (s *Store) PulsarV13State() PaperState { return s.microState(s.pulsarV13Book) }
+func (s *Store) PulsarV14State() PaperState { return s.microState(s.pulsarV14Books...) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

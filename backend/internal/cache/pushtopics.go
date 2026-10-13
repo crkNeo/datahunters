@@ -41,6 +41,8 @@ var pushTopicDefs = []pushTopicDef{
 	{"strat:pulsarv11", "脈衝星v11", "strategy", "pulsarv11"},
 	{"strat:pulsarv12", "脈衝星v12", "strategy", "pulsarv12"},
 	{"strat:pulsarv13", "脈衝星v13", "strategy", "pulsarv13"},
+	{"strat:pulsarv14", "脈衝星v14 多", "strategy", "pulsarv14"},
+	{"strat:pulsarv14s", "脈衝星v14 空", "strategy", "pulsarv14"},
 	{"strat:orderblock", "訂單塊 1H", "strategy", "orderblock"},
 	{"strat:orderblock_4h", "訂單塊 4H", "strategy", "orderblock"},
 	{"strat:orderblockv2", "訂單塊v2 1H", "strategy", "orderblockv2"},
