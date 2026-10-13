@@ -7,11 +7,11 @@ import (
 	"datahunter/internal/exchange"
 )
 
-// pulsarv14.go — 脈衝星v14「雙子星」:照雙子星規劃做的多空觀察策略,多單進場用 v12(盤中、v3 條件)。
+// pulsarv14.go — 脈衝星v14「雙子星」:照雙子星規劃做的多空觀察策略,兩腿都跟 v12 一樣盤中進場(條件成立就進,不等收 K)。
 //
 //	選幣:爆量熱名單(爆量 ≥ 3×)
-//	多單腿 pulsarv14 :v12 的盤中進場 + 「點火順勢」濾網(新錢在推、還不擁擠、還沒噴完、不是出貨爆量)
-//	空單腿 pulsarv14s:「衝高出貨」—— 急漲後的長上影爆量 K 被確認跌破 + 擁擠/力竭 → 15m 收盤做空
+//	多單腿 pulsarv14 :v12(v3 條件)+ 「點火順勢」濾網(新錢在推、還不擁擠、還沒噴完、不是出貨爆量)
+//	空單腿 pulsarv14s:「衝高出貨」—— 已收的長上影爆量 K 被現價跌破 + 擁擠/力竭
 //
 // 兩腿是一個家族:同一個幣同時只會有一個方向、共用一個策略開關(stratKey = pulsarv14)。
 // 濾網用的是爆發雷達(OI 堆積)與多空推薦評分器(費率、散戶多空比、OI/CVD)的個別因子,
@@ -36,7 +36,7 @@ func (s *Store) newPulsarV14Books() []*microBook {
 		signal: surgeV3Signal, intraSignal: surgeV12Signal, gate: s.v14LongGate, tagEntry: true}
 	short := &microBook{name: "pulsarv14s", stratKey: "pulsarv14", tf: "15m", barSec: 900, klimit: 200, minBars: 60,
 		expiry: 16, runnerExpiry: 48, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeHotCoins,
-		signal: blowOffShortSignal, gate: s.v14ShortGate, tagEntry: true}
+		signal: blowOffShortSignal, intraSignal: blowOffShortIntra, gate: s.v14ShortGate, tagEntry: true}
 	books := []*microBook{long, short}
 	fam := &sync.Mutex{}
 	for _, b := range books {
@@ -112,11 +112,18 @@ func recentBlowOff(cs []exchange.Candle) bool {
 	return c.Volume >= 2.5*base && upper >= math.Abs(c.Close-c.Open)
 }
 
-// blowOffShortSignal — 雙子星空單腿(15m 收盤判斷)。抓 CTR / AIO 那種「爆量衝高被砸」之後的回落。
+// blowOffShortIntra 是空單腿的盤中版本:最後一根是還在跑的 K,現價(它的 Close)一跌破就進。
+// 爆量長上影那根必須是已收的(2~6 根前),形狀才確定。
+func blowOffShortIntra(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
+	return blowOffShortSignal(cs)
+}
+
+// blowOffShortSignal — 雙子星空單腿。抓 CTR / AIO 那種「爆量衝高被砸」之後的回落。
+// 盤中(blowOffShortIntra)時最後一根是形成中的 K,「本根收盤」= 現價。
 //
 //	① 剛急漲:最高點比 12h 前的收盤高 ≥ 15%,或比 24h 前高 ≥ 25%
-//	② 出貨爆量:最近 6 根內(不含本根)有一根量 ≥ 2.5× 截尾基線、上影 ≥ 實體,而且它就是做出這段高點的那根(差 0.5% 內)
-//	③ 確認轉弱:本根收盤跌破爆量根實體中點,也跌破前兩根的最低點
+//	② 出貨爆量:2~6 根前(不含本根)有一根量 ≥ 2.5× 截尾基線、上影 ≥ 實體,而且它就是做出這段高點的那根(差 0.5% 內)
+//	③ 確認轉弱:本根收盤(現價)跌破爆量根實體中點,也跌破前兩根的最低點
 //	止損:這段最高點 + 0.2×ATR(至少 0.8×ATR);止損超過 8% 不做 ｜ tp = 5R 佔位(1R/2R 分批 + 追蹤)
 func blowOffShortSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
 	const (

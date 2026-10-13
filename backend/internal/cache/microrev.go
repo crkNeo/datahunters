@@ -1379,7 +1379,7 @@ func (s *Store) PulsarV13Tick()      { s.microTick(s.pulsarV13Book) }
 func (s *Store) PulsarV13MarkTick()  { s.microMarkTick(s.pulsarV13Book) }
 func (s *Store) PulsarV13IntraTick() { s.microIntraTick(s.pulsarV13Book) }
 
-// 脈衝星v14 雙子星:兩腿一起跑;IntraTick 只有多單腿有盤中訊號(空單腿 intraSignal=nil 直接略過)。
+// 脈衝星v14 雙子星:兩腿一起跑,兩腿都是盤中書(進場走 IntraTick,收盤 Tick 只管持倉)。
 func (s *Store) PulsarV14Tick() {
 	for _, b := range s.pulsarV14Books {
 		s.microTick(b)

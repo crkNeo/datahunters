@@ -139,7 +139,26 @@ func TestV14FamilyExclusive(t *testing.T) {
 	if long.strat() != "pulsarv14" || short.strat() != "pulsarv14" || stratKeyOf("pulsarv14s") != "pulsarv14" {
 		t.Error("兩腿應共用 pulsarv14 開關")
 	}
+	if long.intraSignal == nil || short.intraSignal == nil {
+		t.Error("兩腿都應是盤中進場")
+	}
 	if !observeOnlyBooks["pulsarv14"] || !observeOnlyBooks["pulsarv14s"] {
 		t.Error("兩腿都必須是只觀察(不被 BITUNIX_BOOKS=all 帶進實盤)")
+	}
+}
+
+// 空單盤中:現價一跌破就進(不必等收 K);同一根若現價還沒跌破則不進。
+func TestBlowOffShortIntra(t *testing.T) {
+	falling := func(prev exchange.Candle, i int) exchange.Candle {
+		return bar(i, prev.Close, prev.Close+0.1, 117.0, 117.2, 120)
+	} // 盤中現價 117.2
+	if _, _, _, _, ok := blowOffShortIntra(blowOffSetup(123, 119, 900, falling), 180); !ok {
+		t.Error("現價已跌破前兩根最低與爆量根中點 → 盤中應進空")
+	}
+	notYet := func(prev exchange.Candle, i int) exchange.Candle {
+		return bar(i, prev.Close, prev.Close+0.1, 118.0, 118.2, 120)
+	} // 還在 117.8 之上
+	if _, _, _, _, ok := blowOffShortIntra(blowOffSetup(123, 119, 900, notYet), 180); ok {
+		t.Error("現價還沒跌破 → 不該進")
 	}
 }
