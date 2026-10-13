@@ -89,6 +89,16 @@ type PaperTrade struct {
 	Legs     int     `json:"legs"`
 	Filled   float64 `json:"filled,omitempty"`
 	Realized float64 `json:"realized,omitempty"`
+
+	// 進場因子快照(脈衝星 v3/v12 進場時記錄,供分組分析,見 entrytags.go)。上面的 OI/CVD/Funding
+	// 對這些書 = 12h OI 變化% / 6h CVD% / 最近一次結算費率。0 = 沒記錄。
+	OI1h     float64 `json:"oi_1h,omitempty"`
+	CVD1h    float64 `json:"cvd_1h,omitempty"`
+	LongAcct float64 `json:"long_acct,omitempty"` // 散戶做多帳戶比例 0..1
+	Chg24    float64 `json:"chg_24,omitempty"`
+	SurgeX   float64 `json:"surge_x,omitempty"`
+	BTC1h    float64 `json:"btc_1h,omitempty"`
+	Vol24    float64 `json:"vol_24,omitempty"`
 }
 
 // PaperStats summarises closed trades.
@@ -810,6 +820,16 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 			return t
 		}
 	}
+	if mb := s.pulsarBookByName(book); mb != nil { // 脈衝星家族:沒 DB 時退回記憶體
+		mb.mu.Lock()
+		defer mb.mu.Unlock()
+		out := make([]*PaperTrade, len(mb.trades))
+		copy(out, mb.trades)
+		return out
+	}
+	if IsPulsarBook(book) {
+		return nil
+	}
 	s.paperMu.Lock()
 	defer s.paperMu.Unlock()
 	var b *paperBook
@@ -827,6 +847,38 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 	out := make([]*PaperTrade, len(b.trades))
 	copy(out, b.trades)
 	return out
+}
+
+// IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
+func IsPulsarBook(book string) bool {
+	switch book {
+	case "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13":
+		return true
+	}
+	return false
+}
+
+// pulsarBookByName 依名稱取脈衝星家族的 book(非家族或未初始化回 nil)。
+func (s *Store) pulsarBookByName(book string) *microBook {
+	switch book {
+	case "pulsar":
+		return s.pulsarBook
+	case "pulsarv3":
+		return s.pulsarV3Book
+	case "pulsarv8":
+		return s.pulsarV8Book
+	case "pulsarv9":
+		return s.pulsarV9Book
+	case "pulsarv10":
+		return s.pulsarV10Book
+	case "pulsarv11":
+		return s.pulsarV11Book
+	case "pulsarv12":
+		return s.pulsarV12Book
+	case "pulsarv13":
+		return s.pulsarV13Book
+	}
+	return nil
 }
 
 // EMAOnly = standalone EMA cross book (signals only; no scan watchlist).

@@ -572,8 +572,8 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 // the Chinese/number columns correctly.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
-	switch book {
-	case "main", "gamble", "emaonly":
+	switch {
+	case book == "main", book == "gamble", book == "emaonly", cache.IsPulsarBook(book):
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -584,8 +584,12 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename="+fname)
 	w.Write([]byte{0xEF, 0xBB, 0xBF}) // UTF-8 BOM for Excel
 	cw := csv.NewWriter(w)
+	// 新欄位一律接在原本欄位之後,舊的試算表不受影響。oi/cvd/funding 對脈衝星 = 12h OI% / 6h CVD% / 結算費率;
+	// oi_1h 之後是進場因子快照(cache/entrytags.go),目前只有 v3/v12 會記。
 	cw.Write([]string{"coin", "dir", "score", "entry", "tp", "sl", "exit", "pnl_pct",
-		"status", "outcome", "oi", "cvd", "funding", "open_time", "close_time"})
+		"status", "outcome", "oi", "cvd", "funding", "open_time", "close_time",
+		"book", "id", "tp1", "tp2", "legs", "max_gain",
+		"oi_1h", "cvd_1h", "long_acct", "chg_24", "surge_x", "btc_1h", "vol_24"})
 	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 	for _, t := range trades {
 		closeT := ""
@@ -596,6 +600,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			t.Coin, t.Dir, strconv.Itoa(t.Score), f(t.Entry), f(t.TP), f(t.SL), f(t.Cur),
 			f(t.PnLPct), t.Status, t.Outcome, f(t.OI), f(t.CVD), f(t.Funding),
 			t.OpenTime.UTC().Format(time.RFC3339), closeT,
+			book, t.ID, f(t.TP1), f(t.TP2), strconv.Itoa(t.Legs), f(t.MaxGain),
+			f(t.OI1h), f(t.CVD1h), f(t.LongAcct), f(t.Chg24), f(t.SurgeX), f(t.BTC1h), f(t.Vol24),
 		})
 	}
 	cw.Flush()

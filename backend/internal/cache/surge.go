@@ -333,6 +333,15 @@ func (s *Store) WarmSurge() {
 // Cached ~5min so it's one cheap fetch regardless of how many coins fire. Lenient
 // by design — only vetoes an obvious dump, not ordinary chop. Used as 脈衝星v3 gate.
 func (s *Store) btcRegimeGate(coin string, cs []exchange.Candle) bool {
+	ret, ok := s.btc1hRet()
+	if !ok {
+		return true // 取不到 BTC 資料 → 不擋(避免因外部故障整個停擺)
+	}
+	return ret > -0.02
+}
+
+// btc1hRet 回傳 BTC 現價對上一個整點收盤的報酬(小數,−0.02 = −2%),走 oiCache 快取。
+func (s *Store) btc1hRet() (float64, bool) {
 	v, err := s.oiCache.get("btc1hret", func() (any, error) {
 		kl, e := s.ex.BinanceKlines("BTCUSDT", "1h", 2)
 		if e != nil || len(kl) < 2 || kl[len(kl)-2].Close <= 0 {
@@ -341,10 +350,10 @@ func (s *Store) btcRegimeGate(coin string, cs []exchange.Candle) bool {
 		return kl[len(kl)-1].Close/kl[len(kl)-2].Close - 1, nil
 	})
 	if err != nil {
-		return true // 取不到 BTC 資料 → 不擋(避免因外部故障整個停擺)
+		return 0, false
 	}
 	ret, _ := v.(float64)
-	return ret > -0.02
+	return ret, true
 }
 
 // surgeHotCoins is the strategy universe (爆量熱名單) — coins currently above the

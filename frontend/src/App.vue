@@ -897,7 +897,7 @@ async function manualExit(t) {
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
   const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
-  const bookName = map[mainTab.value]
+  const bookName = map[mainTab.value] || (mainTab.value.startsWith('pulsar') ? mainTab.value : '') // 脈衝星家族:分頁名 = book 名
   if (!bookName) return
   try {
     const res = await authFetch('/api/admin/export?book=' + bookName)
@@ -2689,7 +2689,7 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && mainTab.startsWith('pulsar')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
       <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
       <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>

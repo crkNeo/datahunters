@@ -45,6 +45,8 @@ type microBook struct {
 	// intraSignal (盤中書,脈衝星v12/v13):非 nil 時進場改由 microIntraTick 每分鐘用「形成中的那根」
 	// 評估(elapsedSec = 該根已經過的秒數),條件成立就以當下價進場;收盤的 microTick 只管持倉、不進場。
 	intraSignal func(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool)
+	// tagEntry: 進場時記錄雷達/評分器因子(entrytags.go),只記錄、不影響進場。
+	tagEntry bool
 	// signalWhy (optional, diagnostics only): 當 signal 不成立時回傳子原因給 log。nil = 不報子原因。
 	signalWhy func(cs []exchange.Candle) string
 	// exitSignal (optional): checked on each bar close for an OPEN position — return
@@ -866,6 +868,7 @@ func (s *Store) microIntraOpen(b *microBook, coin string, cs []exchange.Candle, 
 	if tr == nil {
 		return false
 	}
+	s.tagEntry(b, tr, cs)
 	if s.db != nil {
 		s.db.upsertTrade(b.name, tr)
 	}
@@ -1081,6 +1084,9 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	b.mu.Unlock()
 	if b.famMu != nil {
 		b.famMu.Unlock() // 在 DB 寫入前放掉,別讓另一腿等 I/O
+	}
+	if opened {
+		s.tagEntry(b, dirty, cs) // 鎖外抓因子,趕在第一次 upsert 前寫進去
 	}
 	if dirty != nil && s.db != nil {
 		s.db.upsertTrade(b.name, dirty)
