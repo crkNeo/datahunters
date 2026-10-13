@@ -44,10 +44,15 @@ func TestBlowOffShortSignal(t *testing.T) {
 	if _, _, _, _, ok := blowOffShortSignal(blowOffSetup(123, 119, 200, breakDown)); ok {
 		t.Error("量不夠不該做空")
 	}
-	// 最後一根收紅(還沒轉弱)→ 不做
+	// 最後一根沒跌破前兩根的最低點(還沒轉弱)→ 不做
 	green := func(prev exchange.Candle, i int) exchange.Candle { return bar(i, 117.2, 119, 117, 118.9, 250) }
 	if _, _, _, _, ok := blowOffShortSignal(blowOffSetup(123, 119, 900, green)); ok {
 		t.Error("沒確認轉弱不該做空")
+	}
+	// 跌破爆量根中點、但沒跌破前兩根最低(117.8)→ 不做
+	half := func(prev exchange.Candle, i int) exchange.Candle { return bar(i, 118.6, 118.7, 117.9, 118.0, 250) }
+	if _, _, _, _, ok := blowOffShortSignal(blowOffSetup(123, 119, 900, half)); ok {
+		t.Error("沒跌破前兩根最低不該做空")
 	}
 	// 沒有前面那段急漲 → 不做
 	if _, _, _, _, ok := blowOffShortSignal(quietBars(80, 100)); ok {
@@ -57,17 +62,18 @@ func TestBlowOffShortSignal(t *testing.T) {
 
 func TestV14Gates(t *testing.T) {
 	cs := quietBars(60, 100)
-	okLong := EntryTags{Vol24: 8e6, OI12h: 3, Funding: 0.0001, LongAcct: 0.6, Chg24: 10, BTC1h: 0.3}
+	okLong := EntryTags{Vol24: 8e6, OI12h: 6, CVD6h: 4, Funding: 0.0001, LongAcct: 0.55, Chg24: 10, BTC1h: 0.3}
 	if !v14LongOK(okLong, cs) {
 		t.Fatal("基準多單應通過")
 	}
 	for name, mod := range map[string]func(*EntryTags){
-		"量太小":    func(x *EntryTags) { x.Vol24 = 1e6 },
-		"OI 在減少": func(x *EntryTags) { x.OI12h = -2 },
-		"費率擁擠":   func(x *EntryTags) { x.Funding = 0.0008 },
-		"散戶擁擠":   func(x *EntryTags) { x.LongAcct = 0.75 },
-		"已漲太多":   func(x *EntryTags) { x.Chg24 = 45 },
-		"BTC 急跌": func(x *EntryTags) { x.BTC1h = -2.5 },
+		"量太小":         func(x *EntryTags) { x.Vol24 = 1e6 },
+		"OI 增加不到 5%":  func(x *EntryTags) { x.OI12h = 3 },
+		"CVD 賣方主導":    func(x *EntryTags) { x.CVD6h = -2 },
+		"費率擁擠":        func(x *EntryTags) { x.Funding = 0.0008 },
+		"散戶做多 ≥60%":   func(x *EntryTags) { x.LongAcct = 0.62 },
+		"24h 已漲 ≥25%": func(x *EntryTags) { x.Chg24 = 28 },
+		"BTC 急跌":      func(x *EntryTags) { x.BTC1h = -2.5 },
 	} {
 		x := okLong
 		mod(&x)
@@ -75,9 +81,12 @@ func TestV14Gates(t *testing.T) {
 			t.Errorf("多單 %s 應擋下", name)
 		}
 	}
-	missing := EntryTags{Vol24: 8e6} // 抓不到的資料(0)不擋
-	if !v14LongOK(missing, cs) {
-		t.Error("缺資料不該擋多單")
+	noCrowdData := EntryTags{Vol24: 8e6, OI12h: 6, CVD6h: 4} // 費率/多空比抓不到(0)不擋
+	if !v14LongOK(noCrowdData, cs) {
+		t.Error("缺費率/多空比不該擋多單")
+	}
+	if v14LongOK(EntryTags{Vol24: 8e6, CVD6h: 4}, cs) { // OI 是「錢在進來」的憑證,沒有就不進
+		t.Error("缺 OI 資料應擋多單")
 	}
 
 	okShort := EntryTags{Vol24: 2e7, Funding: 0.0006, LongAcct: 0.5, CVD1h: -5, OI1h: -1, BTC1h: 0.5}
