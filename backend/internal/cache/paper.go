@@ -470,24 +470,10 @@ func bookLabel(name string) string {
 		return "冥王星"
 	case "bollema":
 		return "海王星"
-	case "pulsar":
-		return "脈衝星(舊)"
 	case "pulsarv3":
 		return "脈衝星"
-	case "pulsarv8":
-		return "脈衝星v8"
-	case "pulsarv9":
-		return "脈衝星v9"
-	case "pulsarv10":
-		return "脈衝星v10"
-	case "pulsarv11":
-		return "脈衝星v11"
 	case "pulsarv12":
 		return "脈衝星v12"
-	case "pulsarv13":
-		return "脈衝星v13"
-	case "pulsarv14", "pulsarv14s":
-		return "脈衝星v14"
 	case "orderblock", "orderblock_4h":
 		return "訂單塊"
 	case "orderblockv2", "orderblockv2_4h":
@@ -543,12 +529,10 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13", "orderblock", "orderblockv2":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
-	case "pulsarv14", "pulsarv14s": // 雙子星兩腿共用一個分頁
-		return "pulsarv14"
 	case "orderblockv2_4h":
 		return "orderblockv2"
 	}
@@ -859,17 +843,14 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13", "pulsarv14":
+	case "pulsarv3", "pulsarv12":
 		return true
 	}
 	return false
 }
 
-// pulsarBooksByName 依名稱取脈衝星家族的 book(雙子星回兩腿;非家族回 nil)。
+// pulsarBooksByName 依名稱取脈衝星家族的 book(非家族回 nil)。
 func (s *Store) pulsarBooksByName(book string) []*microBook {
-	if book == "pulsarv14" {
-		return s.pulsarV14Books
-	}
 	if b := s.pulsarBookByName(book); b != nil {
 		return []*microBook{b}
 	}
@@ -879,22 +860,10 @@ func (s *Store) pulsarBooksByName(book string) []*microBook {
 // pulsarBookByName 依名稱取脈衝星家族的單一 book(非家族或未初始化回 nil)。
 func (s *Store) pulsarBookByName(book string) *microBook {
 	switch book {
-	case "pulsar":
-		return s.pulsarBook
 	case "pulsarv3":
 		return s.pulsarV3Book
-	case "pulsarv8":
-		return s.pulsarV8Book
-	case "pulsarv9":
-		return s.pulsarV9Book
-	case "pulsarv10":
-		return s.pulsarV10Book
-	case "pulsarv11":
-		return s.pulsarV11Book
 	case "pulsarv12":
 		return s.pulsarV12Book
-	case "pulsarv13":
-		return s.pulsarV13Book
 	}
 	return nil
 }

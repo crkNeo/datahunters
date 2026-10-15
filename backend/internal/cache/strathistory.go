@@ -21,8 +21,6 @@ func stratBooks(key string) []string {
 		return []string{"orderblock", "orderblock_4h"}
 	case "orderblockv2":
 		return []string{"orderblockv2", "orderblockv2_4h"}
-	case "pulsarv14":
-		return []string{"pulsarv14", "pulsarv14s"}
 	}
 	return []string{key}
 }

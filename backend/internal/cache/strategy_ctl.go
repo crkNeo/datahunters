@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsar", "pulsarv3", "pulsarv8", "pulsarv9", "pulsarv10", "pulsarv11", "pulsarv12", "pulsarv13", "pulsarv14", "orderblock", "orderblockv2"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -81,23 +81,11 @@ var stratDefaults = map[string]StratCfg{
 	"conv":    {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
 	"bollema": {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "single", BeCuePct: 30, NotifyBE: true},
-	// 脈衝星:建在爆量熱名單上的觀察策略。TP3=1:4、分批 50/75 → 1:2/1:3。預設靜默觀察
-	// (通知全關),確認品質後再開通知/接實盤。
-	"pulsar": {Tags: []string{"爆量", "埋伏", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05},
 	// 脈衝星v3:ATR 自適應 + 追尾 runner。ExitMode 須為 split 才會觸發 tpFor;結構(TP1=1R/
 	// TP2=2R/追尾)來自 tpPulsarV3,SplitA/B 對 rMult 無效;比例 50/25/25 由此驅動。
 	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v8:v3 家族(50/25/25 + 追尾)+ 更強爆量門檻。
-	"pulsarv8": {Tags: []string{"爆量", "埋伏", "多單", "真暴漲"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	"pulsarv9": {Tags: []string{"爆量", "埋伏", "多單", "條件爆量"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v10/v11:早進場觀察書(v10 首次回踩、v11 早鳥 ATR),出場同 v3 家族。
-	"pulsarv10": {Tags: []string{"爆量", "回踩", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	"pulsarv11": {Tags: []string{"爆量", "早鳥", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v12/v13:盤中書(不等收K),出場同 v3 家族。
+	// 脈衝星v12:盤中書(不等收K),出場同 v3 家族。
 	"pulsarv12": {Tags: []string{"爆量", "盤中", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	"pulsarv13": {Tags: []string{"爆量", "盤中", "護欄", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v14 雙子星:多空兩腿(pulsarv14 / pulsarv14s)共用這組設定,出場同 v3 家族。
-	"pulsarv14": {Tags: []string{"爆量", "盤中", "多空", "雙子星"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
 	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
 	// 訂單塊(v1):三段斐波止盈 0.618/1.13/1.618,分批 40/30/30,止損 fib−0.13;進場區 0.142-0.382;1h/4h。
@@ -376,8 +364,6 @@ func stratKeyOf(book string) string {
 		return "orderblock"
 	case "orderblockv2_4h": // 訂單塊v2 的 4h 週期併回主 key
 		return "orderblockv2"
-	case "pulsarv14s": // 雙子星空單腿併回主 key
-		return "pulsarv14"
 	}
 	return book
 }
@@ -470,44 +456,18 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.bollEMABook.mu.Lock()
 		done = closeIn(s.bollEMABook.trades)
 		s.bollEMABook.mu.Unlock()
-	case "pulsar":
-		s.pulsarBook.mu.Lock()
-		done = closeIn(s.pulsarBook.trades)
-		s.pulsarBook.mu.Unlock()
 	case "pulsarv3":
 		s.pulsarV3Book.mu.Lock()
 		done = closeIn(s.pulsarV3Book.trades)
 		s.pulsarV3Book.mu.Unlock()
-	case "pulsarv8":
-		s.pulsarV8Book.mu.Lock()
-		done = closeIn(s.pulsarV8Book.trades)
-		s.pulsarV8Book.mu.Unlock()
-	case "pulsarv9":
-		s.pulsarV9Book.mu.Lock()
-		done = closeIn(s.pulsarV9Book.trades)
-		s.pulsarV9Book.mu.Unlock()
-	case "pulsarv10":
-		s.pulsarV10Book.mu.Lock()
-		done = closeIn(s.pulsarV10Book.trades)
-		s.pulsarV10Book.mu.Unlock()
-	case "pulsarv11":
-		s.pulsarV11Book.mu.Lock()
-		done = closeIn(s.pulsarV11Book.trades)
-		s.pulsarV11Book.mu.Unlock()
 	case "pulsarv12":
 		s.pulsarV12Book.mu.Lock()
 		done = closeIn(s.pulsarV12Book.trades)
 		s.pulsarV12Book.mu.Unlock()
-	case "pulsarv13":
-		s.pulsarV13Book.mu.Lock()
-		done = closeIn(s.pulsarV13Book.trades)
-		s.pulsarV13Book.mu.Unlock()
-	case "orderblock", "orderblockv2", "pulsarv14": // 多本都找(訂單塊 1h/4h、雙子星多/空兩腿)
+	case "orderblock", "orderblockv2": // 多本都找(訂單塊 1h/4h)
 		books := s.smcBooks
 		if book == "orderblockv2" {
 			books = s.smcV2Books
-		} else if book == "pulsarv14" {
-			books = s.pulsarV14Books
 		}
 		for _, b := range books {
 			b.mu.Lock()

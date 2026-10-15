@@ -20,10 +20,8 @@ var stratTabKey = [][2]string{
 	{"conv", "conv"},
 	{"meanrev", "meanrev"},
 	{"bollema", "bollema"},
-	{"pulsar", "pulsar"},
 	{"pulsarv3", "pulsarv3"},
-	{"pulsarv5", "pulsarv5"},
-	{"pulsarv6", "pulsarv6"},
+	{"pulsarv12", "pulsarv12"},
 	{"orderblock", "orderblock"},
 	{"orderblockv2", "orderblockv2"},
 }

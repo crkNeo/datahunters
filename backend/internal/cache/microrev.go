@@ -220,89 +220,6 @@ func pulsarPctTPLevels(entry, sl float64) (tp1, tp2, tp3 float64) {
 	return roundPx(entry * 1.05), roundPx(entry * 1.10), roundPx(entry * 1.15)
 }
 
-// surgeSignal — 脈衝星進場規則。此書的宇宙已是「爆量熱名單」(成交量條件由 universe
-// 篩過),這裡在 15m K 線上做多重過濾。只做多。脈衝星與 v2 共用;v2 另有 OI/CVD 閘門。
-//
-//	① 動能狀態:EMA5 > EMA20(多頭排列)且 本根收 > 前一根
-//	進場K棒體質(反插針):收陽、實體 ≥ 全距一半、上影線 ≤ 實體(排除衝高被打下來)
-//	② 量能確認:進場根量 ≥ 1.2× 靜默基線(不在量縮回檔根追進)
-//	③ 新鮮度:近 6 根內要有一根「爆量根」(量 ≥ 2.5× 基線),確保是剛起漲、不是追高
-//	不追高:現價離近20根低點 ≤ 25% ｜ 止損:近10根 swing low ｜ 止盈 1:4 分批
-func surgeSignal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	const (
-		surgeMaxExt  = 0.25 // 現價高出近20根低點 >25% 就算追高
-		pinBodyMin   = 0.5  // 進場K棒實體 ≥ 全距的一半
-		pinWickMax   = 1.0  // 上影線 ≤ 實體
-		entryVolMult = 1.2  // 進場根量 ≥ 基線的倍數
-		freshVolMult = 2.5  // 「爆量根」= 量 ≥ 基線的倍數
-		freshWithin  = 6    // 爆量根需落在最近幾根內
-	)
-	n := len(cs)
-	if n < 40 {
-		return
-	}
-	price := cs[n-1].Close
-	last := cs[n-1]
-
-	// ① 動能:EMA5 > EMA20(狀態,不是金叉,避免落後)+ 本根向上
-	e5 := emaSeries(cs, 5)
-	e20 := emaSeries(cs, 20)
-	if !(e5[n-1] > e20[n-1] && price > cs[n-2].Close) {
-		return
-	}
-	// 進場K棒體質(反插針):收陽、實體夠大、上影線不過長
-	rng := last.High - last.Low
-	body := last.Close - last.Open
-	if rng <= 0 || body <= 0 || body < pinBodyMin*rng || (last.High-last.Close) > pinWickMax*body {
-		return
-	}
-	// 靜默基線量 = 近期之前那 20 根(n-30..n-11)的均量,避開最近的爆量,避免自我循環
-	var vsum float64
-	for i := n - 30; i < n-10; i++ {
-		if i >= 0 {
-			vsum += cs[i].Volume
-		}
-	}
-	baseVol := vsum / 20
-	// ② 進場根量能確認
-	if baseVol > 0 && last.Volume < entryVolMult*baseVol {
-		return
-	}
-	// ③ 新鮮度:最近 freshWithin 根內要有一根爆量根
-	fresh := false
-	for i := n - freshWithin; i < n; i++ {
-		if i >= 0 && baseVol > 0 && cs[i].Volume >= freshVolMult*baseVol {
-			fresh = true
-			break
-		}
-	}
-	if !fresh {
-		return
-	}
-	// 不追高護欄
-	low20 := cs[n-1].Low
-	for i := n - 20; i < n; i++ {
-		if i >= 0 && cs[i].Low < low20 {
-			low20 = cs[i].Low
-		}
-	}
-	if low20 <= 0 || (price-low20)/low20 > surgeMaxExt {
-		return
-	}
-	// 止損 = 近10根 swing low
-	low10 := cs[n-1].Low
-	for i := n - 10; i < n; i++ {
-		if i >= 0 && cs[i].Low < low10 {
-			low10 = cs[i].Low
-		}
-	}
-	risk := price - low10
-	if risk <= 0 {
-		return
-	}
-	return "long", roundPx(price), roundPx(low10), roundPx(price + 4*risk), true // TP3 = 1:4
-}
-
 // robustATR = mean of the last `period` true ranges after dropping the `trimTop`
 // largest — so a single monster breakout candle can't blow the ATR up (and the
 // stop with it), while it still reflects the current elevated regime.
@@ -572,224 +489,9 @@ func surgeV3Why(cs []exchange.Candle) string {
 	return ""
 }
 
-// confirmSurgeV3Signal — 脈衝星v6:v3 + 確認棒進場。針對「訊號根是誘多、下一根就秒回調」
-// 的假突破:v3 設定必須在「前一根(N-1)」成立,再看「這一根(N)」是否確認 —— 收在訊號根
-// 之上且沒跌破設定的止損,才進場。晚一根、用結構低當止損,濾掉一進場就倒的單。只做多。
-func confirmSurgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	n := len(cs)
-	if n < 42 {
-		return
-	}
-	// 設定在前一根成立?(把最後一根拿掉重評 v3)
-	d, _, slPrev, _, ok0 := surgeV3Signal(cs[:n-1])
-	if !ok0 || d != "long" {
-		return
-	}
-	// 確認棒:收盤要落在「訊號根 −1% ~ +2% 安全帶」內,且最低點沒跌破設定止損。
-	//   上緣 +2%:噴太高才進 = 追高 → 擋掉;下緣 −1%:淺回踩仍算(不因小跌就錯過後續上漲)。
-	last, prev := cs[n-1], cs[n-2]
-	const confUpTol, confDownTol = 0.02, 0.01
-	sig := prev.Close
-	if last.Close > sig*(1+confUpTol) || last.Close < sig*(1-confDownTol) || last.Low <= slPrev {
-		return
-	}
-	// 於確認棒收盤進場;止損沿用設定的結構低,R 以新進場價計
-	entry = roundPx(last.Close)
-	sl = roundPx(slPrev)
-	stopDist := entry - sl
-	if stopDist <= 0 {
-		return
-	}
-	return "long", entry, sl, roundPx(entry + 5*stopDist), true
-}
-
-// v7/v8 進場加嚴常數。數據依據:v3 的利潤幾乎全來自「寬止損(高波動、已在動)」的怪物單;
-// 窄止損(<3%)那半數是低波動咬合、33% 一進場就秒回調、幾乎不產怪物。
-const (
-	minRPct       = 3.0 // v7/v8:最小止損距離(原始 R = (entry−sl)/entry),擋掉低波動咬合單
-	strongVolMult = 4.0 // v8:近6根需有一根量 ≥ 此倍數×截尾基線(比 v3 的 2.5× 更兇,鎖定真暴漲)
-)
-
-// surgeV7Signal — 脈衝星v7:= v3,但多一道「最小止損距離」門檻(原始 R ≥ minRPct%)。
-// 只做「本來就有真波動」的幣,砍掉爆量卻死盤的咬合單(秒回調重災區)。只做多。
-func surgeV7Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	d, e, s, t, ok0 := surgeV3Signal(cs)
-	if !ok0 || e <= 0 {
-		return
-	}
-	if (e-s)/e*100 < minRPct { // 止損太近 = 低波動咬合 → 不進場
-		return
-	}
-	return d, e, s, t, true
-}
-
-// surgeV8Signal — 脈衝星v8:= v7(最小R)+ 更強爆量門檻。近6根要有一根量 ≥ strongVolMult×
-// 截尾基線(v3 只要 2.5×),鎖定「真暴漲」等級的爆量,不做溫吞的量增。只做多。
-func surgeV8Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	d, e, s, t, ok0 := surgeV7Signal(cs)
-	if !ok0 || !hasStrongVol(cs) { // 爆量不夠兇 = 不是真暴漲 → 不進場
-		return
-	}
-	return d, e, s, t, true
-}
-
-// hasStrongVol:近6根有一根量 ≥ strongVolMult × 截尾基線(真暴漲等級的爆量)。
-func hasStrongVol(cs []exchange.Candle) bool {
-	base := trimmedBaseVol(cs)
-	if base <= 0 {
-		return false
-	}
-	for i := len(cs) - 6; i < len(cs); i++ {
-		if i >= 0 && cs[i].Volume >= strongVolMult*base {
-			return true
-		}
-	}
-	return false
-}
-
-// surgeV9Signal — 脈衝星v9:「止損越寬,越要真爆量」。= v3,但原始 R ≥ minRPct 的寬止損
-// 設定必須有真爆量(hasStrongVol)才進;窄止損照收。數據依據(09/14–09/30,R 正規化扣成本):
-// 窄止損 +0.067R/筆、寬止損有爆量 +0.056R、寬止損沒爆量 −0.038R —— 只丟唯一虧錢的那組。
-func surgeV9Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	d, e, s, t, ok0 := surgeV3Signal(cs)
-	if !ok0 || e <= 0 {
-		return
-	}
-	if (e-s)/e*100 >= minRPct && !hasStrongVol(cs) { // 錯了很貴,就要先看到真爆量
-		return
-	}
-	return d, e, s, t, true
-}
-
-// surgeV10Signal — 脈衝星v10「爆量後首次回踩」。不追突破根,等爆量後第一次回到 EMA20 守住
-// 才進,買在回檔、止損放回踩低點下方(通常比 v3 的近10根低近得多)。只做多。
-//
-//	爆量根:近 2~10 根內一根收陽、量 ≥ 2.5× 截尾基線(取量最大那根),之後至少一根回踩
-//	爆量品質:爆量根上影線 < 實體(長上影 = 衝高被砸的出貨量,之後的回踩不做)
-//	趨勢:EMA20 仍上彎(高於 3 根前);不要求 EMA5 > EMA20(回踩時 EMA5 常會下來)
-//	回踩:本根最低 ≤ EMA20 + 0.5×ATR(碰到均線區)且收盤 ≥ EMA20(守住)
-//	仍在回檔:收盤 < 爆量後最高點;爆量後每根收盤都在 EMA20 之上(趨勢沒破)
-//	量縮:爆量後各根均量 ≤ 0.6× 爆量根量(賣壓不重)
-//	止跌:本根收陽,或下影 ≥ 全距一半
-//	動能:MACD 柱翻紅(<0)且比前一根更低 → 不接(空方動能還在擴大)。柱在零軸上方收斂不擋 ——
-//	      爆量後回踩時訊號線會追上來,柱幾乎必然下降,用「只要下降就擋」會讓本策略幾乎不觸發。
-//	止損:回踩最低 − 0.2×ATR,下限 0.8×ATR、上限 4×max(ATR, 近5根ATR)
-func surgeV10Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	const (
-		spikeVolMult = 2.5
-		spikeFrom    = 10  // 爆量根最遠在幾根前
-		spikeTo      = 2   // 爆量根最近在幾根前(之後至少要有一根回踩)
-		touchATR     = 0.5 // 碰到 EMA20 的容許距離(×ATR)
-		pbVolMax     = 0.6 // 回踩段均量 ≤ 爆量根量 × 此值
-		slBufATR     = 0.2
-		slMinATR     = 0.8
-		slMaxATR     = 4.0
-	)
-	n := len(cs)
-	if n < 40 {
-		return
-	}
-	last := cs[n-1]
-	price := last.Close
-	atr := robustATR(cs, 14, 2)
-	base := trimmedBaseVol(cs)
-	if atr <= 0 || base <= 0 {
-		return
-	}
-	k := -1 // 爆量根
-	for i := n - spikeFrom; i <= n-spikeTo; i++ {
-		if i >= 0 && cs[i].Close > cs[i].Open && cs[i].Volume >= spikeVolMult*base && (k < 0 || cs[i].Volume > cs[k].Volume) {
-			k = i
-		}
-	}
-	if k < 0 {
-		return
-	}
-	if cs[k].High-cs[k].Close >= cs[k].Close-cs[k].Open { // 爆量根長上影 = 出貨爆量
-		return
-	}
-	e20 := emaSeries(cs, 20)
-	ema := e20[n-1]
-	if !(ema > e20[n-4]) { // EMA20 仍上彎
-		return
-	}
-	if !(last.Low <= ema+touchATR*atr && price >= ema) { // 碰均線區且守住
-		return
-	}
-	hi, pbLow, pbVol := cs[k].High, last.Low, 0.0
-	for i := k + 1; i < n; i++ {
-		if cs[i].Close < e20[i] { // 回踩途中曾收破 EMA20 = 不是「首次回踩守住」
-			return
-		}
-		if cs[i].High > hi {
-			hi = cs[i].High
-		}
-		if cs[i].Low < pbLow {
-			pbLow = cs[i].Low
-		}
-		pbVol += cs[i].Volume
-	}
-	if price >= hi { // 已創新高 = 不是回踩
-		return
-	}
-	if pbVol/float64(n-1-k) > pbVolMax*cs[k].Volume { // 回踩沒量縮
-		return
-	}
-	rng := last.High - last.Low
-	if rng <= 0 || !(last.Close > last.Open || math.Min(last.Open, last.Close)-last.Low >= 0.5*rng) {
-		return
-	}
-	if h := macdHist(cs); h[n-1] < 0 && h[n-1] < h[n-2] { // MACD 柱翻紅且還在擴大 = 空方動能增強
-		return
-	}
-	stopDist := price - (pbLow - slBufATR*atr)
-	capATR := math.Max(atr, robustATR(cs, 5, 0))
-	if stopDist > slMaxATR*capATR {
-		return
-	}
-	if stopDist < slMinATR*atr {
-		stopDist = slMinATR * atr
-	}
-	return "long", roundPx(price), roundPx(price - stopDist), roundPx(price + 5*stopDist), true
-}
-
-// surgeV11Signal — 脈衝星v11「早鳥 ATR」。= v3,但止損可行性上限改用突破當下的 ATR
-// (surgeV3Core fastCap),讓 v3 在剛起漲、止損距離相對盤整 ATR 很大時也能進;拋物線/不追高
-// 護欄不放鬆。早進的單止損通常偏寬,所以沿用 v9:R ≥ minRPct 的寬止損必須有真爆量才進。
-func surgeV11Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
-	d, e, s, t, ok0 := surgeV3Core(cs, true)
-	if !ok0 || e <= 0 {
-		return
-	}
-	if (e-s)/e*100 >= minRPct && !hasStrongVol(cs) {
-		return
-	}
-	return d, e, s, t, true
-}
-
 // surgeV12Signal — 脈衝星v12「盤中即進」:把 v3 的條件直接套在還沒收完的那根上,
 // 這一刻成立就進(量看這根到目前為止實際成交的量,不推估)。最早,但收盤前可能被砸成長上影。
 func surgeV12Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
-	return surgeV3Core(cs, false)
-}
-
-// surgeV13Signal — 脈衝星v13「盤中＋護欄」:v12 再加三道,擋掉大部分「衝高被砸」:
-//
-//	這根已開始滿 5 分鐘 ｜ 現價突破前一根最高點 ｜ 現價離本根最高點的回落 ≤ 本根全距 30%
-func surgeV13Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, sl, tp float64, ok bool) {
-	const (
-		minElapsed  = 300 // 秒
-		maxDrawback = 0.3 // 離本根高點回落上限(×本根全距)
-	)
-	n := len(cs)
-	if elapsedSec < minElapsed || n < 2 {
-		return
-	}
-	last, prev := cs[n-1], cs[n-2]
-	rng := last.High - last.Low
-	if last.Close <= prev.High || rng <= 0 || last.High-last.Close > maxDrawback*rng {
-		return
-	}
 	return surgeV3Core(cs, false)
 }
 
@@ -1360,41 +1062,11 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 // ---- per-book public wrappers (ticks + state) ----
 
 func (s *Store) BollEMATick()        { s.microTick(s.bollEMABook) }
-func (s *Store) PulsarTick()         { s.microTick(s.pulsarBook) }
-func (s *Store) PulsarMarkTick()     { s.microMarkTick(s.pulsarBook) }
 func (s *Store) PulsarV3Tick()       { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()   { s.microMarkTick(s.pulsarV3Book) }
-func (s *Store) PulsarV8Tick()       { s.microTick(s.pulsarV8Book) }
-func (s *Store) PulsarV8MarkTick()   { s.microMarkTick(s.pulsarV8Book) }
-func (s *Store) PulsarV9Tick()       { s.microTick(s.pulsarV9Book) }
-func (s *Store) PulsarV9MarkTick()   { s.microMarkTick(s.pulsarV9Book) }
-func (s *Store) PulsarV10Tick()      { s.microTick(s.pulsarV10Book) }
-func (s *Store) PulsarV10MarkTick()  { s.microMarkTick(s.pulsarV10Book) }
-func (s *Store) PulsarV11Tick()      { s.microTick(s.pulsarV11Book) }
-func (s *Store) PulsarV11MarkTick()  { s.microMarkTick(s.pulsarV11Book) }
 func (s *Store) PulsarV12Tick()      { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick()  { s.microMarkTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12IntraTick() { s.microIntraTick(s.pulsarV12Book) }
-func (s *Store) PulsarV13Tick()      { s.microTick(s.pulsarV13Book) }
-func (s *Store) PulsarV13MarkTick()  { s.microMarkTick(s.pulsarV13Book) }
-func (s *Store) PulsarV13IntraTick() { s.microIntraTick(s.pulsarV13Book) }
-
-// 脈衝星v14 雙子星:兩腿一起跑,兩腿都是盤中書(進場走 IntraTick,收盤 Tick 只管持倉)。
-func (s *Store) PulsarV14Tick() {
-	for _, b := range s.pulsarV14Books {
-		s.microTick(b)
-	}
-}
-func (s *Store) PulsarV14MarkTick() {
-	for _, b := range s.pulsarV14Books {
-		s.microMarkTick(b)
-	}
-}
-func (s *Store) PulsarV14IntraTick() {
-	for _, b := range s.pulsarV14Books {
-		s.microIntraTick(b)
-	}
-}
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1441,12 +1113,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
 		s.bollEMABook.mu.Unlock()
-	case "orderblock", "orderblockv2", "pulsarv14": // 一個開關清多本(訂單塊 1h/4h、雙子星多/空兩腿)
+	case "orderblock", "orderblockv2": // 一個開關清多本(訂單塊 1h/4h)
 		books := s.smcBooks
 		if book == "orderblockv2" {
 			books = s.smcV2Books
-		} else if book == "pulsarv14" {
-			books = s.pulsarV14Books
 		}
 		for _, b := range books {
 			b.mu.Lock()
@@ -1461,38 +1131,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 			}
 		}
 		return true // DB 已在上面各週期處理
-	case "pulsar":
-		s.pulsarBook.mu.Lock()
-		s.pulsarBook.trades = keepIf(s.pulsarBook.trades, closedOnly)
-		s.pulsarBook.mu.Unlock()
 	case "pulsarv3":
 		s.pulsarV3Book.mu.Lock()
 		s.pulsarV3Book.trades = keepIf(s.pulsarV3Book.trades, closedOnly)
 		s.pulsarV3Book.mu.Unlock()
-	case "pulsarv8":
-		s.pulsarV8Book.mu.Lock()
-		s.pulsarV8Book.trades = keepIf(s.pulsarV8Book.trades, closedOnly)
-		s.pulsarV8Book.mu.Unlock()
-	case "pulsarv9":
-		s.pulsarV9Book.mu.Lock()
-		s.pulsarV9Book.trades = keepIf(s.pulsarV9Book.trades, closedOnly)
-		s.pulsarV9Book.mu.Unlock()
-	case "pulsarv10":
-		s.pulsarV10Book.mu.Lock()
-		s.pulsarV10Book.trades = keepIf(s.pulsarV10Book.trades, closedOnly)
-		s.pulsarV10Book.mu.Unlock()
-	case "pulsarv11":
-		s.pulsarV11Book.mu.Lock()
-		s.pulsarV11Book.trades = keepIf(s.pulsarV11Book.trades, closedOnly)
-		s.pulsarV11Book.mu.Unlock()
 	case "pulsarv12":
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
-	case "pulsarv13":
-		s.pulsarV13Book.mu.Lock()
-		s.pulsarV13Book.trades = keepIf(s.pulsarV13Book.trades, closedOnly)
-		s.pulsarV13Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1557,14 +1203,7 @@ func (s *Store) retrofitMultiTP() {
 }
 
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
-func (s *Store) PulsarState() PaperState    { return s.microState(s.pulsarBook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
-func (s *Store) PulsarV8State() PaperState  { return s.microState(s.pulsarV8Book) }
-func (s *Store) PulsarV9State() PaperState  { return s.microState(s.pulsarV9Book) }
-func (s *Store) PulsarV10State() PaperState { return s.microState(s.pulsarV10Book) }
-func (s *Store) PulsarV11State() PaperState { return s.microState(s.pulsarV11Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
-func (s *Store) PulsarV13State() PaperState { return s.microState(s.pulsarV13Book) }
-func (s *Store) PulsarV14State() PaperState { return s.microState(s.pulsarV14Books...) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

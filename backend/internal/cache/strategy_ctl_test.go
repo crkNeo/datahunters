@@ -23,7 +23,7 @@ func TestStratDefaultsMirrorCode(t *testing.T) {
 		{"gamble", 12, "split", 40, 70, 40}, // FILTER@12% + tpMomentum
 		{"main", 0, "split", 40, 70, 40},    // tpMomentum
 		{"conv", 0, "split", 40, 70, 40},    // tpMomentum(原本寫死在 convergence.go)
-		{"pulsar", 0, "split", 50, 75, 40},  // 爆量觀察書(靜默)
+		{"pulsarv12", 0, "split", 50, 75, 50},  // 爆量觀察書(靜默)
 		{"bollema", 0, "single", 0, 0, 0},   // 單段 + 保本位提示
 	} {
 		got := s.StratConfigOf(tc.name)
@@ -139,7 +139,7 @@ func TestNotifyToggles(t *testing.T) {
 	if !s.notifyOn("gamble", "open") || !s.notifyOn("gamble", "tp") {
 		t.Error("gamble 預設應開啟開倉/止盈通知")
 	}
-	if s.notifyOn("pulsar", "open") {
+	if s.notifyOn("pulsarv12", "open") {
 		t.Error("pulsar 預設不該發開倉通知(管理員觀察書)")
 	}
 	s.SetStrategyConfig("gamble", StratCfg{ExitMode: "single", NotifyClose: true})
@@ -218,17 +218,17 @@ func TestApplyBreakeven(t *testing.T) {
 // 切換到保本/單段模式時,分段設定必須保留 —— 否則切回分批會拿到壞掉的 1/1。
 func TestSwitchingModeKeepsSplitSettings(t *testing.T) {
 	s := newCfgStore()
-	base := s.StratConfigOf("pulsar") // 50/75、40/30/30
+	base := s.StratConfigOf("pulsarv12") // 50/75、40/30/30
 	// 模擬前端切到保本模式:只送保本相關欄位,不送分段參數
-	s.SetStrategyConfig("pulsar", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05, MaxSLPct: 10})
-	got := s.StratConfigOf("pulsar")
+	s.SetStrategyConfig("pulsarv12", StratCfg{ExitMode: "breakeven", BeAtPct: 50, BeBufPct: 0.05, MaxSLPct: 10})
+	got := s.StratConfigOf("pulsarv12")
 	if got.SplitA != base.SplitA || got.SplitB != base.SplitB || got.SplitW1 != base.SplitW1 {
 		t.Errorf("切到保本後分段設定被清掉: %v/%v w1=%v,原本 %v/%v w1=%v",
 			got.SplitA, got.SplitB, got.SplitW1, base.SplitA, base.SplitB, base.SplitW1)
 	}
 	// 切回分批應該還是原本那組
-	s.SetStrategyConfig("pulsar", StratCfg{ExitMode: "split", MaxSLPct: 10})
-	if p, _ := s.tpFor("pulsar", nil); p == nil || p.a != base.SplitA/100 || p.b != base.SplitB/100 {
+	s.SetStrategyConfig("pulsarv12", StratCfg{ExitMode: "split", MaxSLPct: 10})
+	if p, _ := s.tpFor("pulsarv12", nil); p == nil || p.a != base.SplitA/100 || p.b != base.SplitB/100 {
 		t.Errorf("切回分批後計畫不正確: %+v", p)
 	}
 }
@@ -240,14 +240,14 @@ func TestManualExitAlwaysNotifies(t *testing.T) {
 	tr := &PaperTrade{Coin: "BTC", Dir: "long", Entry: 100, Cur: 101, PnLPct: 1, Outcome: "momdead", OpenTime: time.Now()}
 
 	// pulsar 預設 NotifyClose=false → 自動平倉不通知
-	if s.notifyOn("pulsar", "close") {
+	if s.notifyOn("pulsarv12", "close") {
 		t.Fatal("前提錯了:pulsar 預設應該是不發平倉通知")
 	}
-	if s.notifyCloseBook("pulsar", tr, time.Now(), false) {
+	if s.notifyCloseBook("pulsarv12", tr, time.Now(), false) {
 		t.Error("自動平倉不該通知(開關是關的)")
 	}
 	// 手動出場 force=true → 一律通知
-	if !s.notifyCloseBook("pulsar", tr, time.Now(), true) {
+	if !s.notifyCloseBook("pulsarv12", tr, time.Now(), true) {
 		t.Error("手動出場沒有發通知")
 	}
 	// 多週期分腿(orderblock_4h)要能解析回主 key,不能因為查不到設定而漏發

@@ -681,15 +681,6 @@ async function loadBollema() {
     /* secondary */
   }
 }
-const pulsar = ref(null)
-async function loadPulsar() {
-  try {
-    const res = await authFetch('/api/pulsar')
-    if (res.ok) pulsar.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 const pulsarv3 = ref(null)
 async function loadPulsarV3() {
   try {
@@ -699,65 +690,11 @@ async function loadPulsarV3() {
     /* secondary */
   }
 }
-const pulsarv9 = ref(null)
-async function loadPulsarV9() {
-  try {
-    const res = await authFetch('/api/pulsarv9')
-    if (res.ok) pulsarv9.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv10 = ref(null)
-async function loadPulsarV10() {
-  try {
-    const res = await authFetch('/api/pulsarv10')
-    if (res.ok) pulsarv10.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 const pulsarv12 = ref(null)
 async function loadPulsarV12() {
   try {
     const res = await authFetch('/api/pulsarv12')
     if (res.ok) pulsarv12.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv13 = ref(null)
-async function loadPulsarV13() {
-  try {
-    const res = await authFetch('/api/pulsarv13')
-    if (res.ok) pulsarv13.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv14 = ref(null)
-async function loadPulsarV14() {
-  try {
-    const res = await authFetch('/api/pulsarv14')
-    if (res.ok) pulsarv14.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv11 = ref(null)
-async function loadPulsarV11() {
-  try {
-    const res = await authFetch('/api/pulsarv11')
-    if (res.ok) pulsarv11.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const pulsarv8 = ref(null)
-async function loadPulsarV8() {
-  try {
-    const res = await authFetch('/api/pulsarv8')
-    if (res.ok) pulsarv8.value = await res.json()
   } catch (e) {
     /* secondary */
   }
@@ -824,41 +761,13 @@ const microMeta = {
     title: '海王星', load: loadBollema, get: () => bollema.value,
     help: "‼️此訊號為保守策略‼️<br>波動較低，<br>但有機會在行情出來後延續下去。<br><b>分批止盈</b>:TP1/TP2 位在進場→最終止盈的 40%/70%,分三批出場,TP1 後止損移保本、TP2 後移 TP1。<br>下單前務必確認倉位使用總本金「2%」<br>槓桿不超過「25-40x」<br>🌟若遇到盤整行情，可往其他策略觀察更好的交易機會。<br><br>「此為幣種策略分享，不構成任何投資建議。」",
   },
-  pulsar: {
-    title: '脈衝星(舊) · 爆量埋伏 · 15m', load: loadPulsar, get: () => pulsar.value,
-    help: '<b>建在「爆量脈搏」斥候上的觀察策略 · 只做多</b>,目標是埋伏「靜默後突然爆量」的暴漲初段。<br><br><b>【選幣】</b>不看成交量絕對排名,看「相對自身基線的爆量」——全市場 ~700 檔中,近30分鐘成交量脈搏 ≥ <b>3×</b> 自身基線者進熱名單(可含 top-80 以外的冷門幣),取前 40。<br><b>【進場】</b>(15m 收盤,全部成立):① <b>EMA5 &gt; EMA20</b>(多頭排列,非金叉→不落後)且本根收 &gt; 前一根 ② <b>反插針</b>:進場K棒收陽、實體 ≥ 全距一半、上影線 ≤ 實體(擋衝高被打下來) ③ <b>量能確認</b>:進場根量 ≥ 1.2× 靜默基線 ④ <b>新鮮度</b>:近 6 根內有一根爆量根(量 ≥ 2.5× 基線,確保剛起漲) ⑤ <b>不追高</b>:現價離近 20 根最低點 ≤ <b>25%</b>。<br><b>【止損】</b>近 10 根 swing low。<br><b>【止盈】</b>以 R = 進場−止損:<b>TP1=1:2、TP2=1:3、TP3=1:4</b>,分批 50%/75% → 40/30/30(TP1 後移保本、TP2 後移 TP1)。<br><b>【其他】</b>逾時 <b>4 小時</b>平倉、<b>出場後冷卻 4 小時(16 根)</b>——同幣出場後 4h 內不再進場,避開回調追單。<br><br>⚠️ <b>此為「裸訊號」觀察書</b>。預設靜默(不推播、不接實盤)。管理員專屬模擬單,非投資建議。',
-  },
   pulsarv3: {
     title: '脈衝星', load: loadPulsarV3, get: () => pulsarv3.value,
     help: '‼️此策略只做多單，小止損換大盈利‼️<br>此為幣種分享，不代表任何投資建議，建議搭配技術分析進場。<br><br>建議使用總本金：1%<br>建議槓桿：25x-30x',
   },
-  pulsarv9: {
-    title: '脈衝星v9 · 寬止損才要真爆量 · 15m', load: loadPulsarV9, get: () => pulsarv9.value,
-    help: '<b>= 脈衝星v3,多一條規則:「止損越寬,越要真爆量」。</b><br><b>【規則】</b>止損距離 R &lt; 3%(窄止損)→ 照 v3 進場;R ≥ 3%(寬止損)→ 必須近 6 根有一根量 ≥ 4× 截尾基線才進。<br><b>【依據】</b>09/14–09/30 以風險正規化(R 倍數、扣成本)比較:窄止損 +0.067R/筆、寬止損有爆量 +0.056R/筆、<b>寬止損沒爆量 −0.038R/筆(唯一虧錢的一組)</b>。v9 只丟掉這一組。<br><b>【其餘完全同 v3】</b>選幣、ATR 濾網、TP=1R/2R+追尾 50/25/25、4h/24h 逾時、4h 冷卻。<br><br>⚠️ 觀察用書,跟 v3 / v8 對照。窄止損的優勢對手續費/滑點較敏感。預設靜默、不接實盤。非投資建議。',
-  },
-  pulsarv10: {
-    title: '脈衝星v10 · 爆量後等回檔再買 · 15m', load: loadPulsarV10, get: () => pulsarv10.value,
-    help: '<b>一句話：爆量之後不追，等它回檔到均線、站穩了再買。</b><br><b>【怎麼進場】</b><br>① 最近 2.5 小時內出現過一根「爆大量的上漲 K 棒」（量是平常的 2.5 倍以上）<br>② 之後價格回檔、量也變小（代表賣的人不多）<br>③ 回檔碰到橘色均線（EMA20）附近、收盤沒跌破，而且這根收漲或留長下影線 → 進場<br><b>【這些情況不做】</b><br>✗ 那根爆量 K 棒的上影線比 K 棒本身還長（衝上去被砸，通常是有人在出貨）<br>✗ MACD 柱已經變成負的（紅色）、而且越來越長（賣壓還在變大）<br>✗ 回檔途中曾經收盤跌破均線<br><b>【止損】</b>放在這次回檔最低點再下面一點，通常比 v3 近很多。<br><b>【缺點】</b>一路漲上去不回頭的行情會買不到。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  pulsarv11: {
-    title: '脈衝星v11 · 剛起漲就進 · 15m', load: loadPulsarV11, get: () => pulsarv11.value,
-    help: '<b>一句話：跟 v3 一樣，但剛起漲時就願意進場，不用等盤整完。</b><br><b>【v3 為什麼常常進太晚】</b>v3 會檢查「止損會不會太遠」，拿來比的「正常波動」是用前面盤整時算的、很小。所以剛起漲時止損一定被判定太遠，要等盤整一陣子才放行，那時常常已經漲一大段。<br><b>【v11 改了什麼】</b>判斷止損遠不遠時，改用「最近 5 根」的波動（起漲當下的波動），剛起漲就能通過。<br><b>【沒改的】</b>「不追太高」和「單根漲太誇張不買」這兩個保護照舊，所以多出來的單都在「剛起漲、還沒漲遠」那段。<br><b>【多一條】</b>早進的止損比較寬；止損超過 3% 的單，最近要有一根量是平常 4 倍以上才進。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
     help: '<b>一句話：不等 15 分鐘 K 線收完，條件一成立就馬上進場。</b><br><b>【跟 v3 的差別】</b>v3 要等這根 K 收完、確認長得對才買；v12 每分鐘看一次還在跑的那根，這一刻符合 v3 的條件就買，最多比 v3 早 15 分鐘。<br><b>【風險】</b>K 線還沒收完，形狀隨時會變。常見情況：拉上去那幾分鐘看起來是漂亮的大漲 K 棒 → v12 買進 → 收盤前被砸回來、變成長上影線（v3 收盤看到這種形狀就不會買）。所以 v12 比較容易買在高點。<br><b>【怎麼看結果】</b>同一個幣、同一根 K，如果 v3 沒開單、v12 有開，那筆就是「盤中看起來對、收盤後不對」的單，可以拿來算這種單的勝率。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  pulsarv13: {
-    title: '脈衝星v13 · 不等收K、多看幾眼再進 · 15m', load: loadPulsarV13, get: () => pulsarv13.value,
-    help: '<b>一句話：跟 v12 一樣不等收 K，但多看幾眼再買，避免買在被砸的高點。</b><br><b>【多加的三個檢查】</b><br>① 這根 K 已經跑滿 5 分鐘（剛開始那幾分鐘價格亂跳，不算）<br>② 現在價格高過前一根 K 的最高點（確認真的往上突破）<br>③ 現在價格沒有從這根的最高點掉下來太多（掉超過這根高低差的 30% 就不買，代表上面有人在賣）<br><b>【跟 v3、v12 比】</b>比 v3 早大約 5～10 分鐘；比 v12 晚一點，但能擋掉大部分「衝高被砸」的假突破。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  pulsarv14: {
-    title: '脈衝星v14 · 雙子星（多空都做）· 15m', load: loadPulsarV14, get: () => pulsarv14.value,
-    help: '<b>一句話：照「雙子星」規劃做的多空策略，多單和空單都用 v12 的方式進場：條件一成立就進，不等 K 線收完。</b><br><b>【挑哪些幣】</b>爆量脈搏的熱名單：成交量突然變成平常 3 倍以上的幣。<br><b>【多單「點火順勢」：條件一成立就進，不等收 K】</b><br>① 符合 v12（也就是 v3）的進場條件<br>② 錢在進來：近 12 小時持倉量（OI）增加 5% 以上，而且近 6 小時是買方主導<br>③ 還不擁擠：資金費率 &lt; 0.05%、散戶做多 &lt; 60%<br>④ 還沒噴完：24 小時漲幅 &lt; 25%<br>⑤ 最近那根爆量 K 不是長上影（衝高被砸的出貨量不追）<br>⑥ 24 小時成交額 ≥ 500 萬 U；BTC 1 小時沒有跌超過 2%<br><b>【空單「衝高出貨」：條件一成立就進，不等收 K】</b><br>① 剛急漲過：最高點比 12 小時前高 15% 以上，或比 24 小時前高 25% 以上<br>② 出現「衝高被砸」，以下兩種情況任一種就進：<br>　　A. 前面已經收完的 K 裡（最近 6 根內）有一根爆大量（平常 2.5 倍以上）、上影線比 K 棒本身還長、而且就是它做出最高點；現在價格跌破那根 K 的一半，也跌破前兩根的最低點<br>　　B. <b>最激進</b>：衝高的那根還沒收完，但已經爆大量、上影線已經比 K 棒本身長、價格已從這根的最高點掉回一半以上 → 不等收 K 直接進<br>③ 人太多：資金費率 ≥ 0.05% 或散戶做多 ≥ 65%<br>④ 推不動了：A 要最近 1 小時賣方主導、持倉量沒有再增加；B 不看這條（那根裡大多是衝高時的買盤），改由「已經被砸回一半」來證明<br>⑤ 24 小時成交額 ≥ 1000 萬 U；BTC 1 小時沒有漲超過 2%<br><b>【空單止損】</b>放在這段最高點再上面一點；止損超過 8% 就不做。<br><b>【出場（多空一樣）】</b>賺到 1 倍風險先平一半、2 倍再平 1/4，最後 1/4 移動停利；主倉最多抱 4 小時，最後那份多單最多 24 小時、空單最多 12 小時；同一個幣平倉後 4 小時內不再進；同一個幣同時只會有一個方向。<br><b>【注意】</b>這些門檻還沒用歷史數據校準過，是合理的起點；每筆單進場時的數值都有記錄，跑一陣子後可以匯出來調整。空單在小幣上風險較高（容易被軋空、插針）；B 是在 K 線還沒收完時判斷，收盤前可能又被拉上去，假訊號會比 A 多。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  pulsarv8: {
-    title: '脈衝星v8 · v7+真爆量 · 15m', load: loadPulsarV8, get: () => pulsarv8.value,
-    help: '<b>= 脈衝星v7(最小R)+ 再加一道「更強爆量」門檻。</b>在「已在動」之上再鎖定「<b>真暴漲等級</b>」的爆量。<br><b>【差別】</b>除了 v7 的最小 R ≥ 3%,還要求<b>近 6 根內有一根量 ≥ 4× 截尾基線</b>(v3/v7 只要 2.5×)—— 溫吞的量增直接跳過,只做像 LSK / BTR / ZKC 那種真的噴量的。<br><b>【取捨】</b>單量會更少、更集中在大行情候選;可能錯過一些「量普通但後來噴」的,換取更高的怪物濃度。<br><b>【其餘完全同 v3】</b>選幣、ATR 濾網、TP=1R/2R+追尾 50/25/25、4h/24h 逾時、4h 冷卻。<br><br>⚠️ 觀察用書,跟 v3 / v7 <b>A/B 三方對照</b>。預設靜默、不接實盤。非投資建議。',
   },
   orderblock: {
     title: '訂單塊 · SMC 斐波 · 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
@@ -1452,15 +1361,8 @@ function loadAll() {
   if (canTab('sr')) loadSR()
   if (canTab('conv')) loadConv()
   if (canTab('bollema')) loadBollema()
-  if (canTab('pulsar')) loadPulsar()
   if (canTab('pulsarv3')) loadPulsarV3()
-  if (canTab('pulsarv8')) loadPulsarV8()
-  if (canTab('pulsarv9')) loadPulsarV9()
-  if (canTab('pulsarv10')) loadPulsarV10()
-  if (canTab('pulsarv11')) loadPulsarV11()
   if (canTab('pulsarv12')) loadPulsarV12()
-  if (canTab('pulsarv13')) loadPulsarV13()
-  if (canTab('pulsarv14')) loadPulsarV14()
   if (canTab('orderblock')) loadOrderBlock()
   if (canTab('orderblockv2')) loadOrderBlockV2()
   if (canTab('surge')) loadSurge()
@@ -1554,7 +1456,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsar', 'pulsarv3', 'pulsarv8', 'pulsarv9', 'pulsarv10', 'pulsarv11', 'pulsarv12', 'pulsarv13', 'pulsarv14', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1703,7 +1605,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsar: 'admin', pulsarv8: 'admin', pulsarv9: 'admin', pulsarv10: 'admin', pulsarv11: 'admin', pulsarv12: 'admin', pulsarv13: 'admin', pulsarv14: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1766,8 +1668,8 @@ const TAB_NAMES = {
   capital: '資金流向', upbit: 'Upbit 公告', news: '市場快訊', funding: '資金費率', unlock: '代幣解鎖',
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
-  sr: '支撐壓力', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星', pulsar: '脈衝星(舊)',
-  pulsarv8: '脈衝星v8', pulsarv9: '脈衝星v9', pulsarv10: '脈衝星v10', pulsarv11: '脈衝星v11', pulsarv12: '脈衝星v12', pulsarv13: '脈衝星v13', pulsarv14: '脈衝星v14', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
+  sr: '支撐壓力', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
+  pulsarv12: '脈衝星v12', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1787,7 +1689,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsar: 'signal', pulsarv3: 'signal', pulsarv8: 'signal', pulsarv9: 'signal', pulsarv10: 'signal', pulsarv11: 'signal', pulsarv12: 'signal', pulsarv13: 'signal', pulsarv14: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1795,7 +1697,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsar', 'pulsarv8', 'pulsarv9', 'pulsarv10', 'pulsarv11', 'pulsarv12', 'pulsarv13', 'pulsarv14', 'orderblock', 'orderblockv2', 'srmtf',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2345,29 +2247,8 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('pulsarv3', grp[0])" :class="{ active: mainTab === 'pulsarv3', lk: !canTab('pulsarv3') }" @click="navTo('pulsarv3', loadPulsarV3)">
             脈衝星<em v-if="pulsarv3 && pulsarv3.open.length" class="navbadge">{{ pulsarv3.open.length }}</em><i v-if="!canTab('pulsarv3')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsar', grp[0])" :class="{ active: mainTab === 'pulsar', lk: !canTab('pulsar') }" @click="navTo('pulsar', loadPulsar)">
-            脈衝星(舊)<em v-if="pulsar && pulsar.open.length" class="navbadge">{{ pulsar.open.length }}</em><i v-if="!canTab('pulsar')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv8', grp[0])" :class="{ active: mainTab === 'pulsarv8', lk: !canTab('pulsarv8') }" @click="navTo('pulsarv8', loadPulsarV8)">
-            脈衝星v8<em v-if="pulsarv8 && pulsarv8.open.length" class="navbadge">{{ pulsarv8.open.length }}</em><i v-if="!canTab('pulsarv8')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv9', grp[0])" :class="{ active: mainTab === 'pulsarv9', lk: !canTab('pulsarv9') }" @click="navTo('pulsarv9', loadPulsarV9)">
-            脈衝星v9<em v-if="pulsarv9 && pulsarv9.open.length" class="navbadge">{{ pulsarv9.open.length }}</em><i v-if="!canTab('pulsarv9')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv10', grp[0])" :class="{ active: mainTab === 'pulsarv10', lk: !canTab('pulsarv10') }" @click="navTo('pulsarv10', loadPulsarV10)">
-            脈衝星v10<em v-if="pulsarv10 && pulsarv10.open.length" class="navbadge">{{ pulsarv10.open.length }}</em><i v-if="!canTab('pulsarv10')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv11', grp[0])" :class="{ active: mainTab === 'pulsarv11', lk: !canTab('pulsarv11') }" @click="navTo('pulsarv11', loadPulsarV11)">
-            脈衝星v11<em v-if="pulsarv11 && pulsarv11.open.length" class="navbadge">{{ pulsarv11.open.length }}</em><i v-if="!canTab('pulsarv11')" class="navlk">🔒</i>
-          </button>
           <button v-if="inGroup('pulsarv12', grp[0])" :class="{ active: mainTab === 'pulsarv12', lk: !canTab('pulsarv12') }" @click="navTo('pulsarv12', loadPulsarV12)">
             脈衝星v12<em v-if="pulsarv12 && pulsarv12.open.length" class="navbadge">{{ pulsarv12.open.length }}</em><i v-if="!canTab('pulsarv12')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv13', grp[0])" :class="{ active: mainTab === 'pulsarv13', lk: !canTab('pulsarv13') }" @click="navTo('pulsarv13', loadPulsarV13)">
-            脈衝星v13<em v-if="pulsarv13 && pulsarv13.open.length" class="navbadge">{{ pulsarv13.open.length }}</em><i v-if="!canTab('pulsarv13')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('pulsarv14', grp[0])" :class="{ active: mainTab === 'pulsarv14', lk: !canTab('pulsarv14') }" @click="navTo('pulsarv14', loadPulsarV14)">
-            脈衝星v14<em v-if="pulsarv14 && pulsarv14.open.length" class="navbadge">{{ pulsarv14.open.length }}</em><i v-if="!canTab('pulsarv14')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock', lk: !canTab('orderblock') }" @click="navTo('orderblock', loadOrderBlock)">
             訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em><i v-if="!canTab('orderblock')" class="navlk">🔒</i>
