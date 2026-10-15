@@ -519,13 +519,12 @@ func (s *Store) microIntraTick(b *microBook) {
 		if busy {
 			continue
 		}
-		v, err := s.klineCache.get(fmt.Sprintf("intra|%s|%s|%d", coin, b.tf, b.klimit), func() (any, error) {
-			return s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
-		})
+		// 盤中即進要的是「此刻」形成中那根的最新狀態,所以直接抓、不走快取(快取會讓資料
+		// 最多舊 30 秒 → 可能照著已反轉的舊形狀進場;v13 已刪,這裡也沒有第二本可共用抓取)。
+		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		if err != nil {
 			continue
 		}
-		cs, _ := v.([]exchange.Candle)
 		if len(cs) < b.minBars+1 {
 			continue
 		}

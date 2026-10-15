@@ -280,7 +280,7 @@ func main() {
 	}()
 	// 脈衝星v12 盤中進場:每分鐘用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程)。
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(20 * time.Second) // 盤中即進:掃越密越能即時抓到條件成立的那一刻
 		for range ticker.C {
 			store.PulsarV12IntraTick()
 		}
