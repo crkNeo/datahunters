@@ -285,10 +285,10 @@ func (t *bitunixTrader) mirrorOpen(book string, tr *PaperTrade) {
 func (t *bitunixTrader) singleOpen(a *bitunixAccount, book string, tr *PaperTrade) {
 	res, err := a.cli.Open(tr.Coin+"USDT", tr.Dir, a.pct, a.lev, tr.Entry, tr.TP, tr.SL, "USDT", a.margin)
 	if err != nil {
-		log.Printf("bitunix autotrade: %s [%s] %s %s FAILED: %v", a.label, book, tr.Coin, tr.Dir, err)
+		tradeLogf("bitunix autotrade: %s [%s] %s %s FAILED: %v", a.label, book, tr.Coin, tr.Dir, err)
 		return
 	}
-	log.Printf("bitunix autotrade: %s [%s] %s %s OK — qty %s · %dx · 保證金 %.2fU · 名目 %.2fU @ %.6g (TP %.6g / SL %.6g)",
+	tradeLogf("bitunix autotrade: %s [%s] %s %s OK — qty %s · %dx · 保證金 %.2fU · 名目 %.2fU @ %.6g (TP %.6g / SL %.6g)",
 		a.label, book, tr.Coin, tr.Dir, res.Qty, res.Lev, res.Margin, res.Notional, res.Price, tr.TP, tr.SL)
 }
 
@@ -297,7 +297,7 @@ func (t *bitunixTrader) singleOpen(a *bitunixAccount, book string, tr *PaperTrad
 func (t *bitunixTrader) followOpen(a *bitunixAccount, book string, tr *PaperTrade) {
 	res, err := a.cli.Open(tr.Coin+"USDT", tr.Dir, a.pct, a.lev, tr.Entry, 0, tr.SL, "USDT", a.margin)
 	if err != nil {
-		log.Printf("bitunix follow: %s [%s] %s %s 開倉 FAILED: %v", a.label, book, tr.Coin, tr.Dir, err)
+		tradeLogf("bitunix follow: %s [%s] %s %s 開倉 FAILED: %v", a.label, book, tr.Coin, tr.Dir, err)
 		return
 	}
 	posID, perr := a.cli.PositionID(res.Symbol, tr.Dir)
@@ -314,7 +314,7 @@ func (t *bitunixTrader) followOpen(a *bitunixAccount, book string, tr *PaperTrad
 		Hedge: res.PosMode == "HEDGE",
 	}
 	t.putFollow(fp)
-	log.Printf("bitunix follow: %s [%s] %s %s 開倉 OK — qty %s · %dx · 名目 %.2fU @ %.6g (初始 SL %.6g, posID=%s)",
+	tradeLogf("bitunix follow: %s [%s] %s %s 開倉 OK — qty %s · %dx · 名目 %.2fU @ %.6g (初始 SL %.6g, posID=%s)",
 		a.label, book, tr.Coin, tr.Dir, res.Qty, res.Lev, res.Notional, res.Price, tr.SL, posID)
 }
 

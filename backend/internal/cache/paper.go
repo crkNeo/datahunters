@@ -588,6 +588,7 @@ func abs2(f float64) float64 {
 // book has no radar fields (score/OI/CVD), so it gets its own signal-style
 // format instead of zero-filled radar numbers.
 func (s *Store) notifyTradeOpen(b *paperBook, tr *PaperTrade) {
+	tradeLogf("OPEN [%s] %s %s 進場=%.6g TP=%.6g SL=%.6g", b.name, tr.Coin, dirCN(tr.Dir), tr.Entry, tr.TP, tr.SL)
 	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
 		s.trader.mirrorOpen(b.name, tr)
 	}
@@ -634,6 +635,7 @@ func (s *Store) notifyCloseBook(book string, tr *PaperTrade, now time.Time, forc
 // 管理員專屬的策略只推管理員,開放給 VIP/公開就推所有人;吃「開倉通知」開關。
 // 回傳是否通過「開倉通知」開關(方便測試驗證 gating,與 notifyCloseBook 對稱)。
 func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
+	tradeLogf("OPEN [%s] %s %s 進場=%.6g TP=%.6g SL=%.6g", book, tr.Coin, dirCN(tr.Dir), tr.Entry, tr.TP, tr.SL)
 	if s.trader != nil { // mirror onto a real Bitunix account — independent of the 開倉通知 toggle
 		s.trader.mirrorOpen(book, tr)
 	}

@@ -10,3 +10,4 @@ datahunter.db-shm
 .env
 server.run.log
 bin/
+logs/

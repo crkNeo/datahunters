@@ -177,11 +177,10 @@ func (s *Store) ConvTick() {
 		return
 	}
 	expOpenMs := (b4 - 1) * 4 * 3600 * 1000 // 剛收盤那根 4h 棒「應有」的開盤時戳(ms)
-	evaluated, errs, stale := 0, 0, 0
+	stale := 0
 	for _, coin := range s.emaCoins() {
 		cs, err := s.ex.BinanceKlines(coin+"USDT", "4h", convKlimit)
 		if err != nil || len(cs) < 2 {
-			errs++
 			continue
 		}
 		cs = cs[:len(cs)-1] // drop the still-forming bar
@@ -191,15 +190,12 @@ func (s *Store) ConvTick() {
 		if cs[len(cs)-1].Ts != expOpenMs {
 			stale++
 		}
-		evaluated++
 		s.runConv(coin, cs, now)
 		time.Sleep(25 * time.Millisecond)
 	}
-	barT := time.Unix(b4*4*3600, 0).Local().Format("01-02 15:04")
-	if stale > 0 {
-		log.Printf("策略[冥王星] 4h %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判)", barT, stale, evaluated)
-	} else {
-		log.Printf("策略[冥王星] 4h %s 收盤:正常評估 %d 幣%s", barT, evaluated, failNote(errs))
+	if stale > 0 { // 正常評估不洗版;只在少見的「新棒未生成」異常時出一行
+		barT := time.Unix(b4*4*3600, 0).Local().Format("01-02 15:04")
+		log.Printf("策略[冥王星] 4h %s 收盤:⚠️ %d 幣新棒未生成,評估到上一根(此根可能漏判)", barT, stale)
 	}
 }
 

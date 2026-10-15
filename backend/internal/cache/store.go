@@ -224,6 +224,7 @@ type Store struct {
 }
 
 func NewStore(coins []string) *Store {
+	initTradeLog() // logs/trades.log:開單歷史 + 各帳號下單結果
 	s := &Store{
 		data:              map[string]Snapshot{},
 		details:           map[string]CoinDetail{},

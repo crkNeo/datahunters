@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -596,7 +595,6 @@ func (s *Store) microTick(b *microBook) {
 	if b.intraSignal != nil { // 盤中書:進場交給 microIntraTick,收盤只處理持倉
 		base = nil
 	}
-	hotN := len(base)                       // 熱名單(可進場候選)幣數 —— 與「持倉補掃」分開記,log 才看得懂
 	coins := append([]string(nil), base...) // 複製,下面要 append 不能動到共用切片
 	// 關鍵:一定要處理「有未平倉部位的幣」,即使它已掉出宇宙/熱名單 —— 否則逾時、
 	// 訊號出場(死叉)、收盤 TP/SL 這些只在 microRun(收 K)跑的邏輯永遠不會觸發,
@@ -614,23 +612,17 @@ func (s *Store) microTick(b *microBook) {
 	}
 	b.mu.Unlock()
 	expOpenMs := (bkt - 1) * int64(b.barSec) * 1000 // 剛收盤那根「應有」的開盤時戳(ms)
-	evaluated, errs, stale := 0, 0, 0
-	opened, held := 0, 0
-	reasons := map[string]int{} // 沒開的幣 → 被哪個關卡擋下(逐項計數,基礎分類)
-	var details []string        // 每個沒開的幣 → coin:原因(含子原因)
+	stale := 0
 	for _, coin := range coins {
-		// 走短 TTL 快取:脈衝星家族 4 本同一根會抓同一批(coin|15m|200),只有第一本真的打 REST,
-		// 其餘命中快取 → 放寬到整個脈搏面板也不會把請求量 ×4。
+		// 走短 TTL 快取:脈衝星家族多本同一根會抓同一批(coin|15m|200),只有第一本真的打 REST。
 		v, err := s.candleCache.get(fmt.Sprintf("%s|%s|%d", coin, b.tf, b.klimit), func() (any, error) {
 			return s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
 		})
 		if err != nil {
-			errs++
 			continue
 		}
 		cs := v.([]exchange.Candle)
 		if len(cs) < 2 {
-			errs++
 			continue
 		}
 		cs = cs[:len(cs)-1] // drop the still-forming bar
@@ -640,57 +632,14 @@ func (s *Store) microTick(b *microBook) {
 		if cs[len(cs)-1].Ts != expOpenMs {
 			stale++ // 交易所新棒還沒生成 → 丟掉的其實是剛收盤那根,評估到的是更舊的一根
 		}
-		evaluated++
-		r := s.microRun(b, coin, cs, now)
-		switch {
-		case r == "":
-			opened++
-		case r == "持倉中":
-			held++
-		default:
-			base, _, _ := strings.Cut(r, ":") // 聚合只看基礎分類(訊號不符/冷卻中…),明細才帶子原因
-			reasons[base]++
-			details = append(details, coin+":"+r)
-		}
+		s.microRun(b, coin, cs, now)
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
-	barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
+	// 正常評估不再逐根洗版;只在少見的「新棒未生成」異常時出一行,幫助診斷漏判。
 	if stale > 0 {
-		log.Printf("策略[%s] %s %s 收盤:⚠️ %d/%d 幣新棒未生成,評估到上一根(此根可能漏判);2分鐘間隔通常不會踩到,若常見代表觸發太貼近收盤", b.name, b.tf, barT, stale, evaluated)
-		return
+		barT := time.Unix(bkt*int64(b.barSec), 0).Local().Format("15:04")
+		log.Printf("策略[%s] %s %s 收盤:⚠️ %d 幣新棒未生成,評估到上一根(此根可能漏判)", b.name, b.tf, barT, stale)
 	}
-	log.Printf("策略[%s] %s %s 收盤:候選 %d → 評估 %d 幣:開倉 %d · 持倉 %d%s%s", b.name, b.tf, barT, hotN, evaluated, opened, held, fmtRejects(reasons), failNote(errs))
-	if len(details) > 0 { // 每個沒開的幣逐一列出原因(上限 30 個,避免大宇宙策略洗版)
-		log.Printf("  └ [%s] 未開明細:%s", b.name, joinCapped(details, 30))
-	}
-}
-
-// joinCapped 以空白接起最多 n 個,超過則附「…+剩餘」。
-func joinCapped(xs []string, n int) string {
-	if len(xs) <= n {
-		return strings.Join(xs, "  ")
-	}
-	return strings.Join(xs[:n], "  ") + fmt.Sprintf("  …+%d", len(xs)-n)
-}
-
-// fmtRejects 依固定順序把「沒開的原因」計數組成簡短字串(全 0 時回空字串)。
-func fmtRejects(r map[string]int) string {
-	order := []string{"訊號不符", "冷卻中", "止損不可行", "止盈不可行", "品質閘門", "大盤過濾", "股票代幣過濾", "策略停用", "同家族持有"}
-	out := ""
-	for _, k := range order {
-		if r[k] > 0 {
-			out += fmt.Sprintf(" · %s %d", k, r[k])
-		}
-	}
-	return out
-}
-
-// failNote 把抓取失敗數變成簡短後綴(0 失敗時不顯示)。
-func failNote(errs int) string {
-	if errs == 0 {
-		return ""
-	}
-	return fmt.Sprintf(",抓取失敗 %d", errs)
 }
 
 // microRun 評估單一幣;回傳「給 log 的結果碼」:""=本根開倉 / "持倉中"=已有部位(只做管理)
