@@ -62,7 +62,7 @@ func (t EntryTags) apply(tr *PaperTrade) {
 // 與線上 surgeEngine 同一套(reconstructSurgeSeed + pulseAndBaseline)。資料不足回 0。
 func SurgeXFromMinuteKlines(ks []exchange.Candle) float64 {
 	points := surgeRing
-	if max := (len(ks)-1441)/2 + 1; max < points { // reconstructSurgeSeed 需要 24h + (points−1)×2 根
+	if max := len(ks) - 1440; max < points { // reconstructSurgeSeed 需要 24h(1440 根)+ points(step=1)
 		points = max
 	}
 	if points < surgeMinHist {

@@ -1019,7 +1019,7 @@ func (s *Store) Refresh() {
 	btcChg := tmap["BTCUSDT"].ChgPct
 	if len(tickers) > 0 {
 		s.setEMAUniverse(tickers, emaTopN) // top-N by volume → EMA strategy universe
-		s.surge.scan(tickers, time.Now())  // 爆量脈搏斥候(零額外 REST,純記憶體)
+		// 爆量掃描已獨立成 SurgeScanTick(每 60s),不在這裡做,避免雙重 append 打亂快照間距。
 	}
 
 	// OI 儀表板 / 數據訊號 / 評分穿越的監控幣池 = 動態「成交量前 N」(emaCoins,與策略同

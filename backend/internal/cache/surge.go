@@ -26,9 +26,9 @@ import (
 // 這只是「感測器」——負責提名可疑對象,不負責定罪。真正的品質閘門(OI/CVD)在下游。
 
 const (
-	surgeRing     = 240             // 每檔保留的快照數(2min×240 ≈ 8h 基線)
-	surgeWin      = 15              // 脈搏窗:15 個 cycle ≈ 30min 的近窗成交量
-	surgeMinHist  = 30             // 至少 30 個 cycle(~1h)才開始評分;啟動時由 K 線暖機直接補滿
+	surgeRing     = 480             // 每檔保留的快照數(1min×480 ≈ 8h 基線;掃描週期 60s)
+	surgeWin      = 30              // 脈搏窗:30 個 cycle ≈ 30min 的近窗成交量(60s/cycle)
+	surgeMinHist  = 60             // 至少 60 個 cycle(~1h)才開始評分;啟動時由 K 線暖機直接補滿
 	surgeVolFloor = 1_000_000.0     // 24h 成交額地板:低於此不評分(擋殭屍幣一筆單假爆量)
 	surgePulseMin = 150_000.0       // 近窗脈搏絕對地板(USDT):過小的脈搏不算數
 	surgeHotRatio = 3.0             // 進「熱名單」(供脈衝星策略)的爆量倍數門檻
@@ -252,12 +252,12 @@ func (e *surgeEngine) mergeSeed(coin string, seed []surgeSnap) {
 	e.hist[coin] = merged
 }
 
-// reconstructSurgeSeed rebuilds ~surgeMinHist snapshots at 2-min spacing from 1m
+// reconstructSurgeSeed rebuilds ~surgeMinHist snapshots at 1-min spacing from 1m
 // klines. Each snapshot's qv is the 24h-rolling quote volume ending at that bar —
 // exactly what all-tickers reports live, so the seam with live scans is smooth.
 func reconstructSurgeSeed(ks []exchange.Candle, points int) []surgeSnap {
 	const day = 1440 // 1m bars in 24h
-	const step = 2   // 2min ring cadence (Refresh 週期)
+	const step = 1   // 1min ring cadence(獨立爆量掃描週期 60s)
 	n := len(ks)
 	if n < day+(points-1)*step+1 {
 		return nil // 不夠 24h + ring,交給即時暖機
@@ -368,6 +368,20 @@ func (s *Store) surgeHotCoins() []string {
 	out := make([]string, len(s.surge.hot))
 	copy(out, s.surge.hot)
 	return out
+}
+
+// SurgeScanTick 獨立的爆量掃描:每 60 秒抓一次 all-tickers 餵給 surge 引擎,讓爆量名單
+// (board/hot)比 120 秒的 Refresh 更快反映新爆量 → 脈衝星(含 v12 盤中)更快把新爆量的幣
+// 納入候選。一次 all-tickers REST(weight ~40),per-coin 是純記憶體掃描、零額外 REST。
+func (s *Store) SurgeScanTick() {
+	if s.surge == nil {
+		return
+	}
+	tickers, err := s.ex.BinanceAllTickers()
+	if err != nil || len(tickers) == 0 {
+		return
+	}
+	s.surge.scan(tickers, time.Now())
 }
 
 // surgeBoardCoins is the WIDER strategy universe — the whole 脈搏面板 (board): every

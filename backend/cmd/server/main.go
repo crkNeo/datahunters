@@ -96,6 +96,16 @@ func main() {
 	// 爆量脈搏:啟動時用歷史 K 線重建基線,面板幾分鐘內就有資料(不必等 ~1h 累積)。
 	go store.WarmSurge()
 
+	// 爆量掃描獨立每 60s 跑(與 120s 的 Refresh 分開):新爆量的幣最快 ~60s 就進候選名單,
+	// 讓脈衝星(尤其 v12 盤中)少漏、少晚。一次 all-tickers,per-coin 純記憶體。
+	go func() {
+		store.SurgeScanTick()
+		ticker := time.NewTicker(60 * time.Second)
+		for range ticker.C {
+			store.SurgeScanTick()
+		}
+	}()
+
 	// initial fill, then refresh on a ticker
 	go func() {
 		log.Printf("priming cache for %d coins...", len(coins))
