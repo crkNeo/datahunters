@@ -1093,7 +1093,7 @@ func (s *Server) handleKlines(w http.ResponseWriter, r *http.Request) {
 	}
 	interval := r.URL.Query().Get("interval")
 	switch interval {
-	case "1h", "4h", "1d":
+	case "15m", "1h", "2h", "4h", "1d": // 幣種明細 K 線圖可選 15m / 1H / 2H / 4H
 	default:
 		interval = "1h"
 	}

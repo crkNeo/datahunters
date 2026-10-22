@@ -27,6 +27,7 @@ import NewsBoard from './components/NewsBoard.vue'
 import RobinhoodBoard from './components/RobinhoodBoard.vue'
 import WhaleBoard from './components/WhaleBoard.vue'
 import PolyscoutBoard from './components/PolyscoutBoard.vue'
+import CandleChart from './components/CandleChart.vue'
 import { ROUTE_TABS } from './router'
 
 // ---- shared data ----
@@ -1330,19 +1331,6 @@ const detailLSR = computed(() => {
   const lp = detail.value && detail.value.stats ? detail.value.stats.long_pct : 0
   const sp = 100 - lp
   return sp > 0 ? (lp / sp).toFixed(2) : '—'
-})
-// 近 24h 收盤 sparkline → SVG(折線 + 面積);顏色依 24h 漲跌
-const detailSpark = computed(() => {
-  const s = (detail.value && detail.value.spark) || []
-  if (s.length < 2) return null
-  const W = 520, H = 56, pad = 4
-  const lo = Math.min(...s), hi = Math.max(...s), span = hi - lo || 1
-  const pts = s.map((v, i) => {
-    const x = (i / (s.length - 1)) * W
-    const y = H - pad - ((v - lo) / span) * (H - pad * 2)
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
-  return { line: pts.join(' '), area: `0,${H} ${pts.join(' ')} ${W},${H}` }
 })
 
 // load everything the current role is allowed to see (gated endpoints 403 quietly)
@@ -3201,6 +3189,9 @@ watch([role, tabPerms, authReady], () => {
           </div>
         </div>
         <div class="cm-body">
+          <!-- K 線圖(15m / 1H / 2H / 4H 可切)-->
+          <CandleChart :coin="detail.coin" />
+
           <!-- 方向 + 強度 -->
           <div class="cm-dir" :class="biasClass(detail.bias)">
             <span class="dl">{{ detail.bias === 'long' ? '做多推薦' : detail.bias === 'short' ? '做空推薦' : '中性 · 觀察' }}</span>
@@ -3228,15 +3219,6 @@ watch([role, tabPerms, authReady], () => {
             <div class="row" v-if="detail.high_24h"><span>24h 高</span><b>{{ fmtPrice(detail.high_24h) }}</b></div>
             <div class="row" v-if="detail.low_24h"><span>24h 低</span><b>{{ fmtPrice(detail.low_24h) }}</b></div>
           </div>
-
-          <!-- 近 24h 走勢 -->
-          <template v-if="detailSpark">
-            <p class="eyebrow">近 24h 走勢</p>
-            <svg class="cm-spark" viewBox="0 0 520 56" preserveAspectRatio="none">
-              <polygon :points="detailSpark.area" :fill="detail.stats.chg_24h >= 0 ? 'rgba(55,214,138,.12)' : 'rgba(255,92,108,.12)'" />
-              <polyline :points="detailSpark.line" fill="none" :stroke="detail.stats.chg_24h >= 0 ? 'var(--c-up)' : 'var(--c-dn)'" stroke-width="2" vector-effect="non-scaling-stroke" />
-            </svg>
-          </template>
 
           <!-- 評分理由(保留真資料)-->
           <template v-if="detail.rationale && detail.rationale.length">
@@ -4553,7 +4535,6 @@ footer { padding: 18px 0 30px; text-align: center; }
 .cm-kv{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; margin-bottom:16px; }
 .cm-kv .row{ display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--c-line); font-size:12.5px; color:var(--c-mut); }
 .cm-kv .row b{ font-family:var(--f-mono); color:var(--c-txt); }
-.cm-spark{ width:100%; height:56px; background:var(--c-bg2); border:1px solid var(--c-line); border-radius:10px; margin-bottom:16px; display:block; }
 .cm-rationale{ display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
 .cm-rrow{ display:grid; grid-template-columns:auto auto 1fr; gap:8px; align-items:center; font-size:12.5px; }
 .cm-rrow .rl-label{ font-family:var(--f-disp); font-weight:600; color:var(--c-txt); white-space:nowrap; }

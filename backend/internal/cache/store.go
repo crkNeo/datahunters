@@ -979,6 +979,7 @@ type KlinePoint struct {
 	H float64 `json:"h"`
 	L float64 `json:"l"`
 	C float64 `json:"c"`
+	V float64 `json:"v"` // 成交量(base)
 }
 
 // Klines fetches recent OHLC candles for a coin (fresh from Binance fapi).
@@ -991,7 +992,7 @@ func (s *Store) Klines(coin, interval string, limit int) ([]KlinePoint, error) {
 		}
 		out := make([]KlinePoint, len(kl))
 		for i, c := range kl {
-			out[i] = KlinePoint{T: c.Ts, O: c.Open, H: c.High, L: c.Low, C: c.Close}
+			out[i] = KlinePoint{T: c.Ts, O: c.Open, H: c.High, L: c.Low, C: c.Close, V: c.Volume}
 		}
 		return out, nil
 	})
