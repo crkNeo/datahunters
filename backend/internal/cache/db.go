@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   oi_1h DOUBLE NOT NULL DEFAULT 0, cvd_1h DOUBLE NOT NULL DEFAULT 0, long_acct DOUBLE NOT NULL DEFAULT 0,
   chg_24 DOUBLE NOT NULL DEFAULT 0, surge_x DOUBLE NOT NULL DEFAULT 0, btc_1h DOUBLE NOT NULL DEFAULT 0,
   vol_24 DOUBLE NOT NULL DEFAULT 0,
+  wick_pct DOUBLE NOT NULL DEFAULT 0, ema_dist DOUBLE NOT NULL DEFAULT 0, bar_atr DOUBLE NOT NULL DEFAULT 0,
+  spike_x DOUBLE NOT NULL DEFAULT 0, btc_15m DOUBLE NOT NULL DEFAULT 0,
   KEY idx_pt_open (open_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -231,6 +233,11 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"surge_x":   "ADD COLUMN surge_x DOUBLE NOT NULL DEFAULT 0",
 		"btc_1h":    "ADD COLUMN btc_1h DOUBLE NOT NULL DEFAULT 0",
 		"vol_24":    "ADD COLUMN vol_24 DOUBLE NOT NULL DEFAULT 0",
+		"wick_pct":  "ADD COLUMN wick_pct DOUBLE NOT NULL DEFAULT 0",
+		"ema_dist":  "ADD COLUMN ema_dist DOUBLE NOT NULL DEFAULT 0",
+		"bar_atr":   "ADD COLUMN bar_atr DOUBLE NOT NULL DEFAULT 0",
+		"spike_x":   "ADD COLUMN spike_x DOUBLE NOT NULL DEFAULT 0",
+		"btc_15m":   "ADD COLUMN btc_15m DOUBLE NOT NULL DEFAULT 0",
 	} {
 		var has int
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)
@@ -431,8 +438,8 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 	}
 	db.sql.Exec(`INSERT INTO paper_trades
 	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
-	   oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24)
-	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	   oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	  ON DUPLICATE KEY UPDATE
 	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
 	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl),
@@ -442,7 +449,8 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		t.ID, book, t.Coin, t.Dir, t.Score, t.Entry, t.TP, t.SL, t.Cur, t.PnLPct,
 		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding,
 		t.TP1, t.TP2, t.TP3, t.Legs, t.Filled, t.Realized, t.BEHit, t.BEPrice, t.MaxGain,
-		t.OI1h, t.CVD1h, t.LongAcct, t.Chg24, t.SurgeX, t.BTC1h, t.Vol24)
+		t.OI1h, t.CVD1h, t.LongAcct, t.Chg24, t.SurgeX, t.BTC1h, t.Vol24,
+		t.WickPct, t.EMADist, t.BarATR, t.SpikeX, t.BTC15m)
 }
 
 func (db *DB) insertLiquidation(r LiqRow) {
@@ -479,7 +487,7 @@ func (db *DB) clearClosedTrades(book string) {
 
 func (db *DB) loadTrades(book string) []*PaperTrade {
 	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
-	  oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24
+	  oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -492,7 +500,8 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 		if err := rows.Scan(&t.ID, &t.Coin, &t.Dir, &t.Score, &t.Entry, &t.TP, &t.SL,
 			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
 			&t.TP1, &t.TP2, &t.TP3, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain,
-			&t.OI1h, &t.CVD1h, &t.LongAcct, &t.Chg24, &t.SurgeX, &t.BTC1h, &t.Vol24); err != nil {
+			&t.OI1h, &t.CVD1h, &t.LongAcct, &t.Chg24, &t.SurgeX, &t.BTC1h, &t.Vol24,
+			&t.WickPct, &t.EMADist, &t.BarATR, &t.SpikeX, &t.BTC15m); err != nil {
 			continue
 		}
 		t.OpenTime = time.UnixMilli(ot).UTC()

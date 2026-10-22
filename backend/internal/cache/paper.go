@@ -99,6 +99,11 @@ type PaperTrade struct {
 	SurgeX   float64 `json:"surge_x,omitempty"`
 	BTC1h    float64 `json:"btc_1h,omitempty"`
 	Vol24    float64 `json:"vol_24,omitempty"`
+	WickPct  float64 `json:"wick_pct,omitempty"` // 進場那根上影線佔全距 %
+	EMADist  float64 `json:"ema_dist,omitempty"` // (進場價 − EMA20) / ATR
+	BarATR   float64 `json:"bar_atr,omitempty"`  // 進場那根全距 / ATR
+	SpikeX   float64 `json:"spike_x,omitempty"`  // 近 6 根最大量 / 截尾基線
+	BTC15m   float64 `json:"btc_15m,omitempty"`  // BTC 對上一根 15m 收盤的漲跌%
 }
 
 // PaperStats summarises closed trades.
@@ -474,6 +479,8 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
+	case "pulsarv15":
+		return "脈衝星v15"
 	case "orderblock", "orderblock_4h":
 		return "訂單塊"
 	case "orderblockv2", "orderblockv2_4h":
@@ -529,7 +536,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv15", "orderblock", "orderblockv2":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
@@ -845,7 +852,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12":
+	case "pulsarv3", "pulsarv12", "pulsarv15":
 		return true
 	}
 	return false
@@ -866,6 +873,8 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV3Book
 	case "pulsarv12":
 		return s.pulsarV12Book
+	case "pulsarv15":
+		return s.pulsarV15Book
 	}
 	return nil
 }

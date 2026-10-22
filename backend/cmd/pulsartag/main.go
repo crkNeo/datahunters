@@ -12,6 +12,7 @@
 //	intrabar   1 = 盤中進場(進場時間不在 15m 整點上)
 //	v3_confirm 盤中單才有:那根 15m 收完後,v3 的進場條件是否也成立(1/0)
 //	t_oi12h t_oi1h t_cvd6h t_cvd1h t_funding t_long_acct t_chg24 t_surge_x t_btc1h t_vol24
+//	t_wick_pct t_ema_dist t_bar_atr t_spike_x t_btc15m
 //	tag_err    抓資料失敗的項目(空 = 全部成功)
 //
 // 防偷看未來:所有資料都只取進場時刻之前的。盤中進場那根 15m 用 1m K 拼出「進場前」的部分 K,
@@ -41,7 +42,8 @@ const (
 
 var newCols = []string{"r_pct", "pnl_r", "intrabar", "v3_confirm",
 	"t_oi12h", "t_oi1h", "t_cvd6h", "t_cvd1h", "t_funding", "t_long_acct",
-	"t_chg24", "t_surge_x", "t_btc1h", "t_vol24", "tag_err"}
+	"t_chg24", "t_surge_x", "t_btc1h", "t_vol24",
+	"t_wick_pct", "t_ema_dist", "t_bar_atr", "t_spike_x", "t_btc15m", "tag_err"}
 
 func main() {
 	out := flag.String("out", "pulsar-tagged.csv", "輸出 CSV 路徑")
@@ -84,7 +86,7 @@ func main() {
 	w := csv.NewWriter(f)
 	w.Write(append(append([]string{}, header...), newCols...))
 
-	t := &tagger{ex: exchange.NewClient(), sleep: *sleep, btcPrevHour: map[int64]float64{}}
+	t := &tagger{ex: exchange.NewClient(), sleep: *sleep, btcPrevHour: map[int64]float64{}, btcPrev15: map[int64]float64{}}
 	for i, r := range rows {
 		get := func(k string) string { return r[col[k]] }
 		w.Write(append(append([]string{}, r...), t.tagRow(get)...))
@@ -129,6 +131,7 @@ type tagger struct {
 	ex          *exchange.Client
 	sleep       time.Duration
 	btcPrevHour map[int64]float64 // 整點 → 上一個整點 BTC 收盤(同一小時的單共用)
+	btcPrev15   map[int64]float64 // 15m 棒開盤 → 上一根 15m BTC 收盤
 }
 
 func (t *tagger) pause() { time.Sleep(t.sleep) }
@@ -197,7 +200,7 @@ func (t *tagger) tagRow(get func(string) string) []string {
 	if err != nil {
 		errs = append(errs, "費率")
 	}
-	btc, ok := t.btc1h(entryMs, minuteEnd)
+	btc, btc15, ok := t.btcRets(entryMs, barStart, minuteEnd)
 	if !ok {
 		errs = append(errs, "BTC")
 	}
@@ -206,35 +209,41 @@ func (t *tagger) tagRow(get func(string) string) []string {
 		errs = append(errs, "爆量倍數")
 	}
 
-	tags := cache.ComputeEntryTags(cs, oi, fr.Rate, ls.LongAccount, btc, surgeX)
+	tags := cache.ComputeEntryTags(cs, oi, fr.Rate, ls.LongAccount, btc, btc15, surgeX)
 	ib := "0"
 	if intrabar {
 		ib = "1"
 	}
 	return []string{ff(rPct), pnlR, ib, v3c,
 		ff(tags.OI12h), ff(tags.OI1h), ff(tags.CVD6h), ff(tags.CVD1h), ff(tags.Funding), ff(tags.LongAcct),
-		ff(tags.Chg24), ff(tags.SurgeX), ff(tags.BTC1h), ff(tags.Vol24), strings.Join(errs, "|")}
+		ff(tags.Chg24), ff(tags.SurgeX), ff(tags.BTC1h), ff(tags.Vol24),
+		ff(tags.WickPct), ff(tags.EMADist), ff(tags.BarATR), ff(tags.SpikeX), ff(tags.BTC15m), strings.Join(errs, "|")}
 }
 
-// btc1h = BTC 進場前最後一根 1m 收盤,對上一個整點收盤的漲跌%(與線上 btc1hRet 同口徑)。
-func (t *tagger) btc1h(entryMs, minuteEnd int64) (float64, bool) {
-	hourStart := entryMs - entryMs%hourMs
-	prev, ok := t.btcPrevHour[hourStart]
-	if !ok {
-		kl, err := t.ex.BinanceKlinesRange("BTCUSDT", "1h", 0, hourStart-1, 1)
+// btcRets = BTC 進場前最後一根 1m 收盤,分別對「上一個整點收盤」與「上一根 15m 收盤」的漲跌%
+// (與線上 btc1hRet / btc15mRet 同口徑)。
+func (t *tagger) btcRets(entryMs, barStart, minuteEnd int64) (h1, m15 float64, ok bool) {
+	prevClose := func(cache map[int64]float64, interval string, start int64) (float64, bool) {
+		if v, ok := cache[start]; ok {
+			return v, true
+		}
+		kl, err := t.ex.BinanceKlinesRange("BTCUSDT", interval, 0, start-1, 1)
 		t.pause()
 		if err != nil || len(kl) == 0 || kl[0].Close <= 0 {
 			return 0, false
 		}
-		prev = kl[0].Close
-		t.btcPrevHour[hourStart] = prev
+		cache[start] = kl[0].Close
+		return kl[0].Close, true
 	}
+	ph, ok1 := prevClose(t.btcPrevHour, "1h", entryMs-entryMs%hourMs)
+	p15, ok2 := prevClose(t.btcPrev15, "15m", barStart)
 	kl, err := t.ex.BinanceKlinesRange("BTCUSDT", "1m", 0, minuteEnd, 1)
 	t.pause()
-	if err != nil || len(kl) == 0 {
-		return 0, false
+	if err != nil || len(kl) == 0 || !ok1 || !ok2 {
+		return 0, 0, false
 	}
-	return (kl[0].Close/prev - 1) * 100, true
+	p := kl[0].Close
+	return (p/ph - 1) * 100, (p/p15 - 1) * 100, true
 }
 
 // surgeX 抓進場前約 2000 根 1m K(24h 滾動量 + 8h 快照環),重建當時的爆量倍數。

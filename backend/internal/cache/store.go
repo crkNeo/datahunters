@@ -145,12 +145,13 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	bollEMABook    *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
-	surge          *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
-	pulsarV3Book   *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
-	pulsarV12Book  *microBook   // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
-	smcBooks       []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
-	smcV2Books     []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
+	bollEMABook   *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
+	surge         *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
+	pulsarV3Book  *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
+	pulsarV12Book *microBook   // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
+	pulsarV15Book *microBook   // 脈衝星v15:v12 + 1h CVD ≤10% + 散戶做多 ≥60% (pulsarv15.go)
+	smcBooks      []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
+	smcV2Books    []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -291,6 +292,7 @@ func NewStore(coins []string) *Store {
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, signalWhy: surgeV3Why, tagEntry: true}
 	// 脈衝星v12:盤中書。進場由 microIntraTick 每分鐘用形成中的 K 評估;signal 保留 v3 只給收盤管理流程佔位(不會用來進場)。
 	s.pulsarV12Book = &microBook{name: "pulsarv12", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, intraSignal: surgeV12Signal, tagEntry: true}
+	s.pulsarV15Book = s.newPulsarV15Book()
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
@@ -322,6 +324,7 @@ func NewStore(coins []string) *Store {
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV12Book.trades = db.loadTrades("pulsarv12")
+		s.pulsarV15Book.trades = db.loadTrades("pulsarv15")
 		for _, b := range s.smcBooks {
 			b.trades = db.loadTrades(b.name)
 		}

@@ -265,6 +265,7 @@ func main() {
 			store.BollEMAMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV12MarkTick()
+			store.PulsarV15MarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
@@ -282,17 +283,19 @@ func main() {
 	go func() {
 		store.PulsarV3Tick()
 		store.PulsarV12Tick()
+		store.PulsarV15Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarV3Tick()
 			store.PulsarV12Tick()
+			store.PulsarV15Tick()
 		}
 	}()
-	// 脈衝星v12 盤中進場:每分鐘用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程)。
+	// 脈衝星v12 / v15 盤中進場:每 20 秒用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程);兩本共用每個幣的一次抓取。
 	go func() {
 		ticker := time.NewTicker(20 * time.Second) // 盤中即進:掃越密越能即時抓到條件成立的那一刻
 		for range ticker.C {
-			store.PulsarV12IntraTick()
+			store.PulsarIntraTick()
 		}
 	}()
 	// 多空推薦 → Telegram:不等整點,出現異常 OI 或 CVD 就即時通知(同幣冷卻去重)。

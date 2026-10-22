@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"math"
+
 	"datahunter/internal/exchange"
 	"datahunter/internal/indicator"
 )
@@ -21,6 +23,13 @@ type EntryTags struct {
 	SurgeX   float64 // 爆量倍數(近 30 分鐘成交額 / 自身 8h 基線)
 	BTC1h    float64 // BTC 現價對上一個整點收盤的漲跌%
 	Vol24    float64 // 近 24h 成交額(USDT)
+
+	// 進場那根 K(盤中進場 = 到進場為止的部分 K)的形狀與位置
+	WickPct float64 // 上影線佔這根全距的 %(越大 = 已從高點被砸回越多)
+	EMADist float64 // (現價 − 15m EMA20) / ATR:離均線幾個 ATR(越大 = 追得越高)
+	BarATR  float64 // 這根全距 / ATR:這根有多誇張
+	SpikeX  float64 // 近 6 根(含這根)最大量 / 截尾基線量:觸發的爆量是幾倍
+	BTC15m  float64 // BTC 現價對上一根 15m 收盤的漲跌%
 }
 
 // ComputeEntryTags 由原始資料算出因子。
@@ -28,8 +37,8 @@ type EntryTags struct {
 //	cs15:進場當下的 15m K(最後一根 = 進場那根;盤中進場時是到進場為止的部分 K)
 //	oi1h:1h 名目 OI 歷史(舊→新,最後一點 = 進場前最近的整點)
 //	btc1h:BTC 漲跌%(已換算好)
-func ComputeEntryTags(cs15 []exchange.Candle, oi1h []exchange.OIPoint, funding, longAcct, btc1h, surgeX float64) EntryTags {
-	t := EntryTags{Funding: funding, LongAcct: longAcct, BTC1h: btc1h, SurgeX: surgeX}
+func ComputeEntryTags(cs15 []exchange.Candle, oi1h []exchange.OIPoint, funding, longAcct, btc1h, btc15m, surgeX float64) EntryTags {
+	t := EntryTags{Funding: funding, LongAcct: longAcct, BTC1h: btc1h, BTC15m: btc15m, SurgeX: surgeX}
 	if len(oi1h) > 13 {
 		oi1h = oi1h[len(oi1h)-13:]
 	}
@@ -48,6 +57,25 @@ func ComputeEntryTags(cs15 []exchange.Candle, oi1h []exchange.OIPoint, funding, 
 			t.Vol24 += cs15[i].QuoteVol
 		}
 	}
+	if n > 0 {
+		last := cs15[n-1]
+		if rng := last.High - last.Low; rng > 0 {
+			t.WickPct = (last.High - math.Max(last.Open, last.Close)) / rng * 100
+		}
+		if atr := robustATR(cs15, 14, 2); atr > 0 {
+			t.EMADist = (last.Close - emaSeries(cs15, 20)[n-1]) / atr
+			t.BarATR = (last.High - last.Low) / atr
+		}
+		if base := trimmedBaseVol(cs15); base > 0 {
+			peak := 0.0
+			for i := n - 6; i < n; i++ {
+				if i >= 0 {
+					peak = math.Max(peak, cs15[i].Volume)
+				}
+			}
+			t.SpikeX = peak / base
+		}
+	}
 	return t
 }
 
@@ -56,6 +84,7 @@ func (t EntryTags) apply(tr *PaperTrade) {
 	tr.OI, tr.CVD, tr.Funding = t.OI12h, t.CVD6h, t.Funding
 	tr.OI1h, tr.CVD1h, tr.LongAcct = t.OI1h, t.CVD1h, t.LongAcct
 	tr.Chg24, tr.SurgeX, tr.BTC1h, tr.Vol24 = t.Chg24, t.SurgeX, t.BTC1h, t.Vol24
+	tr.WickPct, tr.EMADist, tr.BarATR, tr.SpikeX, tr.BTC15m = t.WickPct, t.EMADist, t.BarATR, t.SpikeX, t.BTC15m
 }
 
 // SurgeXFromMinuteKlines 用進場前的 1m K 重建爆量脈搏的快照環,算出當時的爆量倍數。
@@ -90,10 +119,27 @@ func (s *Store) tagEntry(b *microBook, tr *PaperTrade, cs []exchange.Candle) {
 	}
 	coin := tr.Coin
 	btc, _ := s.btc1hRet()
-	tags := ComputeEntryTags(cs, s.oiHist1h(coin, 13), s.lastFunding(coin), s.longShortCached(coin).LongAccount, btc*100, s.surgeXOf(coin))
+	btc15, _ := s.btc15mRet()
+	tags := ComputeEntryTags(cs, s.oiHist1h(coin, 13), s.lastFunding(coin), s.longShortCached(coin).LongAccount, btc*100, btc15*100, s.surgeXOf(coin))
 	b.mu.Lock()
 	tags.apply(tr)
 	b.mu.Unlock()
+}
+
+// btc15mRet 回傳 BTC 現價對上一根 15m 收盤的報酬(小數),快取 30 秒(15m 的指標不能用太舊的值)。
+func (s *Store) btc15mRet() (float64, bool) {
+	v, err := s.klineCache.get("btc15mret", func() (any, error) {
+		kl, e := s.ex.BinanceKlines("BTCUSDT", "15m", 2)
+		if e != nil || len(kl) < 2 || kl[len(kl)-2].Close <= 0 {
+			return 0.0, e
+		}
+		return kl[len(kl)-1].Close/kl[len(kl)-2].Close - 1, nil
+	})
+	if err != nil {
+		return 0, false
+	}
+	ret, _ := v.(float64)
+	return ret, true
 }
 
 // lastFunding 回傳最近一次已結算的資金費率(快取 10 分鐘;費率 8h 才結算一次)。

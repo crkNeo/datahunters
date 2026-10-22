@@ -14,8 +14,9 @@ func TestComputeEntryTags(t *testing.T) {
 	}
 	cs[len(cs)-97].Close = 80                                                         // 24h 前收 80 → 現在 100 = +25%
 	cs[len(cs)-1].TakerBuy = 10                                                       // 最後一根全是主動買
+	cs[len(cs)-1].Open, cs[len(cs)-1].High, cs[len(cs)-1].Low = 99, 102, 98           // 進場那根:上影 2 / 全距 4
 	oi := []exchange.OIPoint{{SumOIValue: 100}, {SumOIValue: 110}, {SumOIValue: 121}} // 只有 3 點也要能算
-	tg := ComputeEntryTags(cs, oi, 0.0005, 0.62, -1.5, 3.2)
+	tg := ComputeEntryTags(cs, oi, 0.0005, 0.62, -1.5, 0.2, 3.2)
 
 	if math.Abs(tg.Chg24-25) > 1e-9 {
 		t.Errorf("Chg24=%v want 25", tg.Chg24)
@@ -33,9 +34,12 @@ func TestComputeEntryTags(t *testing.T) {
 		t.Errorf("直通欄位錯: %+v", tg)
 	}
 
+	if math.Abs(tg.WickPct-50) > 1e-9 || math.Abs(tg.SpikeX-1) > 1e-9 || tg.BTC15m != 0.2 || tg.BarATR <= 0 {
+		t.Errorf("K 棒形狀欄位錯: wick=%v spike=%v btc15=%v barATR=%v", tg.WickPct, tg.SpikeX, tg.BTC15m, tg.BarATR)
+	}
 	var tr PaperTrade
 	tg.apply(&tr)
-	if tr.OI != tg.OI12h || tr.CVD != tg.CVD6h || tr.Funding != tg.Funding || tr.Chg24 != tg.Chg24 || tr.SurgeX != tg.SurgeX {
+	if tr.OI != tg.OI12h || tr.CVD != tg.CVD6h || tr.Funding != tg.Funding || tr.Chg24 != tg.Chg24 || tr.SurgeX != tg.SurgeX || tr.WickPct != tg.WickPct || tr.BTC15m != tg.BTC15m {
 		t.Errorf("apply 沒寫對: %+v", tr)
 	}
 }

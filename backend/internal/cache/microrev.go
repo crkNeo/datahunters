@@ -496,48 +496,75 @@ func surgeV12Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, 
 
 // ---- generic engine ----
 
-// microIntraTick 是盤中書的進場掃描(每分鐘呼叫):對宇宙內沒有持倉的幣抓含「形成中那根」的
-// K 線,條件成立就以當下價開倉。抓取走 30 秒快取、key 與收盤書分開(收盤書要的是已收的棒),
-// v12/v13 同一分鐘內接連跑時第二本直接命中快取。
-func (s *Store) microIntraTick(b *microBook) {
-	if b.intraSignal == nil || b.universe == nil || !s.StrategyEnabled(b.strat()) {
+// microIntraTick 是盤中書的進場掃描:對各書宇宙裡「還沒持倉」的幣抓含形成中那根的最新 K 線,
+// 條件成立就以當下價開倉。多本盤中書一起傳進來時(v12 / v15),每個幣只抓一次、各書共用,
+// 不會因為多一本就多一倍 REST。直接抓、不走快取:盤中即進要的是此刻形成中那根的最新狀態。
+func (s *Store) microIntraTick(bs ...*microBook) {
+	var live []*microBook
+	for _, b := range bs {
+		if b != nil && b.intraSignal != nil && b.universe != nil && s.StrategyEnabled(b.strat()) {
+			live = append(live, b)
+		}
+	}
+	if len(live) == 0 {
 		return
 	}
 	now := time.Now().UTC()
-	opened := 0
-	for _, coin := range b.universe() {
-		b.mu.Lock()
-		busy := false
-		for _, tr := range b.trades {
-			if tr.Coin == coin && tr.Status == "open" {
-				busy = true
-				break
+	opened := make([]int, len(live))
+	// 各書宇宙聯集(保持順序):coin → 哪幾本要看它
+	var coins []string
+	wants := map[string][]int{}
+	for i, b := range live {
+		for _, coin := range b.universe() {
+			if _, seen := wants[coin]; !seen {
+				coins = append(coins, coin)
+			}
+			wants[coin] = append(wants[coin], i)
+		}
+	}
+	for _, coin := range coins {
+		var need []int // 這個幣還沒持倉的書
+		for _, i := range wants[coin] {
+			b := live[i]
+			b.mu.Lock()
+			busy := false
+			for _, tr := range b.trades {
+				if tr.Coin == coin && tr.Status == "open" {
+					busy = true
+					break
+				}
+			}
+			b.mu.Unlock()
+			if !busy {
+				need = append(need, i)
 			}
 		}
-		b.mu.Unlock()
-		if busy {
+		if len(need) == 0 {
 			continue
 		}
-		// 盤中即進要的是「此刻」形成中那根的最新狀態,所以直接抓、不走快取(快取會讓資料
-		// 最多舊 30 秒 → 可能照著已反轉的舊形狀進場;v13 已刪,這裡也沒有第二本可共用抓取)。
-		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
+		cs, err := s.ex.BinanceKlines(coin+"USDT", live[need[0]].tf, live[need[0]].klimit)
 		if err != nil {
 			continue
 		}
-		if len(cs) < b.minBars+1 {
-			continue
+		elapsed := int64(-1)
+		if len(cs) > 0 {
+			elapsed = (now.UnixMilli() - cs[len(cs)-1].Ts) / 1000
 		}
-		elapsed := (now.UnixMilli() - cs[len(cs)-1].Ts) / 1000
-		if elapsed < 0 || elapsed >= b.barSec { // 最後一根不是「現在這根」(交易所還沒切新棒)→ 跳過
-			continue
-		}
-		if s.microIntraOpen(b, coin, cs, elapsed, now) {
-			opened++
+		for _, i := range need {
+			b := live[i]
+			if len(cs) < b.minBars+1 || elapsed < 0 || elapsed >= b.barSec { // 最後一根不是「現在這根」→ 跳過
+				continue
+			}
+			if s.microIntraOpen(b, coin, cs, elapsed, now) {
+				opened[i]++
+			}
 		}
 		time.Sleep(25 * time.Millisecond) // pace the REST batch
 	}
-	if opened > 0 {
-		log.Printf("策略[%s] 盤中進場 %d 筆", b.name, opened)
+	for i, n := range opened {
+		if n > 0 {
+			log.Printf("策略[%s] 盤中進場 %d 筆", live[i].name, n)
+		}
 	}
 }
 
@@ -1009,12 +1036,16 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 
 // ---- per-book public wrappers (ticks + state) ----
 
-func (s *Store) BollEMATick()        { s.microTick(s.bollEMABook) }
-func (s *Store) PulsarV3Tick()       { s.microTick(s.pulsarV3Book) }
-func (s *Store) PulsarV3MarkTick()   { s.microMarkTick(s.pulsarV3Book) }
-func (s *Store) PulsarV12Tick()      { s.microTick(s.pulsarV12Book) }
-func (s *Store) PulsarV12MarkTick()  { s.microMarkTick(s.pulsarV12Book) }
-func (s *Store) PulsarV12IntraTick() { s.microIntraTick(s.pulsarV12Book) }
+func (s *Store) BollEMATick()       { s.microTick(s.bollEMABook) }
+func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
+func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
+func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
+func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
+func (s *Store) PulsarV15Tick()     { s.microTick(s.pulsarV15Book) }
+func (s *Store) PulsarV15MarkTick() { s.microMarkTick(s.pulsarV15Book) }
+
+// PulsarIntraTick:v12、v15 一起掃,每個幣只抓一次 K 線、兩本共用(見 microIntraTick)。
+func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book, s.pulsarV15Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1087,6 +1118,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv15":
+		s.pulsarV15Book.mu.Lock()
+		s.pulsarV15Book.trades = keepIf(s.pulsarV15Book.trades, closedOnly)
+		s.pulsarV15Book.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)
@@ -1153,5 +1188,6 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
+func (s *Store) PulsarV15State() PaperState { return s.microState(s.pulsarV15Book) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }
