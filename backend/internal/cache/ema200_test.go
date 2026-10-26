@@ -2,6 +2,7 @@ package cache
 
 import (
 	"testing"
+	"time"
 
 	"datahunter/internal/exchange"
 )
@@ -49,5 +50,27 @@ func TestEMA200State(t *testing.T) {
 	// K 線不夠(上市太新)→ 不算
 	if _, ok := ema200State(e2Series(e2MinBars-1, 100, 1, 110)); ok {
 		t.Error("K 線不足不該算")
+	}
+}
+
+// 沒有 DB 時,穿越紀錄分頁退回記憶體:總數、頁數、頁碼夾緊、時間範圍都要對。
+func TestEMA200HistoryPaging(t *testing.T) {
+	s := &Store{ema200: newEMA200Engine()}
+	now := time.Now().UTC()
+	for i := 0; i < 120; i++ { // 新的在前,每筆差 1 小時
+		s.ema200.events = append(s.ema200.events, EMA200Event{Coin: "C", Dir: "up", BarTime: now.Add(-time.Duration(i) * time.Hour).Format(time.RFC3339)})
+	}
+	r := s.EMA200History(0, 3, 50)
+	if r.Total != 120 || r.Pages != 3 || r.Page != 3 || len(r.Rows) != 20 {
+		t.Errorf("第 3 頁: total=%d pages=%d page=%d rows=%d", r.Total, r.Pages, r.Page, len(r.Rows))
+	}
+	if r := s.EMA200History(0, 9, 50); r.Page != 3 {
+		t.Errorf("超出頁數應夾到最後一頁, got %d", r.Page)
+	}
+	if r := s.EMA200History(int64(24*time.Hour/time.Millisecond), 1, 50); r.Total != 24 && r.Total != 25 {
+		t.Errorf("最近 24h 應約 24 筆, got %d", r.Total)
+	}
+	if r := (&Store{}).EMA200History(0, 1, 50); r.Total != 0 || r.Rows == nil {
+		t.Error("沒有引擎也要回空陣列")
 	}
 }

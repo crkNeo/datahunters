@@ -12,12 +12,12 @@ import (
 
 // ema200.go — EMA200 穿越監控(VIP,純提示、不下單)。
 //
-// 掃描爆量脈搏掃的全市場(surgeUniverse,約 700 檔:24h 成交額 ≥ 100 萬 U、非穩定幣),看 4H 收盤價
+// 掃描爆量脈搏全市場裡成交額前 200 名(surgeUniverse 前 radarPoolMax 檔,與爆發雷達同一批),看 4H 收盤價
 // 與 4H EMA200 的關係:最新一根已收的 4H 收盤從下方站上 EMA200 = 上穿,從上方跌破 = 下穿,第一次
 // 偵測到時推播(使用者可在帳號頁開關「EMA200 穿越」)。4H K 線不夠算 EMA200 的幣(上市太新)跳過。
 //
-// 成本:每根 4H 收盤後,每個幣抓一次 4H K 線(limit 260,權重 2),放慢到每 120ms 一檔 →
-// 約 700 檔 2~3 分鐘掃完、每分鐘權重約 1000 內,不會把 Binance 打到限流。同一根 4H 內不重抓。
+// 成本:每根 4H 收盤後,每個幣抓一次 4H K 線(limit 260,權重 2),每 120ms 一檔 → 200 檔約 40 秒
+// 掃完,不會把 Binance 打到限流。同一根 4H 內不重抓。穿越紀錄存 MySQL(ema200_events),頁面分頁讀。
 // 現價取爆量脈搏最新快照的價格(全市場都有,不限 WS feed 的幣)。
 
 const (
@@ -61,14 +61,22 @@ type EMA200Event struct {
 	BarTime string  `json:"bar_time"` // 4H 收盤時間(RFC3339)
 }
 
-// EMA200Data 是 VIP 頁的資料。
+// EMA200Data 是 VIP 頁的資料(穿越紀錄另走 EMA200History 分頁)。
 type EMA200Data struct {
-	Rows      []EMA200Row   `json:"rows"`    // 最近 24 小時內穿越的幣
-	Events    []EMA200Event `json:"events"`  // 推播過的穿越紀錄(新的在前)
-	Scanned   int           `json:"scanned"` // 有算出 EMA200 的幣數
-	Above     int           `json:"above"`   // 其中最新 4H 收在 EMA200 之上的幣數
-	Below     int           `json:"below"`
-	UpdatedAt string        `json:"updated_at"`
+	Rows      []EMA200Row `json:"rows"`    // 最近 24 小時內穿越的幣
+	Scanned   int         `json:"scanned"` // 有算出 EMA200 的幣數
+	Above     int         `json:"above"`   // 其中最新 4H 收在 EMA200 之上的幣數
+	Below     int         `json:"below"`
+	UpdatedAt string      `json:"updated_at"`
+}
+
+// e2Universe = 爆量脈搏全市場依成交額排序的前 200 名(與爆發雷達的掃描池同規模)。
+func (s *Store) e2Universe() []string {
+	u := s.surgeUniverse()
+	if len(u) > radarPoolMax {
+		u = u[:radarPoolMax]
+	}
+	return u
 }
 
 type ema200Engine struct {
@@ -121,7 +129,7 @@ func (s *Store) EMA200Tick() {
 		st   e2Coin
 	}
 	var hits []hit
-	universe := s.surgeUniverse()
+	universe := s.e2Universe()
 	if len(universe) == 0 {
 		return // 爆量脈搏還沒掃到行情(剛開機)→ 先別建基準,否則下一輪會把當下的穿越全推一遍
 	}
@@ -170,6 +178,9 @@ func (s *Store) EMA200Tick() {
 	e.mu.Unlock()
 
 	for _, h := range hits {
+		if s.db != nil {
+			s.db.insertEMA200Event(h.coin, h.st)
+		}
 		s.notifyEMA200(h.coin, h.st)
 	}
 }
@@ -177,11 +188,11 @@ func (s *Store) EMA200Tick() {
 // EMA200 回傳 VIP 頁資料:最近 24 小時(6 根 4H)內穿越的幣 + 全市場上方/下方統計 + 穿越紀錄。
 // 排序:越近穿越的越前面,同一根的依離 EMA200 的距離由近到遠。
 func (s *Store) EMA200() EMA200Data {
-	out := EMA200Data{Rows: []EMA200Row{}, Events: []EMA200Event{}, UpdatedAt: time.Now().Format(time.RFC3339)}
+	out := EMA200Data{Rows: []EMA200Row{}, UpdatedAt: time.Now().Format(time.RFC3339)}
 	if s.ema200 == nil {
 		return out
 	}
-	universe := s.surgeUniverse()
+	universe := s.e2Universe()
 	px := s.surgePrices(universe)
 	e := s.ema200
 	e.mu.Lock()
@@ -215,7 +226,100 @@ func (s *Store) EMA200() EMA200Data {
 		}
 		return math.Abs(a.DistPct) < math.Abs(b.DistPct)
 	})
-	out.Events = append(out.Events, e.events...)
+	return out
+}
+
+// ── 穿越紀錄分頁(與訊號紀錄 / 策略紀錄同一套:時間範圍 + 每頁 50 筆)──
+
+var ema200HistCache = newTTLCache(15 * time.Second)
+
+// EMA200HistResult 是一頁穿越紀錄 + 總數。
+type EMA200HistResult struct {
+	Rows  []EMA200Event `json:"rows"`
+	Total int           `json:"total"`
+	Pages int           `json:"pages"`
+	Page  int           `json:"page"`
+	Size  int           `json:"size"`
+}
+
+// EMA200History 回一頁穿越紀錄(可帶時間窗,最新在前)。沒有 DB 時退回記憶體裡的紀錄。
+func (s *Store) EMA200History(winMs int64, page, size int) EMA200HistResult {
+	if size <= 0 || size > 200 {
+		size = 50
+	}
+	var since int64
+	if winMs > 0 {
+		since = time.Now().UnixMilli() - winMs
+	}
+	var all []EMA200Event
+	if s.db != nil {
+		v, _ := ema200HistCache.get(fmt.Sprintf("%d", since), func() (any, error) { return s.db.loadEMA200Events(since), nil })
+		all, _ = v.([]EMA200Event)
+	} else if s.ema200 != nil {
+		s.ema200.mu.Lock()
+		for _, ev := range s.ema200.events {
+			if t, err := time.Parse(time.RFC3339, ev.BarTime); err == nil && t.UnixMilli() >= since {
+				all = append(all, ev)
+			}
+		}
+		s.ema200.mu.Unlock()
+	}
+	total := len(all)
+	pages := (total + size - 1) / size
+	if pages < 1 {
+		pages = 1
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if page > pages {
+		page = pages
+	}
+	start, end := (page-1)*size, page*size
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	rows := append([]EMA200Event{}, all[start:end]...)
+	return EMA200HistResult{Rows: rows, Total: total, Pages: pages, Page: page, Size: size}
+}
+
+func (db *DB) insertEMA200Event(coin string, st e2Coin) {
+	if db.sql == nil {
+		return
+	}
+	db.sql.Exec(`INSERT INTO ema200_events(ts,coin,dir,close,ema) VALUES(?,?,?,?,?)`,
+		st.bar+e2BarMs, coin, st.crossDir, st.close, st.ema)
+}
+
+// loadEMA200Events 撈穿越紀錄(ts = 4H 收盤時間,可帶下限),最新在前。
+func (db *DB) loadEMA200Events(sinceMs int64) []EMA200Event {
+	if db.sql == nil {
+		return nil
+	}
+	q := `SELECT ts,coin,dir,close,ema FROM ema200_events`
+	args := []any{}
+	if sinceMs > 0 {
+		q += ` WHERE ts >= ?`
+		args = append(args, sinceMs)
+	}
+	q += ` ORDER BY ts DESC, coin ASC`
+	rows, err := db.sql.Query(q, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []EMA200Event{}
+	for rows.Next() {
+		var ev EMA200Event
+		var ts int64
+		if rows.Scan(&ts, &ev.Coin, &ev.Dir, &ev.Close, &ev.EMA) == nil {
+			ev.BarTime = time.UnixMilli(ts).UTC().Format(time.RFC3339)
+			out = append(out, ev)
+		}
+	}
 	return out
 }
 

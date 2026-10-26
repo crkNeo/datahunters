@@ -250,7 +250,7 @@ var tabOfRoute = map[string]string{
 	"/api/oi-cache": "oi", "/api/signals": "signals", "/api/radar": "radar",
 	"/api/scorelog": "scorelog", "/api/klines": "oi",
 	"/api/paper": "paper", "/api/gamble": "gamble", "/api/ema-only": "emaonly",
-	"/api/conv": "conv", "/api/sr": "sr", "/api/ema200": "ema200", "/api/whales": "whales",
+	"/api/conv": "conv", "/api/sr": "sr", "/api/ema200": "ema200", "/api/ema200-history": "ema200", "/api/whales": "whales",
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
 	"/api/admin/surge": "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/pulsarv15": "pulsarv15",

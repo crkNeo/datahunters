@@ -1037,6 +1037,7 @@ function openStrat(s) {
 const sr = ref(null)
 const ema200 = ref(null)
 async function loadEMA200() {
+  fetchEMA200Hist()
   try {
     const res = await authFetch('/api/ema200')
     if (res.ok) ema200.value = await res.json()
@@ -1044,6 +1045,18 @@ async function loadEMA200() {
     /* secondary */
   }
 }
+// EMA200 穿越紀錄(ema200_events)的 DB 分頁,跟訊號紀錄 / 策略紀錄同一套時間範圍 + 每頁 50 筆
+const ema200Hist = ref({ rows: [], total: 0, pages: 1, page: 1 })
+const ema200Page = ref(1)
+async function fetchEMA200Hist() {
+  if (!canTab('ema200')) return
+  try {
+    const res = await authFetch(`/api/ema200-history?win=${timeWin.value || 0}&page=${ema200Page.value}&size=50`)
+    if (res.ok) ema200Hist.value = await res.json()
+  } catch (e) { /* secondary */ }
+}
+watch(timeWin, () => { if (mainTab.value === 'ema200') { ema200Page.value = 1; fetchEMA200Hist() } })
+watch(ema200Page, fetchEMA200Hist)
 // EMA200 卡片的狀態標籤:最新 4H 收盤剛穿越 → 醒目框;否則顯示幾小時前穿越、現在在上/下方
 function ema200Tag(c) {
   const up = c.cross_dir === 'up'
@@ -2496,7 +2509,7 @@ watch([role, tabPerms, authReady], () => {
     <!-- EMA200 穿越(4H · 爆量脈搏面板的幣 · 純提示)-->
     <section v-else-if="mainTab === 'ema200' && canTab('ema200')">
       <div class="mk-head">
-        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>掃的全市場(約 700 檔,24h 成交額 ≥ 100 萬 U、扣掉穩定幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>頁面只列<b>最近 24 小時(6 根 4H)內</b>穿越的幣,剛穿越的排最前;「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠算 EMA200 的幣會跳過。每根 4H 收盤後約 2~3 分鐘掃完全部。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>全市場裡<b>成交額前 200 名</b>(跟爆發雷達同一批規模,扣掉穩定幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>頁面只列<b>最近 24 小時(6 根 4H)內</b>穿越的幣,剛穿越的排最前;「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠算 EMA200 的幣會跳過。每根 4H 收盤後約 1 分鐘內掃完。下方「穿越紀錄」永久保存,可依時間範圍篩選、分頁查看。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="ema200 && ema200.scanned">掃描 {{ ema200.scanned }} 檔 · EMA200 上方 <b class="long">{{ ema200.above }}</b> / 下方 <b class="short">{{ ema200.below }}</b> · 近 24h 穿越 {{ ema200.rows.length }} 檔</span>
       </div>
 
@@ -2511,24 +2524,30 @@ watch([role, tabPerms, authReady], () => {
           </div>
         </div>
         <p v-else-if="ema200.scanned" class="empty">最近 24 小時內沒有幣穿越 EMA200。</p>
-        <p v-else class="empty">正在掃描全市場(剛啟動約需 2~3 分鐘)…</p>
-
-        <div class="mk-head" style="margin-top:20px"><h2>最近穿越</h2><span class="mk-count">伺服器重啟後重新累積</span></div>
-        <table class="grid" v-if="ema200.events.length">
-          <thead><tr><th>4H 收盤</th><th>幣種</th><th>方向</th><th class="r">收盤價</th><th class="r">EMA200</th></tr></thead>
-          <tbody>
-            <tr v-for="(e, i) in ema200.events" :key="i" class="clickable" @click="openDetail(e.coin)">
-              <td class="tsmall">{{ fmtClock(e.bar_time) }}</td>
-              <td class="coin">{{ e.coin }}</td>
-              <td><span class="otag" :class="e.dir === 'up' ? 'tp' : 'sl'">{{ e.dir === 'up' ? '📈 上穿' : '📉 下穿' }}</span></td>
-              <td class="r">{{ fmtPrice(e.close) }}</td>
-              <td class="r">{{ fmtPrice(e.ema) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-else class="empty">尚無穿越紀錄 —— 需等 4H 收盤出現上穿或下穿。</p>
+        <p v-else class="empty">正在掃描(剛啟動約需 1 分鐘)…</p>
       </template>
       <p v-else class="loading">載入中…</p>
+
+      <!-- 穿越紀錄(DB 分頁,跟策略紀錄同樣的時間範圍 + 分頁)-->
+      <div class="mk-head" style="margin-top:20px">
+        <h2>穿越紀錄</h2>
+        <span class="mk-count">共 {{ ema200Hist.total }} 筆(此範圍)</span>
+      </div>
+      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
+      <table class="grid" v-if="ema200Hist.rows.length">
+        <thead><tr><th>4H 收盤</th><th>幣種</th><th>方向</th><th class="r">收盤價</th><th class="r">EMA200</th></tr></thead>
+        <tbody>
+          <tr v-for="(e, i) in ema200Hist.rows" :key="i" class="clickable" @click="openDetail(e.coin)">
+            <td class="tsmall">{{ fmtClock(e.bar_time) }}</td>
+            <td class="coin">{{ e.coin }}</td>
+            <td><span class="otag" :class="e.dir === 'up' ? 'tp' : 'sl'">{{ e.dir === 'up' ? '📈 上穿' : '📉 下穿' }}</span></td>
+            <td class="r">{{ fmtPrice(e.close) }}</td>
+            <td class="r">{{ fmtPrice(e.ema) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <PageNav :page="ema200Hist.page" :pages="ema200Hist.pages" :total="ema200Hist.total" @go="(p) => (ema200Page = p)" />
+      <p v-if="!ema200Hist.total" class="empty">此範圍內尚無穿越紀錄 —— 需等 4H 收盤出現上穿或下穿。</p>
       <p class="loginhint" style="margin-top:12px">剛上穿或下穿時,會推播給 VIP(需在帳戶設定開啟「EMA200 穿越」,並在裝置允許通知)。</p>
     </section>
 

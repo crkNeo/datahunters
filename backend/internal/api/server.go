@@ -182,8 +182,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/paper", s.gateTab("paper", s.handlePaper))
 	mux.HandleFunc("/api/gamble", s.gateTab("gamble", s.handleGamble))
 	mux.HandleFunc("/api/ema-only", s.gateTab("emaonly", s.handleEMAOnly))
-	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR))             // 支撐壓力監控
-	mux.HandleFunc("/api/ema200", s.gateTab("ema200", s.handleEMA200)) // EMA200 穿越監控(4H)
+	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR))                            // 支撐壓力監控
+	mux.HandleFunc("/api/ema200", s.gateTab("ema200", s.handleEMA200))                // EMA200 穿越監控(4H)
+	mux.HandleFunc("/api/ema200-history", s.gateTab("ema200", s.handleEMA200History)) // EMA200 穿越紀錄(DB 分頁)
 
 	// 推薦系統
 	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
@@ -1040,6 +1041,12 @@ func (s *Server) handleBTCSR(w http.ResponseWriter, r *http.Request) { writeJSON
 // handleEMA200 serves the VIP EMA200 穿越 monitor (4H, 爆量脈搏面板的幣).
 func (s *Server) handleEMA200(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.EMA200())
+}
+
+// handleEMA200History serves one page of the EMA200 穿越紀錄 (time window + page, like 訊號紀錄).
+func (s *Server) handleEMA200History(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	writeJSON(w, s.store.EMA200History(atoi64(q.Get("win")), atoi(q.Get("page")), atoi(q.Get("size"))))
 }
 
 // handleSR serves the VIP 支撐壓力 monitor: mainstream coins' current support &

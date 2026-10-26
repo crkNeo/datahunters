@@ -16,6 +16,15 @@ import (
 // does not run multi-statement Exec unless multiStatements=true). VARCHAR(191)
 // is used for indexed/PK string columns so they fit the utf8mb4 index limit.
 const Schema = `
+CREATE TABLE IF NOT EXISTS ema200_events (
+  ts    BIGINT NOT NULL,
+  coin  VARCHAR(32) NOT NULL,
+  dir   VARCHAR(8),
+  close DOUBLE,
+  ema   DOUBLE,
+  KEY idx_e2_ts (ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS score_events (
   ts    BIGINT NOT NULL,
   coin  VARCHAR(32) NOT NULL,
