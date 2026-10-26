@@ -145,13 +145,14 @@ type Store struct {
 	conv4hBucket int64         // last processed 4H wall-clock bucket
 	convSeeded   bool          // first tick only sets the baseline — no boot-time backfill of entries
 
-	bollEMABook   *microBook   // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
-	surge         *surgeEngine // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
-	pulsarV3Book  *microBook   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
-	pulsarV12Book *microBook   // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
-	pulsarV15Book *microBook   // 脈衝星v15:v12 + 1h CVD ≤10% + 散戶做多 ≥60% (pulsarv15.go)
-	smcBooks      []*microBook // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
-	smcV2Books    []*microBook // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
+	bollEMABook   *microBook    // 布林EMA 4H 突破蓄勢 多空 (admin, microrev.go)
+	surge         *surgeEngine  // 爆量脈搏斥候:全700檔相對爆量偵測 (surge.go)
+	ema200        *ema200Engine // EMA200 穿越監控(4H,爆量脈搏面板的幣)(ema200.go)
+	pulsarV3Book  *microBook    // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
+	pulsarV12Book *microBook    // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
+	pulsarV15Book *microBook    // 脈衝星v15:v12 + 1h CVD ≤10% + 散戶做多 ≥60% (pulsarv15.go)
+	smcBooks      []*microBook  // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
+	smcV2Books    []*microBook  // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -232,6 +233,7 @@ func NewStore(coins []string) *Store {
 		ex:                exchange.NewClient(),
 		coins:             coins,
 		surge:             newSurgeEngine(),
+		ema200:            newEMA200Engine(),
 		paperMain:         newBook("main", 55, true, 4*time.Hour, 0),    // disciplined, fixed TP/SL
 		paperGamble:       newBook("gamble", 50, false, 1*time.Hour, 0), // gamble (門檻 50:實盤數據顯示 45–49 桶淨虧;逾時6h)
 		paperEMA:          newBook("emaonly", 0, false, 0, 0),           // standalone EMA cross (no time cooldown; signal-hour dedup)

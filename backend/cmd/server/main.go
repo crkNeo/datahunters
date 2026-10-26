@@ -186,6 +186,16 @@ func main() {
 		}
 	}()
 
+	// EMA200 穿越 monitor (VIP,純提示):爆量脈搏面板上的幣,4H 收盤上穿/下穿 EMA200 時推播。
+	// 每分鐘檢查一次;每根 4H 每個幣只抓一次 K 線。第一輪只建基準、不推播。
+	go func() {
+		store.EMA200Tick()
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.EMA200Tick()
+		}
+	}()
+
 	// 多週期支壓 monitor (純提示,1H + 4H):同樣跑在記憶體 WS klines(4h 由 1h 聚合),
 	// 每根 1h/4h 收盤檢查破位並推播。零 REST;首次 tick 只建基準。
 	go func() {

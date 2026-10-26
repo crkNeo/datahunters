@@ -46,6 +46,7 @@ var pushTopicDefs = []pushTopicDef{
 	{"msg:news", "市場快訊", "message", "news"},
 	{"msg:sectors", "板塊輪動", "message", "sectors"},
 	{"msg:sr", "支撐壓力", "message", "sr"},
+	{"msg:ema200", "EMA200 穿越", "message", "ema200"},
 	{"msg:whales", "名人動向", "message", "whales"},
 	{"msg:polyscout", "聰明錢共識", "message", "polyscout"},
 	{"msg:robinhood", "Robinhood上架", "message", "robinhood"},

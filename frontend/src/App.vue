@@ -1035,6 +1035,22 @@ function openStrat(s) {
 
 
 const sr = ref(null)
+const ema200 = ref(null)
+async function loadEMA200() {
+  try {
+    const res = await authFetch('/api/ema200')
+    if (res.ok) ema200.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+// EMA200 卡片的狀態標籤:最新 4H 收盤剛穿越 → 醒目;否則顯示在上/下方與幾根前穿越
+function ema200Tag(c) {
+  if (c.cross_dir && c.bars_since === 0) return c.cross_dir === 'up' ? { txt: '📈 剛上穿', cls: 'long', card: 'broke' } : { txt: '📉 剛下穿', cls: 'short', card: 'broken' }
+  const side = c.above ? '在 EMA200 上方' : '在 EMA200 下方'
+  const ago = c.cross_dir ? ` · ${c.bars_since} 根前${c.cross_dir === 'up' ? '上穿' : '下穿'}` : ''
+  return { txt: side + ago, cls: c.above ? 'long' : 'short', card: '' }
+}
 async function loadSR() {
   try {
     const res = await authFetch('/api/sr')
@@ -1360,6 +1376,7 @@ function loadAll() {
   // 星軌/超新星/銀河 共用 /api/paper(靠 curPaperBook 切換),任一個看得到就要載
   if (canTab('paper') || canTab('gamble') || canTab('emaonly')) { loadPaper(); fetchPaperHist() }
   if (canTab('sr')) loadSR()
+  if (canTab('ema200')) loadEMA200()
   if (canTab('conv')) loadConv()
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsarv3')) loadPulsarV3()
@@ -1458,7 +1475,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1605,7 +1622,7 @@ watch(mainTab, loadMe)
 const TAB_MIN_ROLE_FALLBACK = {
   oi: 'member', signals: 'member', scorelog: 'member', radar: 'member',
   paper: 'vip', emaonly: 'vip',
-  sr: 'vip',
+  sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
   gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv15: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
 }
@@ -1670,7 +1687,7 @@ const TAB_NAMES = {
   capital: '資金流向', upbit: 'Upbit 公告', news: '市場快訊', funding: '資金費率', unlock: '代幣解鎖',
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
-  sr: '支撐壓力', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
+  sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
   pulsarv12: '脈衝星v12', pulsarv15: '脈衝星v15', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
@@ -1698,7 +1715,7 @@ const TAB_KIND_FALLBACK = {
 const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
-  'paper', 'emaonly', 'conv', 'sr', 'pulsarv3',
+  'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
   'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
@@ -2234,6 +2251,7 @@ watch([role, tabPerms, authReady], () => {
             冥王星<em v-if="conv && conv.open.length" class="navbadge">{{ conv.open.length }}</em><i v-if="!canTab('conv')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('sr', grp[0])" :class="{ active: mainTab === 'sr', lk: !canTab('sr') }" @click="navTo('sr', loadSR)">支撐壓力<i v-if="!canTab('sr')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('ema200', grp[0])" :class="{ active: mainTab === 'ema200', lk: !canTab('ema200') }" @click="navTo('ema200', loadEMA200)">EMA200 穿越<i v-if="!canTab('ema200')" class="navlk">🔒</i></button>
           <button v-if="inGroup('admin', grp[0])" :class="{ active: mainTab === 'admin' }" @click="navTo('admin', () => { loadUsers(); loadNotice() })">
             後台<em v-if="users.length" class="navbadge">{{ users.length }}</em>
           </button>
@@ -2473,6 +2491,44 @@ watch([role, tabPerms, authReady], () => {
       </div>
       <p v-else class="loading">載入中…(首個 1h 收盤週期後才會建立支撐壓力)</p>
       <p class="loginhint" style="margin-top:12px">跌破支撐或突破壓力時,會即時推播給 VIP(需在裝置開啟通知)。</p>
+    </section>
+
+    <!-- EMA200 穿越(4H · 爆量脈搏面板的幣 · 純提示)-->
+    <section v-else-if="mainTab === 'ema200' && canTab('ema200')">
+      <div class="mk-head">
+        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>面板上的幣(成交量突然放大的幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>卡片的「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠的幣不列出。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="ema200 && ema200.rows">{{ ema200.rows.length }} 檔 · 每根 4H 收盤更新</span>
+      </div>
+
+      <template v-if="ema200">
+        <div class="sup-cards" v-if="ema200.rows.length">
+          <div v-for="c in ema200.rows" :key="c.coin" class="sup-card" :class="ema200Tag(c).card" @click="openDetail(c.coin)" style="cursor:pointer">
+            <div class="sup-coin">{{ c.coin }}</div>
+            <div class="sup-price">現價 {{ c.price ? fmtPrice(c.price) : '—' }}</div>
+            <div class="sup-level">EMA200 <b>{{ fmtPrice(c.ema) }}</b></div>
+            <div class="sup-level">距離 <b :class="c.dist_pct >= 0 ? 'long' : 'short'">{{ c.dist_pct >= 0 ? '+' : '' }}{{ c.dist_pct.toFixed(2) }}%</b></div>
+            <div class="sup-tag" :class="ema200Tag(c).cls">{{ ema200Tag(c).txt }}</div>
+          </div>
+        </div>
+        <p v-else class="empty">爆量脈搏面板上目前沒有可計算 EMA200 的幣(或剛啟動,約 1 分鐘後就會有資料)。</p>
+
+        <div class="mk-head" style="margin-top:20px"><h2>最近穿越</h2><span class="mk-count">伺服器重啟後重新累積</span></div>
+        <table class="grid" v-if="ema200.events.length">
+          <thead><tr><th>4H 收盤</th><th>幣種</th><th>方向</th><th class="r">收盤價</th><th class="r">EMA200</th></tr></thead>
+          <tbody>
+            <tr v-for="(e, i) in ema200.events" :key="i" class="clickable" @click="openDetail(e.coin)">
+              <td class="tsmall">{{ fmtClock(e.bar_time) }}</td>
+              <td class="coin">{{ e.coin }}</td>
+              <td><span class="otag" :class="e.dir === 'up' ? 'tp' : 'sl'">{{ e.dir === 'up' ? '📈 上穿' : '📉 下穿' }}</span></td>
+              <td class="r">{{ fmtPrice(e.close) }}</td>
+              <td class="r">{{ fmtPrice(e.ema) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="empty">尚無穿越紀錄 —— 需等 4H 收盤出現上穿或下穿。</p>
+      </template>
+      <p v-else class="loading">載入中…</p>
+      <p class="loginhint" style="margin-top:12px">剛上穿或下穿時,會推播給 VIP(需在帳戶設定開啟「EMA200 穿越」,並在裝置允許通知)。</p>
     </section>
 
     <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->

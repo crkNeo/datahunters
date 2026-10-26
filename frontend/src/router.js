@@ -17,7 +17,7 @@ export const ROUTE_TABS = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock',
   'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
-  'paper', 'gamble', 'emaonly', 'conv', 'sr',
+  'paper', 'gamble', 'emaonly', 'conv', 'sr', 'ema200',
   'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'polyscout',
   'admin', 'referral', 'account',
 ]

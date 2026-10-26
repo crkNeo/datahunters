@@ -182,7 +182,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/paper", s.gateTab("paper", s.handlePaper))
 	mux.HandleFunc("/api/gamble", s.gateTab("gamble", s.handleGamble))
 	mux.HandleFunc("/api/ema-only", s.gateTab("emaonly", s.handleEMAOnly))
-	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR)) // 支撐壓力監控
+	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR))             // 支撐壓力監控
+	mux.HandleFunc("/api/ema200", s.gateTab("ema200", s.handleEMA200)) // EMA200 穿越監控(4H)
 
 	// 推薦系統
 	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
@@ -1035,6 +1036,11 @@ func (s *Server) handleStablecoins(w http.ResponseWriter, r *http.Request) {
 // handleBTCSR serves BTC's support/resistance only — the public 戰場 draws its
 // fortress walls from it. The full multi-coin monitor stays VIP (handleSR).
 func (s *Server) handleBTCSR(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.store.BTCSR()) }
+
+// handleEMA200 serves the VIP EMA200 穿越 monitor (4H, 爆量脈搏面板的幣).
+func (s *Server) handleEMA200(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.EMA200())
+}
 
 // handleSR serves the VIP 支撐壓力 monitor: mainstream coins' current support &
 // resistance levels and breach status (no trades).
