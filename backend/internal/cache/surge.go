@@ -60,11 +60,12 @@ type SurgeRow struct {
 
 // surgeEngine holds per-coin snapshot rings + the latest computed board.
 type surgeEngine struct {
-	mu    sync.Mutex
-	hist  map[string][]surgeSnap
-	board []SurgeRow
-	hot   []string
-	upd   time.Time
+	mu       sync.Mutex
+	hist     map[string][]surgeSnap
+	board    []SurgeRow
+	hot      []string
+	universe []string // 本輪有評分資格的全部幣(成交額 ≥ 地板、非穩定幣),依成交額由大到小
+	upd      time.Time
 }
 
 func newSurgeEngine() *surgeEngine {
@@ -147,11 +148,13 @@ func (e *surgeEngine) scan(tickers []exchange.MarketTicker, now time.Time) {
 
 	// 2) score every coin
 	rows := make([]SurgeRow, 0, len(e.hist))
+	universe := make([]string, 0, len(tickers))
 	for _, t := range tickers {
 		coin := coinOf(t.Symbol)
 		if stableLike[coin] || t.QuoteVol < surgeVolFloor {
 			continue
 		}
+		universe = append(universe, coin)
 		h := e.hist[coin]
 		recent, base, ok := pulseAndBaseline(h, surgeWin)
 		if !ok || base <= 0 || recent < surgePulseMin {
@@ -188,6 +191,7 @@ func (e *surgeEngine) scan(tickers []exchange.MarketTicker, now time.Time) {
 	}
 	e.board = rows
 	e.hot = hot
+	e.universe = universe
 	e.upd = now
 }
 
@@ -382,6 +386,33 @@ func (s *Store) SurgeScanTick() {
 		return
 	}
 	s.surge.scan(tickers, time.Now())
+}
+
+// surgeUniverse 回傳爆量脈搏這一輪掃描的全部幣(約 700 檔:24h 成交額 ≥ 地板、非穩定幣),
+// 依成交額由大到小。EMA200 穿越監控用。
+func (s *Store) surgeUniverse() []string {
+	if s.surge == nil {
+		return nil
+	}
+	s.surge.mu.Lock()
+	defer s.surge.mu.Unlock()
+	return append([]string(nil), s.surge.universe...)
+}
+
+// surgePrices 回傳這些幣在爆量脈搏最新一次快照的價格(全市場都有,不限 WS feed 的幣)。
+func (s *Store) surgePrices(coins []string) map[string]float64 {
+	out := make(map[string]float64, len(coins))
+	if s.surge == nil {
+		return out
+	}
+	s.surge.mu.Lock()
+	defer s.surge.mu.Unlock()
+	for _, c := range coins {
+		if h := s.surge.hist[c]; len(h) > 0 {
+			out[c] = h[len(h)-1].price
+		}
+	}
+	return out
 }
 
 // surgeBoardCoins is the WIDER strategy universe — the whole 脈搏面板 (board): every

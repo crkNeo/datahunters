@@ -1044,12 +1044,12 @@ async function loadEMA200() {
     /* secondary */
   }
 }
-// EMA200 卡片的狀態標籤:最新 4H 收盤剛穿越 → 醒目;否則顯示在上/下方與幾根前穿越
+// EMA200 卡片的狀態標籤:最新 4H 收盤剛穿越 → 醒目框;否則顯示幾小時前穿越、現在在上/下方
 function ema200Tag(c) {
-  if (c.cross_dir && c.bars_since === 0) return c.cross_dir === 'up' ? { txt: '📈 剛上穿', cls: 'long', card: 'broke' } : { txt: '📉 剛下穿', cls: 'short', card: 'broken' }
-  const side = c.above ? '在 EMA200 上方' : '在 EMA200 下方'
-  const ago = c.cross_dir ? ` · ${c.bars_since} 根前${c.cross_dir === 'up' ? '上穿' : '下穿'}` : ''
-  return { txt: side + ago, cls: c.above ? 'long' : 'short', card: '' }
+  const up = c.cross_dir === 'up'
+  if (c.bars_since === 0) return up ? { txt: '📈 剛上穿', cls: 'long', card: 'broke' } : { txt: '📉 剛下穿', cls: 'short', card: 'broken' }
+  const side = c.above ? '目前在上方' : '目前在下方'
+  return { txt: `${c.bars_since * 4} 小時前${up ? '上穿' : '下穿'} · ${side}`, cls: c.above ? 'long' : 'short', card: '' }
 }
 async function loadSR() {
   try {
@@ -2496,8 +2496,8 @@ watch([role, tabPerms, authReady], () => {
     <!-- EMA200 穿越(4H · 爆量脈搏面板的幣 · 純提示)-->
     <section v-else-if="mainTab === 'ema200' && canTab('ema200')">
       <div class="mk-head">
-        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>面板上的幣(成交量突然放大的幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>卡片的「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠的幣不列出。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
-        <span class="mk-count" v-if="ema200 && ema200.rows">{{ ema200.rows.length }} 檔 · 每根 4H 收盤更新</span>
+        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>掃的全市場(約 700 檔,24h 成交額 ≥ 100 萬 U、扣掉穩定幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>頁面只列<b>最近 24 小時(6 根 4H)內</b>穿越的幣,剛穿越的排最前;「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠算 EMA200 的幣會跳過。每根 4H 收盤後約 2~3 分鐘掃完全部。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <span class="mk-count" v-if="ema200 && ema200.scanned">掃描 {{ ema200.scanned }} 檔 · EMA200 上方 <b class="long">{{ ema200.above }}</b> / 下方 <b class="short">{{ ema200.below }}</b> · 近 24h 穿越 {{ ema200.rows.length }} 檔</span>
       </div>
 
       <template v-if="ema200">
@@ -2510,7 +2510,8 @@ watch([role, tabPerms, authReady], () => {
             <div class="sup-tag" :class="ema200Tag(c).cls">{{ ema200Tag(c).txt }}</div>
           </div>
         </div>
-        <p v-else class="empty">爆量脈搏面板上目前沒有可計算 EMA200 的幣(或剛啟動,約 1 分鐘後就會有資料)。</p>
+        <p v-else-if="ema200.scanned" class="empty">最近 24 小時內沒有幣穿越 EMA200。</p>
+        <p v-else class="empty">正在掃描全市場(剛啟動約需 2~3 分鐘)…</p>
 
         <div class="mk-head" style="margin-top:20px"><h2>最近穿越</h2><span class="mk-count">伺服器重啟後重新累積</span></div>
         <table class="grid" v-if="ema200.events.length">

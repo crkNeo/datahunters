@@ -12,12 +12,13 @@ import (
 
 // ema200.go — EMA200 穿越監控(VIP,純提示、不下單)。
 //
-// 掃描「爆量脈搏」面板上的幣(surgeBoardCoins),看 4H 收盤價與 4H EMA200 的關係:
-// 最新一根已收的 4H 收盤從下方站上 EMA200 = 上穿,從上方跌破 = 下穿,第一次偵測到時推播
-// (使用者可在帳號頁開關「EMA200 穿越」)。
+// 掃描爆量脈搏掃的全市場(surgeUniverse,約 700 檔:24h 成交額 ≥ 100 萬 U、非穩定幣),看 4H 收盤價
+// 與 4H EMA200 的關係:最新一根已收的 4H 收盤從下方站上 EMA200 = 上穿,從上方跌破 = 下穿,第一次
+// 偵測到時推播(使用者可在帳號頁開關「EMA200 穿越」)。4H K 線不夠算 EMA200 的幣(上市太新)跳過。
 //
-// 成本:每根 4H 收盤後,對面板上的幣各抓一次 4H K 線(約 60 檔);面板中途新進來的幣也只抓一次。
-// 同一根 4H 內不會重抓。現價取爆量脈搏面板上的價格(面板幣大多不在 WS feed 裡)。
+// 成本:每根 4H 收盤後,每個幣抓一次 4H K 線(limit 260,權重 2),放慢到每 120ms 一檔 →
+// 約 700 檔 2~3 分鐘掃完、每分鐘權重約 1000 內,不會把 Binance 打到限流。同一根 4H 內不重抓。
+// 現價取爆量脈搏最新快照的價格(全市場都有,不限 WS feed 的幣)。
 
 const (
 	e2Period  = 200
@@ -25,6 +26,8 @@ const (
 	e2Limit   = 260
 	e2BarMs   = int64(4 * time.Hour / time.Millisecond)
 	e2Keep    = 200 // 保留的穿越紀錄筆數
+	e2Recent  = 6   // 頁面只列最近 6 根 4H(24 小時)內穿越的幣
+	e2Pace    = 120 * time.Millisecond
 )
 
 // e2Coin 是某幣在「最新一根已收 4H」時的 EMA200 狀態(快取到下一根 4H 收盤)。
@@ -60,8 +63,11 @@ type EMA200Event struct {
 
 // EMA200Data 是 VIP 頁的資料。
 type EMA200Data struct {
-	Rows      []EMA200Row   `json:"rows"`
-	Events    []EMA200Event `json:"events"`
+	Rows      []EMA200Row   `json:"rows"`    // 最近 24 小時內穿越的幣
+	Events    []EMA200Event `json:"events"`  // 推播過的穿越紀錄(新的在前)
+	Scanned   int           `json:"scanned"` // 有算出 EMA200 的幣數
+	Above     int           `json:"above"`   // 其中最新 4H 收在 EMA200 之上的幣數
+	Below     int           `json:"below"`
 	UpdatedAt string        `json:"updated_at"`
 }
 
@@ -100,8 +106,8 @@ func ema200State(cs []exchange.Candle) (st e2Coin, ok bool) {
 	return st, true
 }
 
-// EMA200Tick 每分鐘呼叫:面板上的幣若還沒有「最新已收 4H」的狀態就抓一次 K 線算好,
-// 最新那根剛好穿越且還沒推播過就推播。
+// EMA200Tick 每分鐘呼叫:全市場的幣若還沒有「最新已收 4H」的狀態就抓一次 K 線算好,
+// 最新那根剛好穿越且還沒推播過就推播。一輪掃完約 2~3 分鐘(ticker 會自動跳過重疊的那幾次)。
 func (s *Store) EMA200Tick() {
 	if s.ema200 == nil {
 		return
@@ -115,7 +121,11 @@ func (s *Store) EMA200Tick() {
 		st   e2Coin
 	}
 	var hits []hit
-	for _, coin := range s.surgeBoardCoins() {
+	universe := s.surgeUniverse()
+	if len(universe) == 0 {
+		return // 爆量脈搏還沒掃到行情(剛開機)→ 先別建基準,否則下一輪會把當下的穿越全推一遍
+	}
+	for _, coin := range universe {
 		e.mu.Lock()
 		cur, have := e.coins[coin]
 		e.mu.Unlock()
@@ -123,7 +133,7 @@ func (s *Store) EMA200Tick() {
 			continue // 這根 4H 已算過
 		}
 		cs, err := s.ex.BinanceKlines(coin+"USDT", "4h", e2Limit)
-		time.Sleep(25 * time.Millisecond) // pace the REST batch
+		time.Sleep(e2Pace) // 放慢,700 檔不要一次打爆 Binance 權重
 		if err != nil || len(cs) < 2 {
 			continue // 下一輪再試
 		}
@@ -164,38 +174,44 @@ func (s *Store) EMA200Tick() {
 	}
 }
 
-// EMA200 回傳 VIP 頁資料:目前爆量脈搏面板上、已有 EMA200 狀態的幣 + 最近的穿越紀錄。
-// 排序:最近剛穿越的在前,其餘依離 EMA200 的距離由近到遠。
+// EMA200 回傳 VIP 頁資料:最近 24 小時(6 根 4H)內穿越的幣 + 全市場上方/下方統計 + 穿越紀錄。
+// 排序:越近穿越的越前面,同一根的依離 EMA200 的距離由近到遠。
 func (s *Store) EMA200() EMA200Data {
 	out := EMA200Data{Rows: []EMA200Row{}, Events: []EMA200Event{}, UpdatedAt: time.Now().Format(time.RFC3339)}
 	if s.ema200 == nil {
 		return out
 	}
-	board := s.SurgeBoard()
+	universe := s.surgeUniverse()
+	px := s.surgePrices(universe)
 	e := s.ema200
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	for _, r := range board {
-		st, ok := e.coins[r.Coin]
+	for _, coin := range universe {
+		st, ok := e.coins[coin]
 		if !ok || st.ema <= 0 {
+			continue // 還沒算到,或 K 線不夠算 EMA200
+		}
+		out.Scanned++
+		if st.close > st.ema {
+			out.Above++
+		} else {
+			out.Below++
+		}
+		if st.crossDir == "" || st.barsSince >= e2Recent {
 			continue
 		}
-		px := r.Price
-		if px <= 0 {
-			px = st.close
+		p := px[coin]
+		if p <= 0 {
+			p = st.close
 		}
-		row := EMA200Row{Coin: r.Coin, Price: px, EMA: st.ema, DistPct: round2((px - st.ema) / st.ema * 100),
-			Above: st.close > st.ema, CrossDir: st.crossDir, BarsSince: st.barsSince}
-		if st.crossBar > 0 {
-			row.CrossTime = time.UnixMilli(st.crossBar + e2BarMs).UTC().Format(time.RFC3339)
-		}
-		out.Rows = append(out.Rows, row)
+		out.Rows = append(out.Rows, EMA200Row{Coin: coin, Price: p, EMA: st.ema, DistPct: round2((p - st.ema) / st.ema * 100),
+			Above: st.close > st.ema, CrossDir: st.crossDir, BarsSince: st.barsSince,
+			CrossTime: time.UnixMilli(st.crossBar + e2BarMs).UTC().Format(time.RFC3339)})
 	}
 	sort.SliceStable(out.Rows, func(i, j int) bool {
 		a, b := out.Rows[i], out.Rows[j]
-		ra, rb := a.CrossDir != "" && a.BarsSince == 0, b.CrossDir != "" && b.BarsSince == 0
-		if ra != rb {
-			return ra // 最新收盤剛穿越的排最前
+		if a.BarsSince != b.BarsSince {
+			return a.BarsSince < b.BarsSince
 		}
 		return math.Abs(a.DistPct) < math.Abs(b.DistPct)
 	})
