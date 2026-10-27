@@ -79,7 +79,10 @@ func (s *Store) GdeltTick() {
 	if s.gdeltW == nil {
 		return
 	}
+	t0 := time.Now()
 	arts, err := s.gdeltW.FetchRSS() // crypto RSS: 動區/鏈新聞 (繁中) + Coindesk/Cointelegraph/The Block (英譯) — GDELT was too slow/rate-limited
+	// 消息雷達「來源狀態」:每次都回報,不只有新文章時
+	s.naHookMark("rss", t0, len(arts), err)
 	if err != nil {
 		s.apiFail("新聞快訊(RSS)", err.Error())
 		return

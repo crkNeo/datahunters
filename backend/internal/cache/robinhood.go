@@ -33,12 +33,11 @@ func (s *Store) RobinhoodTick() {
 	if s.rhW == nil {
 		return
 	}
+	t0 := time.Now()
 	fresh, all, err := s.rhW.Poll()
+	s.naHookMark("robinhood", t0, len(all), err)
 	if err != nil {
 		s.apiFail("Robinhood 上架", err.Error())
-		if s.news != nil {
-			s.naMark("robinhood", time.Now(), 0, err)
-		}
 		return
 	}
 	s.apiOK("Robinhood 上架")

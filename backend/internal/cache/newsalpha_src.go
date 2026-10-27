@@ -165,7 +165,7 @@ func (s *Store) initNewsAlpha() {
 	if ep := naRPC(); ep != "" {
 		n.register(&naSource{key: "onchain", label: "鏈上交易所錢包", group: "鏈上", every: 30 * time.Second, fetch: func() ([]naIn, error) { return s.naChain(ep) }})
 	} else {
-		n.register(&naSource{key: "onchain", label: "鏈上交易所錢包", group: "鏈上", note: "未設定 ALCHEMY_URL / INFURA_URL,未啟用"})
+		n.register(&naSource{key: "onchain", label: "鏈上交易所錢包", group: "鏈上", note: "未設定 ALCHEMY_URL 或 INFURA_URL(以太坊節點網址,Alchemy / Infura 免費註冊即可取得),設定後重啟才會啟用"})
 	}
 	// 優先 3:Telegram 公開頻道
 	tg := os.Getenv("NEWS_TG_CHANNELS")

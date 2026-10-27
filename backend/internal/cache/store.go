@@ -647,11 +647,10 @@ func (s *Store) UpbitTick() {
 	if s.upbitW == nil {
 		return
 	}
+	t0 := time.Now()
 	fresh, all, err := s.upbitW.Poll()
+	s.naHookMark("upbit", t0, len(all), err)
 	if err != nil {
-		if s.news != nil {
-			s.naMark("upbit", time.Now(), 0, err)
-		}
 		return
 	}
 	defer func() { // 消息雷達:所有新公告(含非上架)都進事件表,中文標題沿用下面翻好的

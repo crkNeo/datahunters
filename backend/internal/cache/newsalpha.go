@@ -209,6 +209,24 @@ func (s *Store) naRun(src *naSource) {
 
 // naMark 更新來源狀態;連續失敗交給 apiFail(達門檻會發一次 Telegram 告警)。
 func (s *Store) naMark(key string, t0 time.Time, items int, err error) {
+	label := s.naStat(key, t0, items, err)
+	if err != nil {
+		s.apiFail("消息雷達·"+label, err.Error())
+	} else {
+		s.apiOK("消息雷達·" + label)
+	}
+}
+
+// naHookMark:掛勾來源(Upbit / Robinhood / 新聞 RSS)每次排程跑完都回報狀態,不論有沒有新消息。
+// 不另發告警 —— 原本的排程自己有。
+func (s *Store) naHookMark(key string, t0 time.Time, items int, err error) {
+	if s.news != nil {
+		s.naStat(key, t0, items, err)
+	}
+}
+
+// naStat 只更新「來源狀態」表,回傳來源名稱。
+func (s *Store) naStat(key string, t0 time.Time, items int, err error) string {
 	n := s.news
 	n.mu.Lock()
 	st := n.stat[key]
@@ -227,14 +245,11 @@ func (s *Store) naMark(key string, t0 time.Time, items int, err error) {
 		label = st.Label
 	}
 	n.mu.Unlock()
-	if err != nil {
-		s.apiFail("消息雷達·"+label, err.Error())
-	} else {
-		s.apiOK("消息雷達·" + label)
-	}
+	return label
 }
 
 // naHook 給 Upbit / Robinhood / RSS 這些「本來就有排程」的地方餵新消息(它們自己已處理過開機基準)。
+// 狀態由呼叫端用 naHookMark 回報。
 func (s *Store) naHook(key string, items []naIn) {
 	n := s.news
 	if n == nil {
@@ -252,7 +267,6 @@ func (s *Store) naHook(key string, items []naIn) {
 	if src == nil {
 		return
 	}
-	s.naMark(key, time.Now(), len(items), nil)
 	if len(items) > 0 {
 		s.naIngest(src, items)
 	}

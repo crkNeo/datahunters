@@ -107,6 +107,8 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(coinTimer) })
 // ── 顯示小工具 ──
 const sources = computed(() => (ov.value ? ov.value.sources : []))
 const okCount = computed(() => sources.value.filter((s) => s.last_ok && !s.fails).length)
+// 需要另外設定才會跑的來源(例如鏈上監控沒設 ALCHEMY_URL / INFURA_URL)
+const isOff = (s) => !s.every_sec && !s.last_try && (s.note || '').includes('未設定')
 const runnable = computed(() => sources.value.filter((s) => s.every_sec > 0 || s.last_try).length)
 // 來源篩選:Telegram 各頻道併成一顆
 const sourcePills = computed(() => {
@@ -387,16 +389,19 @@ function fmtUsd(v) {
               <td><b>{{ s.label }}</b></td>
               <td class="tsmall">{{ s.group }}</td>
               <td class="r na-num">{{ s.every_sec ? (s.every_sec >= 60 ? s.every_sec / 60 + ' 分' : s.every_sec + ' 秒') : '沿用' }}</td>
-              <td>
+              <td class="na-stat">
                 <span v-if="s.fails" class="chip short">失敗 {{ s.fails }} 次</span>
                 <span v-else-if="s.last_ok" class="chip long">正常</span>
-                <span v-else class="tsmall">{{ s.every_sec ? '等待中' : '未啟用 / 等待' }}</span>
+                <span v-else-if="isOff(s)" class="chip">未設定</span>
+                <span v-else class="tsmall">等待第一次更新</span>
+                <div v-if="s.fails && s.last_err" class="na-why short">{{ s.last_err }}</div>
+                <div v-else-if="isOff(s)" class="na-why tsmall">{{ s.note }}</div>
               </td>
               <td class="r na-num">{{ s.last_try ? s.latency_ms + ' ms' : '—' }}</td>
               <td class="r tsmall">{{ ago(s.last_ok) }}</td>
               <td class="r na-num">{{ s.last_ok ? s.items : '—' }}</td>
               <td class="r na-num">{{ s.events }}</td>
-              <td class="na-err"><span v-if="s.last_err" class="short">{{ s.last_err }}</span><span v-else class="tsmall">{{ s.note }}</span></td>
+              <td class="na-err"><span v-if="s.last_err" class="short">{{ s.last_err }}</span><span v-else-if="!isOff(s)" class="tsmall">{{ s.note }}</span></td>
             </tr>
           </tbody>
         </table>
@@ -429,6 +434,8 @@ function fmtUsd(v) {
 .na-ai { margin-top: 5px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .na-ai .na-dir { margin-left: 0; }
 .na-src-tbl td { white-space: nowrap; }
+.na-src-tbl td.na-stat { white-space: normal; min-width: 120px; max-width: 260px; }
+.na-why { font-size: 11px; margin-top: 4px; line-height: 1.4; word-break: break-word; }
 .na-src-tbl td.na-err { white-space: normal; min-width: 220px; font-size: 12px; }
 .na-coinin { width: 140px; background: var(--c-bg2); border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: 4px 10px; color: var(--c-txt); font-size: 12px; outline: none; }
 .na-coinin:focus { border-color: var(--c-gold-d); }

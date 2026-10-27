@@ -128,3 +128,18 @@ func TestLooseTickers(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBithumbAPI(t *testing.T) {
+	b := []byte(`[{"categories":["거래"],"title":"[마켓 추가] 플로키(FLOKI) 원화 마켓 추가","pc_url":"https://feed.bithumb.com/notice/1650123","published_at":"2026-10-27 15:00:00","modified_at":"2026-10-27 15:00:00"},
+	{"categories":["안내"],"title":"점검 안내","pc_url":"https://feed.bithumb.com/notice/1650100","published_at":"2026-10-27 10:00:00"}]`)
+	items, err := parseBithumbAPI(b)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if items[0].ID != "1650123" || items[0].Published.Hour() != 6 { // 15:00 KST = 06:00 UTC
+		t.Fatalf("bad item: %+v", items[0])
+	}
+	if _, err := parseBithumbAPI([]byte(`{"status":"5600","message":"err"}`)); err == nil {
+		t.Fatal("expected error for empty response")
+	}
+}

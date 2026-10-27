@@ -198,13 +198,66 @@ var (
 	bithumbAnchr = regexp.MustCompile(`(?s)<a[^>]+href="(/notice/(\d+))"[^>]*>(.*?)</a>`)
 )
 
-// Bithumb 抓 Bithumb 公告頁(feed.bithumb.com/notice)。
+// Bithumb 抓 Bithumb 公告。優先走官方公開 API(api.bithumb.com/v1/notices);公告網頁
+// feed.bithumb.com 有 Cloudflare 防爬,伺服器直接抓常回 403,只當備援。
 func (c *Client) Bithumb() ([]Item, error) {
-	b, err := c.get("https://feed.bithumb.com/notice", map[string]string{"Accept": "text/html", "Accept-Language": "ko-KR,ko;q=0.9"})
-	if err != nil {
-		return nil, err
+	b, err := c.get("https://api.bithumb.com/v1/notices?count=20", map[string]string{"Accept": "application/json"})
+	if err == nil {
+		items, perr := parseBithumbAPI(b)
+		if perr == nil {
+			return items, nil
+		}
+		err = perr
 	}
-	return parseBithumb(string(b))
+	page, perr := c.get("https://feed.bithumb.com/notice", map[string]string{"Accept": "text/html", "Accept-Language": "ko-KR,ko;q=0.9"})
+	if perr != nil {
+		return nil, fmt.Errorf("API:%v;網頁:%v", err, perr)
+	}
+	return parseBithumb(string(page))
+}
+
+var trailingNum = regexp.MustCompile(`(\d+)/?$`)
+
+// parseBithumbAPI 解析官方公告 API:每則有 title + pc_url(+ published_at)。外層包裝不固定,用通用走訪。
+func parseBithumbAPI(b []byte) ([]Item, error) {
+	var raw any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("解析失敗: %v", err)
+	}
+	var out []Item
+	seen := map[string]bool{}
+	walkObjects(raw, func(o map[string]any) {
+		title := str(o, "title")
+		link := str(o, "pc_url")
+		if link == "" {
+			link = str(o, "url")
+		}
+		if title == "" || link == "" {
+			return
+		}
+		id := link
+		if m := trailingNum.FindStringSubmatch(link); m != nil {
+			id = m[1]
+		}
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		var pub time.Time
+		for _, k := range []string{"published_at", "publishedAt", "created_at", "modified_at"} {
+			if v := str(o, k); v != "" {
+				if t, err := parseLooseTime(v); err == nil {
+					pub = t
+					break
+				}
+			}
+		}
+		out = append(out, Item{Source: "bithumb", ID: id, Title: title, Lang: "ko", URL: link, Published: pub})
+	})
+	if len(out) == 0 {
+		return nil, fmt.Errorf("API 回應裡沒有公告")
+	}
+	return out, nil
 }
 
 // parseBithumb:新版頁面是 Next.js,先試頁面內嵌的 __NEXT_DATA__ JSON(找有 id + title 的物件),
