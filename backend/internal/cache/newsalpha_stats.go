@@ -27,8 +27,10 @@ const (
 	naReactBatch = 25 // 每輪最多回填幾則
 	naReactPace  = 120 * time.Millisecond
 	naReactTries = 8 // 同一則抓 K 線連續失敗幾次就放棄(間隔 1、2、4…最多 30 分鐘重試)
-	naReactDays  = 7 // 只回填最近幾天的事件(伺服器關機再久也補得回來)
-	naStageDone  = 5 // stage = 5:全部時間點都處理完
+	// 只回填最近 5 小時內的事件:正常運作 4h 那一格需要 4 小時,再多留 1 小時給重啟 / 重試;
+	// 伺服器關機超過 1 小時,更早的消息就不補了。
+	naReactWindow = 5 * 3600_000
+	naStageDone   = 5 // stage = 5:全部時間點都處理完
 )
 
 // naDueStage:到 now 為止,這則事件應該完成幾個時間點(每個時間點過後多等 1 分鐘,確保那根 K 已收)。
@@ -66,7 +68,7 @@ func (s *Store) NewsAlphaReactTick() {
 	} else {
 		n.mu.Lock()
 		for _, ev := range n.events {
-			if ev.Coin != "" && ev.Ts > now-naReactDays*86400_000 && ev.Stage < naStageDone && naDueStage(ev.Ts, now) > ev.Stage {
+			if ev.Coin != "" && ev.Ts > now-naReactWindow && ev.Stage < naStageDone && naDueStage(ev.Ts, now) > ev.Stage {
 				cand = append(cand, *ev)
 			}
 		}
@@ -594,6 +596,18 @@ func (db *DB) hasNewsEvent(id string) bool {
 	return n > 0
 }
 
+func (db *DB) clearNewsEvents() int {
+	if db.sql == nil {
+		return 0
+	}
+	res, err := db.sql.Exec(`DELETE FROM news_events`)
+	if err != nil {
+		return 0
+	}
+	n, _ := res.RowsAffected()
+	return int(n)
+}
+
 func (db *DB) deleteNewsEvent(id string) bool {
 	if db.sql == nil {
 		return false
@@ -687,14 +701,14 @@ func (db *DB) loadNewsEvents(since int64, source, category, coin string, limit i
 	return out
 }
 
-// newsReactTodo:有時間點到期、還沒補的事件(最近 naReactDays 天)。完成度低的先(剛出的消息 1m 優先)。
+// newsReactTodo:有時間點到期、還沒補的事件(最近 5 小時)。完成度低的先(剛出的消息 1m 優先)。
 func (db *DB) newsReactTodo(now int64, limit int) []NewsEvent {
 	out := []NewsEvent{}
 	if db.sql == nil {
 		return out
 	}
 	cond := make([]string, 0, len(naHorizons))
-	args := []any{now - naReactDays*86400_000}
+	args := []any{now - naReactWindow}
 	for i, h := range naHorizons {
 		cond = append(cond, fmt.Sprintf("(stage = %d AND ts <= ?)", i))
 		args = append(args, now-int64(h.Min+1)*60_000)

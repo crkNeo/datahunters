@@ -167,6 +167,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
 	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))           // 清空某策略模擬單
 	mux.HandleFunc("/api/admin/newsalpha-delete", s.gate(A, s.handleNewsAlphaDelete)) // 消息雷達:刪除單筆事件
+	mux.HandleFunc("/api/admin/newsalpha-clear", s.gate(A, s.handleNewsAlphaClear))   // 消息雷達:清除全部事件
 
 	// 以下路由的角色由「標籤權限」設定決定(預設值同原本寫死的角色),
 	// 管理員在後台調整後立即生效 — 前端隱藏分頁只是外觀,這裡才是真正的門。
@@ -1088,6 +1089,15 @@ func (s *Server) handleNewsAlphaDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleNewsAlphaClear (admin): POST wipes every news event (the paper book is cleared separately).
+func (s *Server) handleNewsAlphaClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "deleted": s.store.NewsAlphaClear()})
 }
 
 // handleNewsAlphaBook serves the 消息雷達 paper book (observe-only).

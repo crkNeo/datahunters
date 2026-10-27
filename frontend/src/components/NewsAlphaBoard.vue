@@ -16,7 +16,7 @@ const props = defineProps({
   risky: { type: Boolean, default: false },
   tags: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['coin', 'exit', 'delete'])
+const emit = defineEmits(['coin', 'exit', 'delete', 'clear-all', 'clear-book'])
 
 const CAT = {
   listing_kr: '韓所上幣', listing: '交易所上幣', listing_us: '美國券商上架', delist: '下架', warning: '警示 / 監控',
@@ -33,7 +33,7 @@ const srcName = (s) => SRC[s] || (s && s.startsWith('tg:') ? 'TG ' + s.slice(3) 
 const HZ = ['1m', '5m', '15m', '1h', '4h']
 const RKEYS = ['r1m', 'r5m', 'r15m', 'r1h', 'r4h']
 // 這個時間點還沒補(時間未到,或抓 K 線失敗正在重試):顯示「待」;已處理過但沒資料才顯示「—」
-const pending = (e, i) => e.coin && (e.stage || 0) <= i && (e.stage || 0) < 5 && Date.now() - e.ts < 7 * 86400e3
+const pending = (e, i) => e.coin && (e.stage || 0) <= i && (e.stage || 0) < 5 && Date.now() - e.ts < 5 * 3600e3
 
 const tab = ref('feed')
 const TABS = [['feed', '消息流'], ['stats', '統計'], ['book', '模擬單'], ['lead', '領先指標'], ['sources', '來源狀態']]
@@ -192,7 +192,14 @@ function fmtUsd(v) {
         <b>【價格反應】</b>每則有幣種的消息,自動記錄看到當下價格,以及之後 1 分、5 分、15 分、1 小時、4 小時的漲跌,和 1 小時內最大漲 / 跌。<br>
         <b>【怎麼用】</b>先跑 4–8 週只收資料,到「統計」看哪個分類 / 來源照標記方向做是賺的、反應窗口多長;沒有優勢的類別就放棄。<br>
         ⚠️ 只用公開資訊。消息出來常有大滑點、插針,也常「買傳聞賣事實」。非投資建議。</span></span></h2>
-      <span class="mk-count" v-if="ov">來源正常 {{ okCount }} / {{ runnable }} · AI 本小時 {{ ov.ai_used }}/{{ ov.ai_limit }}</span>
+      <span class="mk-actions">
+        <span class="mk-count" v-if="ov">來源正常 {{ okCount }} / {{ runnable }} · AI 本小時 {{ ov.ai_used }}/{{ ov.ai_limit }}</span>
+        <template v-if="props.canExit">
+          <button v-if="tab === 'book'" class="clearbtn" @click="emit('clear-book', true, loadBook)">清已結束</button>
+          <button v-if="tab === 'book'" class="clearbtn" @click="emit('clear-book', false, loadBook)">全部</button>
+          <button v-else class="clearbtn" @click="emit('clear-all', reload)">清除全部消息</button>
+        </template>
+      </span>
     </div>
 
     <div class="subtabs">
@@ -280,7 +287,7 @@ function fmtUsd(v) {
       </div>
       <PageNav :page="feed.page" :pages="feed.pages" :total="feed.total" @go="(p) => (page = p)" />
       <p v-if="!feed.rows.length && !feedLoading" class="empty">此範圍內沒有消息。剛啟動時各來源的第一輪只建基準,之後新出現的消息才會進來。</p>
-      <p class="loginhint">價格反應在每個時間點到了之後約 1 分鐘內補上(「待」= 時間還沒到;用歷史 K 線算,伺服器關機錯過的開機後會自動補上;「停機補記」是關機期間發布、重啟後補進來的公告;「—」= 那個時間點幣安沒有成交資料);「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
+      <p class="loginhint">價格反應在每個時間點到了之後約 1 分鐘內補上(「待」= 時間還沒到;用歷史 K 線算,伺服器重啟後會補回前 1 小時內錯過的;「停機補記」是關機期間發布、重啟後補進來的公告;「—」= 那個時間點幣安沒有成交資料);「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
     </template>
 
     <!-- 統計 -->

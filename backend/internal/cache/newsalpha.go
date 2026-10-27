@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -94,8 +95,8 @@ const (
 	naStaleTrade  = 15 * time.Minute // 來源發布時間早於這麼久才被看到 → 資訊落差已經沒了,只記錄不開單
 	naPushMinStr  = 2                // 強度 ≥ 2 且有幣種才推播
 	naPriceMaxAge = 20 * time.Second
-	naCatchUp     = 12 * time.Hour // 重啟後補記:發布時間在這段內、資料庫還沒有的公告
-	naCatchUpMax  = 30             // 每個來源最多補記幾則
+	naCatchUp     = time.Hour // 重啟後補記:發布時間在前 1 小時內、資料庫還沒有的公告
+	naCatchUpMax  = 30        // 每個來源最多補記幾則
 )
 
 // naSource 是一個排程來源。every = 0 代表由其他 tick 掛勾餵進來(Upbit / Robinhood / RSS)。
@@ -388,6 +389,34 @@ func (s *Store) naCatchUpIngest(src *naSource, items []naIn) {
 	log.Printf("消息雷達[%s] 補記停機期間的公告 %d 則", src.key, added)
 }
 
+// NewsAlphaClear 清除全部消息紀錄(管理員):事件表、記憶體、回填 / AI 狀態與快取全部清空。
+// 各來源「已看過」的清單保留 —— 否則下一輪會把交易所列表上的舊公告當成新消息重推一次。
+// 模擬單不動(在模擬單分頁另外清)。回傳刪掉幾則。
+func (s *Store) NewsAlphaClear() int {
+	n := s.news
+	if n == nil {
+		return 0
+	}
+	n.mu.Lock()
+	cnt := len(n.events)
+	n.events = nil
+	n.aiTried = map[string]bool{}
+	n.reactFails = map[string]int{}
+	n.reactNext = map[string]int64{}
+	for _, st := range n.stat {
+		st.Events = 0
+	}
+	n.mu.Unlock()
+	if s.db != nil {
+		if k := s.db.clearNewsEvents(); k > cnt {
+			cnt = k
+		}
+	}
+	naHistCache.clear()
+	naStatsCache.clear()
+	return cnt
+}
+
 // NewsAlphaDelete 刪除一則事件(管理員):記憶體、資料庫都刪,並清掉分頁 / 統計快取。
 func (s *Store) NewsAlphaDelete(id string) bool {
 	n := s.news
@@ -428,6 +457,9 @@ func (s *Store) naBuild(src *naSource, it naIn) *NewsEvent {
 		if len(coins) == 0 && newsOfficial[it.Source] { // 官方公告的新幣常常還沒有行情 → 放寬只看明確格式
 			coins = newsfeed.LooseTickers(title)
 		}
+		if len(coins) == 0 && cat == "whale" {
+			coins = naWhaleCoins(title, dir)
+		}
 	}
 	if len(coins) > 8 {
 		coins = coins[:8]
@@ -456,6 +488,26 @@ func (s *Store) naBuild(src *naSource, it naIn) *NewsEvent {
 		ev.TitleZH = s.naTranslate(title, it.Lang)
 	}
 	return ev
+}
+
+var naHashTag = regexp.MustCompile(`#([A-Z][A-Z0-9]{1,11})\b`)
+
+// naWhaleCoins:Whale Alert 的幣種寫成「#BTC」。幣價表還沒載入(剛開機 / 被限流)時 ExtractTickers 比對不到,
+// 這裡直接取全大寫的 hashtag;只有穩定幣(USDT 轉進交易所 = 準備買)時以 BTC 代表大盤,跟鏈上監控一致。
+func naWhaleCoins(title, dir string) []string {
+	var out, stables []string
+	for _, m := range naHashTag.FindAllStringSubmatch(title, -1) {
+		t := m[1]
+		if naStables[t] || t == "USD" {
+			stables = append(stables, t)
+			continue
+		}
+		out = append(out, t)
+	}
+	if len(out) == 0 && len(stables) > 0 && dir == "long" {
+		return []string{"BTC"}
+	}
+	return out
 }
 
 // naTranslate:韓文走 MyMemory,英文走 Google 免金鑰端點;失敗回空字串(AI 判斷時會補)。

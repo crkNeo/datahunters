@@ -245,14 +245,14 @@ func TestNACatchUpAndDelete(t *testing.T) {
 	n.perp = map[string]float64{"HYPE": 40}
 	src := &naSource{key: "binance", label: "幣安公告", seed: true}
 	n.register(src)
-	pub := time.Now().Add(-2 * time.Hour)
-	old := time.Now().Add(-48 * time.Hour)
+	pub := time.Now().Add(-40 * time.Minute)
+	old := time.Now().Add(-2 * time.Hour) // 超過 1 小時 → 不補
 	items := []naIn{
 		{Item: newsfeed.Item{Source: "binance", ID: "a", Title: "Binance Will List Hyperliquid (HYPE)", Lang: "en", Published: pub}},
 		{Item: newsfeed.Item{Source: "binance", ID: "b", Title: "Binance Will List Old (OLD)", Lang: "en", Published: old}},
 		{Item: newsfeed.Item{Source: "binance", ID: "c", Title: "Binance Will List NoTime (NOT)", Lang: "en"}},
 	}
-	s.naIngest(src, items) // 開機第一輪:只補記 12 小時內、有發布時間的
+	s.naIngest(src, items) // 開機第一輪:只補記 1 小時內、有發布時間的
 	if len(n.events) != 1 {
 		t.Fatalf("want 1 catch-up event, got %d", len(n.events))
 	}
@@ -265,5 +265,36 @@ func TestNACatchUpAndDelete(t *testing.T) {
 	}
 	if s.NewsAlphaDelete("nope") {
 		t.Fatal("deleting a missing id should report false")
+	}
+}
+
+func TestNAWhaleCoins(t *testing.T) {
+	cases := []struct {
+		title, dir string
+		want       []string
+	}{
+		{"🚨 1,000 #BTC (67,000,000 USD) transferred from unknown wallet to #Binance", "short", []string{"BTC"}},
+		{"🚨 50,000,000 #USDT (50,000,000 USD) transferred from unknown wallet to #Coinbase", "long", []string{"BTC"}},
+		{"🔥 1,000,000,000 #USDC burned at USDC Treasury", "", nil},
+		{"🚨 20,000 #ETH and 5,000,000 #ARB moved", "", []string{"ETH", "ARB"}},
+	}
+	for _, c := range cases {
+		got := naWhaleCoins(c.title, c.dir)
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%q → %v, want %v", c.title, got, c.want)
+		}
+	}
+	// 幣價表空著(剛開機)時,Whale Alert 仍要對得到幣種
+	s := &Store{news: newNewsAlpha()}
+	s.news.pxAt = time.Now().Add(time.Hour)
+	src := &naSource{key: "tg:whale_alert_io", label: "TG whale_alert_io"}
+	s.news.register(src)
+	s.naIngest(src, []naIn{{Item: newsfeed.Item{Source: "tg:whale_alert_io", ID: "1", Lang: "en",
+		Title: "🚨 1,000 #BTC (67,000,000 USD) transferred from unknown wallet to #Binance"}}})
+	if len(s.news.events) != 1 || s.news.events[0].Coin != "BTC" || s.news.events[0].Category != "whale" {
+		t.Fatalf("whale event wrong: %+v", s.news.events)
+	}
+	if s.NewsAlphaClear() != 1 || len(s.news.events) != 0 {
+		t.Fatal("clear failed")
 	}
 }

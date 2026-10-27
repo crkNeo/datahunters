@@ -652,6 +652,15 @@ async function deleteNewsEvent(id, reload) {
   showToast('已刪除', 'ok')
   if (reload) reload()
 }
+// 消息雷達:清除全部消息紀錄(管理員;模擬單不動)
+async function clearNewsEvents(reload) {
+  if (!(await askConfirm('確定清除「全部」消息紀錄?價格反應與統計會全部歸零,無法復原。(模擬單不受影響,要清請到模擬單分頁)'))) return
+  const res = await authFetch('/api/admin/newsalpha-clear', { method: 'POST' })
+  if (!res.ok) { showToast((await res.text()).trim() || '清除失敗', 'err'); return }
+  const d = await res.json()
+  showToast(`已清除 ${d.deleted || 0} 則`, 'ok')
+  if (reload) reload()
+}
 // 後台的功能分頁。標籤權限與策略設定已抽成獨立元件,各自載自己的資料。
 const adminTab = ref('users')
 const ADMIN_TABS = [
@@ -2574,6 +2583,8 @@ watch([role, tabPerms, authReady], () => {
       @coin="openDetail"
       @exit="(id, reload) => manualExitStrat('newsalpha', id, reload)"
       @delete="deleteNewsEvent"
+      @clear-all="clearNewsEvents"
+      @clear-book="(closedOnly, reload) => clearStrat('newsalpha', reload, closedOnly)"
     />
 
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
