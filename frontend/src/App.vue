@@ -27,6 +27,7 @@ import NewsBoard from './components/NewsBoard.vue'
 import RobinhoodBoard from './components/RobinhoodBoard.vue'
 import WhaleBoard from './components/WhaleBoard.vue'
 import PolyscoutBoard from './components/PolyscoutBoard.vue'
+import NewsAlphaBoard from './components/NewsAlphaBoard.vue'
 import CandleChart from './components/CandleChart.vue'
 import { ROUTE_TABS } from './router'
 
@@ -1488,7 +1489,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1637,7 +1638,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv15: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv15: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1701,7 +1702,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
-  pulsarv12: '脈衝星v12', pulsarv15: '脈衝星v15', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識',
+  pulsarv12: '脈衝星v12', pulsarv15: '脈衝星v15', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1721,7 +1722,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', pulsarv15: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', pulsarv15: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1729,7 +1730,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv15', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2294,6 +2295,7 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('srmtf', grp[0])" :class="{ active: mainTab === 'srmtf', lk: !canTab('srmtf') }" @click="navTo('srmtf', loadSRMTF)">反轉訊號<i v-if="!canTab('srmtf')" class="navlk">🔒</i></button>
           <button v-if="inGroup('polyscout', grp[0])" :class="{ active: mainTab === 'polyscout', lk: !canTab('polyscout') }" @click="navTo('polyscout')">聰明錢共識<i v-if="!canTab('polyscout')" class="navlk">🔒</i></button>
+          <button v-if="inGroup('newsalpha', grp[0])" :class="{ active: mainTab === 'newsalpha', lk: !canTab('newsalpha') }" @click="navTo('newsalpha')">消息雷達<i v-if="!canTab('newsalpha')" class="navlk">🔒</i></button>
         </div>
       </div>
       </template>
@@ -2553,6 +2555,15 @@ watch([role, tabPerms, authReady], () => {
 
     <!-- 錘頭/射擊星 型態訊號(1H + 4H · 純提示,不下單)-->
     <PolyscoutBoard v-else-if="mainTab === 'polyscout' && canTab('polyscout')" @toast="(m) => showToast(m)" />
+    <!-- 消息雷達(資訊落差):事件流 + 價格反應統計 + 觀察模擬單 -->
+    <NewsAlphaBoard
+      v-else-if="mainTab === 'newsalpha' && canTab('newsalpha')"
+      :can-exit="can('admin')"
+      :risky="stratRisky('newsalpha')"
+      :tags="stratTagsOf('newsalpha')"
+      @coin="openDetail"
+      @exit="(id, reload) => manualExitStrat('newsalpha', id, reload)"
+    />
 
     <section v-else-if="mainTab === 'srmtf' && canTab('srmtf')">
       <div class="mk-head">
