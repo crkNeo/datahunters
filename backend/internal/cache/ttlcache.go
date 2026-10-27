@@ -32,6 +32,13 @@ func newTTLCache(ttl time.Duration) *ttlCache {
 	return &ttlCache{ttl: ttl, items: map[string]*ttlItem{}}
 }
 
+// clear drops every cached value (used after an admin edit so the next read is fresh).
+func (c *ttlCache) clear() {
+	c.mu.Lock()
+	c.items = map[string]*ttlItem{}
+	c.mu.Unlock()
+}
+
 // get returns the cached value for key if fresh, else calls fetch once (other
 // callers for the same key block until it returns, then share the result).
 func (c *ttlCache) get(key string, fetch func() (any, error)) (any, error) {

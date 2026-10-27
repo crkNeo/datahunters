@@ -165,7 +165,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
 	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
-	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear)) // 清空某策略模擬單
+	mux.HandleFunc("/api/admin/strat-clear", s.gate(A, s.handleStratClear))           // 清空某策略模擬單
+	mux.HandleFunc("/api/admin/newsalpha-delete", s.gate(A, s.handleNewsAlphaDelete)) // 消息雷達:刪除單筆事件
 
 	// 以下路由的角色由「標籤權限」設定決定(預設值同原本寫死的角色),
 	// 管理員在後台調整後立即生效 — 前端隱藏分頁只是外觀,這裡才是真正的門。
@@ -1069,6 +1070,24 @@ func (s *Server) handleNewsAlphaEvents(w http.ResponseWriter, r *http.Request) {
 // handleNewsAlphaStats serves the price-reaction statistics by category / source.
 func (s *Server) handleNewsAlphaStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.NewsAlphaStats(atoi64(r.URL.Query().Get("win"))))
+}
+
+// handleNewsAlphaDelete (admin): POST {id} removes one news event (memory + DB).
+func (s *Server) handleNewsAlphaDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct{ ID string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.ID == "" {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if !s.store.NewsAlphaDelete(in.ID) {
+		http.Error(w, "找不到這則紀錄(可能已刪除)", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleNewsAlphaBook serves the 消息雷達 paper book (observe-only).

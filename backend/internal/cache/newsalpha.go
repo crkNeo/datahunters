@@ -57,6 +57,7 @@ type NewsEvent struct {
 	Dn60       *float64 `json:"dn60"`   // 60 分鐘內最大跌幅 %(負值)
 	Filled     int      `json:"filled"` // 0 未回填 / 1 回填到 1h / 2 全部完成
 	Traded     bool     `json:"traded"`
+	Late       bool     `json:"late"` // 停機補記:伺服器關機期間發布、重啟後才補進來的(只記錄、不推播、不開單)
 }
 
 // 分類 → 中文標籤(前端也用這份)。
@@ -91,6 +92,8 @@ const (
 	naStaleTrade  = 15 * time.Minute // 來源發布時間早於這麼久才被看到 → 資訊落差已經沒了,只記錄不開單
 	naPushMinStr  = 2                // 強度 ≥ 2 且有幣種才推播
 	naPriceMaxAge = 20 * time.Second
+	naCatchUp     = 12 * time.Hour // 重啟後補記:發布時間在這段內、資料庫還沒有的公告
+	naCatchUpMax  = 30             // 每個來源最多補記幾則
 )
 
 // naSource 是一個排程來源。every = 0 代表由其他 tick 掛勾餵進來(Upbit / Robinhood / RSS)。
@@ -127,17 +130,18 @@ type NewsSourceStat struct {
 type newsAlpha struct {
 	nf *newsfeed.Client
 
-	mu      sync.Mutex
-	srcs    []*naSource
-	stat    map[string]*NewsSourceStat
-	running map[string]bool
-	seeded  map[string]bool
-	seen    map[string]map[string]bool // source → 已看過的 id
-	nextRun map[string]time.Time
-	events  []*NewsEvent // 新的在前
-	aiCalls []int64      // 最近一小時的 AI 呼叫時間
-	aiTried map[string]bool
-	started time.Time
+	mu         sync.Mutex
+	srcs       []*naSource
+	stat       map[string]*NewsSourceStat
+	running    map[string]bool
+	seeded     map[string]bool
+	seen       map[string]map[string]bool // source → 已看過的 id
+	nextRun    map[string]time.Time
+	events     []*NewsEvent // 新的在前
+	aiCalls    []int64      // 最近一小時的 AI 呼叫時間
+	aiTried    map[string]bool
+	reactFails map[string]int // 價格回填抓 K 線失敗次數(超過上限就放棄)
+	started    time.Time
 
 	pxMu   sync.Mutex
 	pxAt   time.Time
@@ -151,7 +155,7 @@ type newsAlpha struct {
 func newNewsAlpha() *newsAlpha {
 	return &newsAlpha{nf: newsfeed.New(), stat: map[string]*NewsSourceStat{}, running: map[string]bool{},
 		seeded: map[string]bool{}, seen: map[string]map[string]bool{}, nextRun: map[string]time.Time{},
-		aiTried: map[string]bool{}, started: time.Now(), perp: map[string]float64{}, spot: map[string]float64{},
+		aiTried: map[string]bool{}, reactFails: map[string]int{}, started: time.Now(), perp: map[string]float64{}, spot: map[string]float64{},
 		ext: newNAExtras()}
 }
 
@@ -289,14 +293,18 @@ func (s *Store) naIngest(src *naSource, items []naIn) {
 	first := src.seed && !n.seeded[src.key]
 	n.seeded[src.key] = true
 	seen := n.seen[src.key]
-	var fresh []naIn
+	var fresh, late []naIn
+	now := time.Now()
 	for _, it := range items {
 		if it.ID == "" || seen[it.ID] {
 			continue
 		}
 		seen[it.ID] = true
-		if !first {
+		switch {
+		case !first:
 			fresh = append(fresh, it)
+		case s.db != nil && !it.Published.IsZero() && now.Sub(it.Published) <= naCatchUp && len(late) < naCatchUpMax:
+			late = append(late, it) // 開機基準裡較新的:可能是停機期間發的,資料庫沒有就補記
 		}
 	}
 	if len(seen) > 3000 { // 防無限長大:清掉後,這一批仍標記為已看過
@@ -307,6 +315,9 @@ func (s *Store) naIngest(src *naSource, items []naIn) {
 		n.seen[src.key] = m
 	}
 	n.mu.Unlock()
+	if len(late) > 0 {
+		s.naCatchUpIngest(src, late)
+	}
 	if len(fresh) == 0 {
 		return
 	}
@@ -333,6 +344,71 @@ func (s *Store) naIngest(src *naSource, items []naIn) {
 			s.naTrade(ev, it.Published)
 		}
 	}
+}
+
+// naCatchUpIngest 補記停機期間的公告:時間記成來源發布時間(價格反應從那一分鐘起算),
+// 已經在資料庫的(停機前就記過)由主鍵擋掉。只記錄,不推播、不開單、不花 AI 額度。
+func (s *Store) naCatchUpIngest(src *naSource, items []naIn) {
+	n := s.news
+	s.naPrices(0)
+	added := 0
+	for _, it := range items {
+		if s.db.hasNewsEvent(naEventID(it.Source, it.ID)) {
+			continue // 停機前已記過 → 不重做翻譯
+		}
+		ev := s.naBuild(src, it)
+		if ev == nil {
+			continue
+		}
+		ev.Ts, ev.Price0, ev.Tradable, ev.Late = it.Published.UnixMilli(), 0, false, true
+		if !s.db.insertNewsEvent(ev) {
+			continue
+		}
+		n.mu.Lock()
+		n.events = append(n.events, ev)
+		n.aiTried[ev.ID] = true
+		if st := n.stat[src.key]; st != nil {
+			st.Events++
+		}
+		n.mu.Unlock()
+		added++
+	}
+	if added == 0 {
+		return
+	}
+	n.mu.Lock()
+	sort.SliceStable(n.events, func(i, j int) bool { return n.events[i].Ts > n.events[j].Ts })
+	if len(n.events) > naKeepEvents {
+		n.events = n.events[:naKeepEvents]
+	}
+	n.mu.Unlock()
+	log.Printf("消息雷達[%s] 補記停機期間的公告 %d 則", src.key, added)
+}
+
+// NewsAlphaDelete 刪除一則事件(管理員):記憶體、資料庫都刪,並清掉分頁 / 統計快取。
+func (s *Store) NewsAlphaDelete(id string) bool {
+	n := s.news
+	if n == nil || id == "" {
+		return false
+	}
+	found := false
+	n.mu.Lock()
+	for i, ev := range n.events {
+		if ev.ID == id {
+			n.events = append(n.events[:i], n.events[i+1:]...)
+			found = true
+			break
+		}
+	}
+	n.mu.Unlock()
+	if s.db != nil && s.db.deleteNewsEvent(id) {
+		found = true
+	}
+	if found {
+		naHistCache.clear()
+		naStatsCache.clear()
+	}
+	return found
 }
 
 // naBuild 把一則來源消息變成事件(分類、幣種、基準價、中文標題)。

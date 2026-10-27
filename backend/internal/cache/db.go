@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS news_events (
   dn60        DOUBLE NULL,
   filled      TINYINT NOT NULL DEFAULT 0,
   traded      TINYINT NOT NULL DEFAULT 0,
+  late        TINYINT NOT NULL DEFAULT 0,
   KEY idx_ne_ts (ts),
   KEY idx_ne_fill (filled, ts),
   KEY idx_ne_cat (category, ts)
@@ -286,6 +287,12 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		if has == 0 {
 			d.Exec(`ALTER TABLE paper_trades ` + ddl)
 		}
+	}
+	// 消息雷達:停機補記旗標(late)。Idempotent.
+	var hasLate int
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='news_events' AND COLUMN_NAME='late'`).Scan(&hasLate)
+	if hasLate == 0 {
+		d.Exec(`ALTER TABLE news_events ADD COLUMN late TINYINT NOT NULL DEFAULT 0`)
 	}
 	// 推薦系統 columns on pre-existing users tables. Idempotent.
 	for col, ddl := range map[string]string{

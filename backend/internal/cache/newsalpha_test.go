@@ -207,3 +207,33 @@ func TestNAIngestSeedAndDedupe(t *testing.T) {
 func newsfeedItem(src, id, title string) newsfeed.Item {
 	return newsfeed.Item{Source: src, ID: id, Title: title, Lang: "en"}
 }
+
+func TestNACatchUpAndDelete(t *testing.T) {
+	s := &Store{news: newNewsAlpha(), db: &DB{}} // sql 為 nil:寫入一律視為成功
+	n := s.news
+	n.pxAt = time.Now().Add(time.Hour)
+	n.perp = map[string]float64{"HYPE": 40}
+	src := &naSource{key: "binance", label: "幣安公告", seed: true}
+	n.register(src)
+	pub := time.Now().Add(-2 * time.Hour)
+	old := time.Now().Add(-48 * time.Hour)
+	items := []naIn{
+		{Item: newsfeed.Item{Source: "binance", ID: "a", Title: "Binance Will List Hyperliquid (HYPE)", Lang: "en", Published: pub}},
+		{Item: newsfeed.Item{Source: "binance", ID: "b", Title: "Binance Will List Old (OLD)", Lang: "en", Published: old}},
+		{Item: newsfeed.Item{Source: "binance", ID: "c", Title: "Binance Will List NoTime (NOT)", Lang: "en"}},
+	}
+	s.naIngest(src, items) // 開機第一輪:只補記 12 小時內、有發布時間的
+	if len(n.events) != 1 {
+		t.Fatalf("want 1 catch-up event, got %d", len(n.events))
+	}
+	ev := n.events[0]
+	if !ev.Late || ev.Tradable || ev.Ts != pub.UnixMilli() || ev.Price0 != 0 || ev.Coin != "HYPE" {
+		t.Fatalf("bad catch-up event: %+v", ev)
+	}
+	if !s.NewsAlphaDelete(ev.ID) || len(n.events) != 0 {
+		t.Fatal("delete failed")
+	}
+	if s.NewsAlphaDelete("nope") {
+		t.Fatal("deleting a missing id should report false")
+	}
+}

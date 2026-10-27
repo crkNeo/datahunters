@@ -24,6 +24,8 @@ var naHorizons = []struct {
 const (
 	naReactBatch = 15 // 每輪最多回填幾則
 	naReactPace  = 150 * time.Millisecond
+	naReactTries = 6 // 同一則抓 K 線連續失敗幾次就放棄
+	naReactDays  = 7 // 只回填最近幾天的事件(伺服器關機再久也補得回來)
 )
 
 // NewsAlphaReactTick 每 2 分鐘由 main 呼叫:回填到期事件的價格反應。
@@ -40,7 +42,7 @@ func (s *Store) NewsAlphaReactTick() {
 	} else {
 		n.mu.Lock()
 		for _, ev := range n.events {
-			if ev.Coin != "" && ((ev.Filled == 0 && ev.Ts < cut1) || (ev.Filled == 1 && ev.Ts < cut2)) {
+			if ev.Coin != "" && ev.Ts > now-naReactDays*86400_000 && ((ev.Filled == 0 && ev.Ts < cut1) || (ev.Filled == 1 && ev.Ts < cut2)) {
 				todo = append(todo, *ev)
 			}
 		}
@@ -54,7 +56,11 @@ func (s *Store) NewsAlphaReactTick() {
 	}
 	s.naPrices(0)
 	for _, ev := range todo {
-		r := s.naReact(ev, now)
+		r, ok := s.naReact(ev, now)
+		if !ok {
+			time.Sleep(naReactPace)
+			continue // 抓 K 線失敗(停機 / 限流)→ 下一輪再試,不把空白結果寫死
+		}
 		n.mu.Lock()
 		for _, m := range n.events {
 			if m.ID == ev.ID {
@@ -72,8 +78,9 @@ func (s *Store) NewsAlphaReactTick() {
 	}
 }
 
-// naReact 抓事件之後的 1 分 K,算出各時間點的報酬;回傳更新後的事件(Filled 一定前進,抓不到也不重試)。
-func (s *Store) naReact(ev NewsEvent, now int64) NewsEvent {
+// naReact 抓事件之後的 1 分 K,算出各時間點的報酬。用的是歷史 K 線,所以伺服器關機錯過的
+// 時間點,開機後照樣補得回來。ok=false 代表這次抓失敗、要重試;同一則失敗 naReactTries 次就放棄。
+func (s *Store) naReact(ev NewsEvent, now int64) (NewsEvent, bool) {
 	start := ev.Ts / 60_000 * 60_000
 	full := now-ev.Ts >= 242*60_000
 	limit := 62
@@ -91,11 +98,23 @@ func (s *Store) naReact(ev NewsEvent, now int64) NewsEvent {
 	if full {
 		ev.Filled = 2
 	}
-	if err != nil || len(cs) == 0 {
-		return ev
+	if err != nil {
+		s.news.mu.Lock()
+		s.news.reactFails[ev.ID]++
+		giveUp := s.news.reactFails[ev.ID] >= naReactTries
+		if giveUp {
+			delete(s.news.reactFails, ev.ID)
+		}
+		s.news.mu.Unlock()
+		if !giveUp {
+			return ev, false
+		}
+		return ev, true // 一直抓不到(例如幣已下架)→ 標成已處理,不卡住佇列
 	}
-	fillNAReact(&ev, cs)
-	return ev
+	if len(cs) > 0 {
+		fillNAReact(&ev, cs)
+	}
+	return ev, true
 }
 
 // fillNAReact 由「看到消息那一分鐘」起的 1 分 K 算各時間點報酬(%):N 分鐘後 = 第 N 根的收盤。
@@ -454,10 +473,10 @@ func (db *DB) insertNewsEvent(ev *NewsEvent) bool {
 	if db.sql == nil {
 		return true
 	}
-	res, err := db.sql.Exec(`INSERT IGNORE INTO news_events(id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,price0)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := db.sql.Exec(`INSERT IGNORE INTO news_events(id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,price0,late)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		ev.ID, ev.Ts, ev.Pub, ev.Source, ev.Category, ev.Coin, strings.Join(ev.Coins, ","), ev.Title, ev.TitleZH,
-		trimRunes(ev.URL, 1000), ev.Dir, ev.Strength, ev.Tradable, ev.Value, ev.Price0)
+		trimRunes(ev.URL, 1000), ev.Dir, ev.Strength, ev.Tradable, ev.Value, ev.Price0, ev.Late)
 	if err != nil {
 		return true // DB 出錯不擋事件(記憶體 + 推播照常)
 	}
@@ -481,6 +500,27 @@ func (db *DB) updateNewsReact(ev *NewsEvent) {
 		ev.Price0, nullF(ev.R1m), nullF(ev.R5m), nullF(ev.R15m), nullF(ev.R1h), nullF(ev.R4h), nullF(ev.Up60), nullF(ev.Dn60), ev.Filled, ev.ID)
 }
 
+func (db *DB) hasNewsEvent(id string) bool {
+	if db.sql == nil {
+		return false
+	}
+	var n int
+	db.sql.QueryRow(`SELECT COUNT(*) FROM news_events WHERE id=?`, id).Scan(&n)
+	return n > 0
+}
+
+func (db *DB) deleteNewsEvent(id string) bool {
+	if db.sql == nil {
+		return false
+	}
+	res, err := db.sql.Exec(`DELETE FROM news_events WHERE id=?`, id)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
 func (db *DB) markNewsTraded(id string) {
 	if db.sql == nil {
 		return
@@ -495,7 +535,7 @@ func nullF(p *float64) any {
 	return *p
 }
 
-const naCols = `id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,ai_dir,ai_strength,ai_reason,price0,r1m,r5m,r15m,r1h,r4h,up60,dn60,filled,traded`
+const naCols = `id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,ai_dir,ai_strength,ai_reason,price0,r1m,r5m,r15m,r1h,r4h,up60,dn60,filled,traded,late`
 
 func scanNewsEvent(rows *sql.Rows) (NewsEvent, error) {
 	var ev NewsEvent
@@ -503,7 +543,7 @@ func scanNewsEvent(rows *sql.Rows) (NewsEvent, error) {
 	var r1m, r5m, r15m, r1h, r4h, up, dn sql.NullFloat64
 	err := rows.Scan(&ev.ID, &ev.Ts, &ev.Pub, &ev.Source, &ev.Category, &ev.Coin, &coins, &title, &zh, &url, &ev.Dir,
 		&ev.Strength, &ev.Tradable, &ev.Value, &ev.AIDir, &ev.AIStrength, &ev.AIReason, &ev.Price0,
-		&r1m, &r5m, &r15m, &r1h, &r4h, &up, &dn, &ev.Filled, &ev.Traded)
+		&r1m, &r5m, &r15m, &r1h, &r4h, &up, &dn, &ev.Filled, &ev.Traded, &ev.Late)
 	if err != nil {
 		return ev, err
 	}
@@ -562,7 +602,7 @@ func (db *DB) loadNewsEvents(since int64, source, category, coin string, limit i
 	return out
 }
 
-// newsReactTodo:需要回填的事件(1h 階段 / 4h 階段),最舊的先。只看最近 3 天,太舊的就算了。
+// newsReactTodo:需要回填的事件(1h 階段 / 4h 階段),最舊的先。只看最近 naReactDays 天。
 func (db *DB) newsReactTodo(cut1, cut2 int64, limit int) []NewsEvent {
 	out := []NewsEvent{}
 	if db.sql == nil {
@@ -570,7 +610,7 @@ func (db *DB) newsReactTodo(cut1, cut2 int64, limit int) []NewsEvent {
 	}
 	rows, err := db.sql.Query(`SELECT `+naCols+` FROM news_events WHERE coin <> '' AND ts > ? AND
 		((filled = 0 AND ts < ?) OR (filled = 1 AND ts < ?)) ORDER BY ts ASC LIMIT ?`,
-		time.Now().UnixMilli()-3*86400_000, cut1, cut2, limit)
+		time.Now().UnixMilli()-naReactDays*86400_000, cut1, cut2, limit)
 	if err != nil {
 		return out
 	}

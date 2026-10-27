@@ -16,7 +16,7 @@ const props = defineProps({
   risky: { type: Boolean, default: false },
   tags: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['coin', 'exit'])
+const emit = defineEmits(['coin', 'exit', 'delete'])
 
 const CAT = {
   listing_kr: '韓所上幣', listing: '交易所上幣', listing_us: '美國券商上架', delist: '下架', warning: '警示 / 監控',
@@ -233,7 +233,7 @@ function fmtUsd(v) {
           </thead>
           <tbody>
             <tr v-for="e in feed.rows" :key="e.id">
-              <td class="tsmall na-nw">{{ clock(e.ts) }}<div v-if="lag(e)" class="na-lag">{{ lag(e) }}</div></td>
+              <td class="tsmall na-nw">{{ clock(e.ts) }}<div v-if="lag(e)" class="na-lag">{{ lag(e) }}</div><div v-if="e.late" class="na-late" title="伺服器關機期間發布、重啟後才補進來;時間與價格反應從來源發布時間起算,不推播、不開單">停機補記</div><button v-if="props.canExit" class="clearbtn na-del" @click="emit('delete', e.id, loadFeed)">刪除</button></td>
               <td class="na-nw">
                 <span class="newscat" :class="catCls(e.category)">{{ CAT[e.category] || e.category }}</span>
                 <div class="tsmall na-sub">{{ srcName(e.source) }}</div>
@@ -270,7 +270,7 @@ function fmtUsd(v) {
       </div>
       <PageNav :page="feed.page" :pages="feed.pages" :total="feed.total" @go="(p) => (page = p)" />
       <p v-if="!feed.rows.length && !feedLoading" class="empty">此範圍內沒有消息。剛啟動時各來源的第一輪只建基準,之後新出現的消息才會進來。</p>
-      <p class="loginhint">價格反應在消息出現 1 小時後回填 1m~1h、4 小時後補 4h;「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
+      <p class="loginhint">價格反應在消息出現 1 小時後回填 1m~1h、4 小時後補 4h(用歷史 K 線算,伺服器關機錯過的開機後會自動補上;「停機補記」是關機期間發布、重啟後補進來的公告);「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
     </template>
 
     <!-- 統計 -->
@@ -416,7 +416,7 @@ function fmtUsd(v) {
 /* 只補版面;顏色 / 字體一律沿用全站 token 與既有元件(.timefilter / .newscat / .chip / .grid / .upbit-link) */
 .na-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .na-scroll table { min-width: 460px; }
-.na-scroll table.na-feed { min-width: 940px; }
+.na-scroll table.na-feed { min-width: 960px; }
 .na-scroll table.na-stats { min-width: 920px; }
 .na-scroll table.na-src-tbl { min-width: 880px; }
 .na-feed td, .na-stats td { vertical-align: top; }
@@ -429,8 +429,10 @@ function fmtUsd(v) {
 .na-str { color: var(--c-gold); font-size: 9px; letter-spacing: 1px; margin-left: 4px; }
 .na-sub { margin-top: 3px; }
 .na-dir { font-size: 11px; padding: 1px 6px; margin-left: 6px; }
+.na-late { display: block; width: fit-content; margin-top: 3px; font-size: 10.5px; padding: 0 6px; border-radius: 5px; color: var(--c-steel); background: var(--c-steel-bg); }
+.na-del { display: block; margin-top: 6px; white-space: nowrap; }
 .na-traded { color: var(--c-steel); margin-top: 2px; }
-.na-title { min-width: 260px; }
+.na-title { min-width: 240px; }
 .na-ai { margin-top: 5px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .na-ai .na-dir { margin-left: 0; }
 .na-src-tbl td { white-space: nowrap; }
