@@ -330,7 +330,6 @@ func (s *Store) notifyEMA200(coin string, st e2Coin) {
 		emoji, verb = "📉", "下穿"
 	}
 	title := fmt.Sprintf("%s %s %s EMA200(4H)", emoji, coin, verb)
-	closeAt := time.UnixMilli(st.bar + e2BarMs).Local().Format("01/02 15:04")
-	body := fmt.Sprintf("%s 4H 收盤(%s)$%s %s EMA200 $%s", coin, closeAt, fmtPx(st.close), verb, fmtPx(st.ema))
+	body := fmt.Sprintf("%s 4H 收盤 $%s %s EMA200 $%s", coin, fmtPx(st.close), verb, fmtPx(st.ema))
 	s.PushSendTopic("msg:ema200", title, body, "/?tab=ema200")
 }
