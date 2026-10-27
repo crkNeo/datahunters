@@ -55,7 +55,9 @@ type NewsEvent struct {
 	R4h        *float64 `json:"r4h"`
 	Up60       *float64 `json:"up60"`   // 60 分鐘內最大漲幅 %
 	Dn60       *float64 `json:"dn60"`   // 60 分鐘內最大跌幅 %(負值)
-	Filled     int      `json:"filled"` // 0 未回填 / 1 回填到 1h / 2 全部完成
+	Filled     int      `json:"filled"` // 舊欄位:0 未回填 / 1 回填到 1h / 2 全部完成(由 Stage 推出)
+	Stage      int      `json:"stage"`  // 已補完幾個時間點(1m/5m/15m/1h/4h → 1..5)
+	NoPx       bool     `json:"nopx"`   // 幣安(永續 / 現貨)都沒有這個幣,記不到價格反應
 	Traded     bool     `json:"traded"`
 	Late       bool     `json:"late"` // 停機補記:伺服器關機期間發布、重啟後才補進來的(只記錄、不推播、不開單)
 }
@@ -140,7 +142,8 @@ type newsAlpha struct {
 	events     []*NewsEvent // 新的在前
 	aiCalls    []int64      // 最近一小時的 AI 呼叫時間
 	aiTried    map[string]bool
-	reactFails map[string]int // 價格回填抓 K 線失敗次數(超過上限就放棄)
+	reactFails map[string]int   // 價格回填抓 K 線失敗次數(超過上限就放棄)
+	reactNext  map[string]int64 // 價格回填失敗後,下次可以重試的時間(ms)
 	started    time.Time
 
 	pxMu   sync.Mutex
@@ -155,7 +158,7 @@ type newsAlpha struct {
 func newNewsAlpha() *newsAlpha {
 	return &newsAlpha{nf: newsfeed.New(), stat: map[string]*NewsSourceStat{}, running: map[string]bool{},
 		seeded: map[string]bool{}, seen: map[string]map[string]bool{}, nextRun: map[string]time.Time{},
-		aiTried: map[string]bool{}, reactFails: map[string]int{}, started: time.Now(), perp: map[string]float64{}, spot: map[string]float64{},
+		aiTried: map[string]bool{}, reactFails: map[string]int{}, reactNext: map[string]int64{}, started: time.Now(), perp: map[string]float64{}, spot: map[string]float64{},
 		ext: newNAExtras()}
 }
 

@@ -13,8 +13,10 @@ import (
 
 // newsalpha_stats.go — 消息雷達的「事件資料庫 + 價格反應紀錄」(文件步驟 3)與統計(步驟 7)。
 //
-// 每則有幣種的事件,過了 1 小時先回填 1m / 5m / 15m / 1h 報酬與 60 分鐘內最大漲跌,
-// 過了 4 小時再補 4h。價格用 Binance 1 分 K(永續優先、沒有就現貨),從「看到消息那一分鐘」起算。
+// 每則有幣種的事件,各時間點一到就回填:看到後 1 分鐘補 1m、5 分鐘補 5m、15 分鐘補 15m、
+// 1 小時補 1h 與 60 分鐘內最大漲跌、4 小時補 4h(stage = 已完成幾個時間點,0..5)。
+// 價格用 Binance 1 分 K(永續優先、沒有就現貨),從「看到消息那一分鐘」起算、依 K 線時間戳對齊。
+// 用的是歷史 K 線,伺服器關機錯過的時間點開機後照樣補得回來。
 
 var naHorizons = []struct {
 	Key string
@@ -22,130 +24,212 @@ var naHorizons = []struct {
 }{{"1m", 1}, {"5m", 5}, {"15m", 15}, {"1h", 60}, {"4h", 240}}
 
 const (
-	naReactBatch = 15 // 每輪最多回填幾則
-	naReactPace  = 150 * time.Millisecond
-	naReactTries = 6 // 同一則抓 K 線連續失敗幾次就放棄
+	naReactBatch = 25 // 每輪最多回填幾則
+	naReactPace  = 120 * time.Millisecond
+	naReactTries = 8 // 同一則抓 K 線連續失敗幾次就放棄(間隔 1、2、4…最多 30 分鐘重試)
 	naReactDays  = 7 // 只回填最近幾天的事件(伺服器關機再久也補得回來)
+	naStageDone  = 5 // stage = 5:全部時間點都處理完
 )
 
-// NewsAlphaReactTick 每 2 分鐘由 main 呼叫:回填到期事件的價格反應。
+// naDueStage:到 now 為止,這則事件應該完成幾個時間點(每個時間點過後多等 1 分鐘,確保那根 K 已收)。
+func naDueStage(ts, now int64) int {
+	k := 0
+	for _, h := range naHorizons {
+		if ts+int64(h.Min+1)*60_000 <= now {
+			k++
+		}
+	}
+	return k
+}
+
+// naLegacyFilled:舊欄位 filled(0 未回填 / 1 到 1h / 2 全部)由 stage 推回,維持相容。
+func naLegacyFilled(stage int) int {
+	switch {
+	case stage >= naStageDone:
+		return 2
+	case stage >= 4:
+		return 1
+	}
+	return 0
+}
+
+// NewsAlphaReactTick 每 30 秒由 main 呼叫:回填到期事件的價格反應。
 func (s *Store) NewsAlphaReactTick() {
 	n := s.news
 	if n == nil {
 		return
 	}
 	now := time.Now().UnixMilli()
-	cut1, cut2 := now-62*60_000, now-242*60_000
-	var todo []NewsEvent
+	var cand []NewsEvent
 	if s.db != nil {
-		todo = s.db.newsReactTodo(cut1, cut2, naReactBatch)
+		cand = s.db.newsReactTodo(now, naReactBatch*3)
 	} else {
 		n.mu.Lock()
 		for _, ev := range n.events {
-			if ev.Coin != "" && ev.Ts > now-naReactDays*86400_000 && ((ev.Filled == 0 && ev.Ts < cut1) || (ev.Filled == 1 && ev.Ts < cut2)) {
-				todo = append(todo, *ev)
+			if ev.Coin != "" && ev.Ts > now-naReactDays*86400_000 && ev.Stage < naStageDone && naDueStage(ev.Ts, now) > ev.Stage {
+				cand = append(cand, *ev)
 			}
 		}
 		n.mu.Unlock()
-		if len(todo) > naReactBatch {
-			todo = todo[:naReactBatch]
+		sort.SliceStable(cand, func(i, j int) bool { return cand[i].Stage < cand[j].Stage })
+	}
+	// 失敗重試中的(還沒到下次重試時間)先跳過
+	var todo []NewsEvent
+	n.mu.Lock()
+	for _, ev := range cand {
+		if n.reactNext[ev.ID] > now {
+			continue
+		}
+		todo = append(todo, ev)
+		if len(todo) >= naReactBatch {
+			break
 		}
 	}
-	if len(todo) == 0 {
-		return
-	}
-	s.naPrices(0)
+	n.mu.Unlock()
 	for _, ev := range todo {
 		r, ok := s.naReact(ev, now)
-		if !ok {
-			time.Sleep(naReactPace)
-			continue // 抓 K 線失敗(停機 / 限流)→ 下一輪再試,不把空白結果寫死
-		}
-		n.mu.Lock()
-		for _, m := range n.events {
-			if m.ID == ev.ID {
-				m.R1m, m.R5m, m.R15m, m.R1h, m.R4h, m.Up60, m.Dn60, m.Filled = r.R1m, r.R5m, r.R15m, r.R1h, r.R4h, r.Up60, r.Dn60, r.Filled
-				if m.Price0 == 0 {
-					m.Price0 = r.Price0
+		if ok {
+			n.mu.Lock()
+			for _, m := range n.events {
+				if m.ID == ev.ID {
+					m.R1m, m.R5m, m.R15m, m.R1h, m.R4h, m.Up60, m.Dn60 = r.R1m, r.R5m, r.R15m, r.R1h, r.R4h, r.Up60, r.Dn60
+					m.Stage, m.Filled, m.NoPx = r.Stage, r.Filled, r.NoPx
+					if m.Price0 == 0 {
+						m.Price0 = r.Price0
+					}
 				}
 			}
-		}
-		n.mu.Unlock()
-		if s.db != nil {
-			s.db.updateNewsReact(&r)
+			n.mu.Unlock()
+			if s.db != nil {
+				s.db.updateNewsReact(&r)
+			}
 		}
 		time.Sleep(naReactPace)
 	}
 }
 
-// naReact 抓事件之後的 1 分 K,算出各時間點的報酬。用的是歷史 K 線,所以伺服器關機錯過的
-// 時間點,開機後照樣補得回來。ok=false 代表這次抓失敗、要重試;同一則失敗 naReactTries 次就放棄。
+// naReact 抓事件之後的 1 分 K,補上已到期的時間點。ok=false = 這次抓失敗,稍後重試(不寫入)。
 func (s *Store) naReact(ev NewsEvent, now int64) (NewsEvent, bool) {
+	n := s.news
+	due := naDueStage(ev.Ts, now)
+	if due <= ev.Stage {
+		return ev, false
+	}
 	start := ev.Ts / 60_000 * 60_000
-	full := now-ev.Ts >= 242*60_000
-	limit := 62
-	if full {
-		limit = 242
-	}
-	var cs []exchange.Candle
-	var err error
-	if s.news.hasPerp(ev.Coin) {
-		cs, err = s.ex.BinanceKlinesRange(ev.Coin+"USDT", "1m", start, 0, limit)
-	} else if s.news.known(ev.Coin) {
-		cs, err = s.ex.BinanceSpotKlinesRange(ev.Coin+"USDT", "1m", start, 0, limit)
-	}
-	ev.Filled = 1
-	if full {
-		ev.Filled = 2
-	}
+	cs, noMarket, err := s.naKlines(ev.Coin, start, naHorizons[due-1].Min+2)
 	if err != nil {
-		s.news.mu.Lock()
-		s.news.reactFails[ev.ID]++
-		giveUp := s.news.reactFails[ev.ID] >= naReactTries
-		if giveUp {
-			delete(s.news.reactFails, ev.ID)
+		n.mu.Lock()
+		n.reactFails[ev.ID]++
+		fails := n.reactFails[ev.ID]
+		if fails >= naReactTries {
+			delete(n.reactFails, ev.ID)
+			delete(n.reactNext, ev.ID)
+		} else {
+			n.reactNext[ev.ID] = now + int64(min(1<<(fails-1), 30))*60_000
 		}
-		s.news.mu.Unlock()
-		if !giveUp {
+		n.mu.Unlock()
+		if fails < naReactTries {
 			return ev, false
 		}
-		return ev, true // 一直抓不到(例如幣已下架)→ 標成已處理,不卡住佇列
+		ev.Stage = naStageDone // 一直抓不到 → 放棄,不卡住佇列
+		ev.Filled = naLegacyFilled(ev.Stage)
+		return ev, true
 	}
-	if len(cs) > 0 {
-		fillNAReact(&ev, cs)
+	n.mu.Lock()
+	delete(n.reactFails, ev.ID)
+	delete(n.reactNext, ev.ID)
+	n.mu.Unlock()
+	if noMarket {
+		ev.NoPx, ev.Stage = true, naStageDone // 幣安(永續 / 現貨)都沒有這個幣
+		ev.Filled = naLegacyFilled(ev.Stage)
+		return ev, true
 	}
+	ev.Stage = fillNAReact(&ev, cs, start, due)
+	if ev.Stage < due && now-ev.Ts > 6*3600_000 {
+		ev.Stage = naStageDone // 過了很久 K 線還是缺(停止交易等)→ 不再等
+	}
+	ev.Filled = naLegacyFilled(ev.Stage)
 	return ev, true
 }
 
-// fillNAReact 由「看到消息那一分鐘」起的 1 分 K 算各時間點報酬(%):N 分鐘後 = 第 N 根的收盤。
-func fillNAReact(ev *NewsEvent, cs []exchange.Candle) {
+// naKlines 先抓永續、沒有再抓現貨。noMarket = 兩邊都沒有這個交易對(或這段時間完全沒成交)。
+// 不依賴記憶體裡的幣價表(剛開機 / 被限流時那張表是空的,會誤判成沒有行情)。
+func (s *Store) naKlines(coin string, start int64, limit int) (cs []exchange.Candle, noMarket bool, err error) {
+	sym := coin + "USDT"
+	cs, err = s.ex.BinanceKlinesRange(sym, "1m", start, 0, limit)
+	if err == nil && len(cs) > 0 {
+		return cs, false, nil
+	}
+	if err != nil && !naInvalidSymbol(err) {
+		return nil, false, err
+	}
+	cs, err = s.ex.BinanceSpotKlinesRange(sym, "1m", start, 0, limit)
+	if err == nil && len(cs) > 0 {
+		return cs, false, nil
+	}
+	if err != nil && !naInvalidSymbol(err) {
+		return nil, false, err
+	}
+	return nil, true, nil
+}
+
+// naInvalidSymbol:幣安回「沒有這個交易對」(code -1121 / Invalid symbol)。
+func naInvalidSymbol(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "-1121") || strings.Contains(strings.ToLower(m), "invalid symbol")
+}
+
+// fillNAReact 用「看到消息那一分鐘」起的 1 分 K 算前 due 個時間點的報酬(%),依 K 線時間戳對齊:
+// N 分鐘後 = 開盤時間為 start+(N−1) 分那根的收盤。回傳實際補到第幾個時間點(K 線缺就停在那)。
+func fillNAReact(ev *NewsEvent, cs []exchange.Candle, start int64, due int) int {
+	byTs := make(map[int64]exchange.Candle, len(cs))
+	for _, c := range cs {
+		byTs[c.Ts] = c
+	}
 	p0 := ev.Price0
 	if p0 <= 0 {
-		p0 = cs[0].Open
+		if c, ok := byTs[start]; ok {
+			p0 = c.Open
+		} else {
+			p0 = cs[0].Open // 消息當下還沒開始交易(例如預告上幣)→ 用第一筆成交
+		}
 		ev.Price0 = p0
 	}
 	if p0 <= 0 {
-		return
+		return ev.Stage
 	}
 	ret := func(px float64) *float64 {
 		v := math.Round((px-p0)/p0*100*100) / 100 // 四捨五入到 0.01%(round2 是無條件捨去)
 		return &v
 	}
-	at := func(min int) *float64 {
-		if len(cs) < min {
-			return nil
+	slots := []**float64{&ev.R1m, &ev.R5m, &ev.R15m, &ev.R1h, &ev.R4h}
+	done := 0
+	for i := 0; i < due; i++ {
+		c, ok := byTs[start+int64(naHorizons[i].Min-1)*60_000]
+		if !ok {
+			break
 		}
-		return ret(cs[min-1].Close)
+		*slots[i] = ret(c.Close)
+		done = i + 1
 	}
-	ev.R1m, ev.R5m, ev.R15m, ev.R1h = at(1), at(5), at(15), at(60)
-	if ev.Filled >= 2 {
-		ev.R4h = at(240)
+	if done >= 4 { // 60 分鐘內最大漲 / 跌
+		hi, lo := 0.0, 0.0
+		for _, c := range cs {
+			if c.Ts < start || c.Ts >= start+60*60_000 {
+				continue
+			}
+			if hi == 0 || c.High > hi {
+				hi = c.High
+			}
+			if lo == 0 || c.Low < lo {
+				lo = c.Low
+			}
+		}
+		if hi > 0 {
+			ev.Up60, ev.Dn60 = ret(hi), ret(lo)
+		}
 	}
-	hi, lo := cs[0].High, cs[0].Low
-	for i := 0; i < len(cs) && i < 60; i++ {
-		hi, lo = math.Max(hi, cs[i].High), math.Min(lo, cs[i].Low)
-	}
-	ev.Up60, ev.Dn60 = ret(hi), ret(lo)
+	return max(done, ev.Stage)
 }
 
 // ── 統計(步驟 7:哪類消息、哪個來源有穩定方向)──
@@ -263,7 +347,7 @@ func computeNewsStats(evs []NewsEvent, since int64) NewsStats {
 	for i := range evs {
 		ev := &evs[i]
 		out.Total++
-		if ev.Filled > 0 {
+		if ev.Stage > 0 {
 			out.Filled++
 		}
 		if cats[ev.Category] == nil {
@@ -496,8 +580,9 @@ func (db *DB) updateNewsReact(ev *NewsEvent) {
 	if db.sql == nil {
 		return
 	}
-	db.sql.Exec(`UPDATE news_events SET price0=?, r1m=?, r5m=?, r15m=?, r1h=?, r4h=?, up60=?, dn60=?, filled=? WHERE id=?`,
-		ev.Price0, nullF(ev.R1m), nullF(ev.R5m), nullF(ev.R15m), nullF(ev.R1h), nullF(ev.R4h), nullF(ev.Up60), nullF(ev.Dn60), ev.Filled, ev.ID)
+	db.sql.Exec(`UPDATE news_events SET price0=?, r1m=?, r5m=?, r15m=?, r1h=?, r4h=?, up60=?, dn60=?, filled=?, stage=?, nopx=? WHERE id=?`,
+		ev.Price0, nullF(ev.R1m), nullF(ev.R5m), nullF(ev.R15m), nullF(ev.R1h), nullF(ev.R4h), nullF(ev.Up60), nullF(ev.Dn60),
+		ev.Filled, ev.Stage, ev.NoPx, ev.ID)
 }
 
 func (db *DB) hasNewsEvent(id string) bool {
@@ -535,7 +620,7 @@ func nullF(p *float64) any {
 	return *p
 }
 
-const naCols = `id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,ai_dir,ai_strength,ai_reason,price0,r1m,r5m,r15m,r1h,r4h,up60,dn60,filled,traded,late`
+const naCols = `id,ts,pub,source,category,coin,coins,title,title_zh,url,dir,strength,tradable,value,ai_dir,ai_strength,ai_reason,price0,r1m,r5m,r15m,r1h,r4h,up60,dn60,filled,traded,late,stage,nopx`
 
 func scanNewsEvent(rows *sql.Rows) (NewsEvent, error) {
 	var ev NewsEvent
@@ -543,7 +628,7 @@ func scanNewsEvent(rows *sql.Rows) (NewsEvent, error) {
 	var r1m, r5m, r15m, r1h, r4h, up, dn sql.NullFloat64
 	err := rows.Scan(&ev.ID, &ev.Ts, &ev.Pub, &ev.Source, &ev.Category, &ev.Coin, &coins, &title, &zh, &url, &ev.Dir,
 		&ev.Strength, &ev.Tradable, &ev.Value, &ev.AIDir, &ev.AIStrength, &ev.AIReason, &ev.Price0,
-		&r1m, &r5m, &r15m, &r1h, &r4h, &up, &dn, &ev.Filled, &ev.Traded, &ev.Late)
+		&r1m, &r5m, &r15m, &r1h, &r4h, &up, &dn, &ev.Filled, &ev.Traded, &ev.Late, &ev.Stage, &ev.NoPx)
 	if err != nil {
 		return ev, err
 	}
@@ -602,15 +687,21 @@ func (db *DB) loadNewsEvents(since int64, source, category, coin string, limit i
 	return out
 }
 
-// newsReactTodo:需要回填的事件(1h 階段 / 4h 階段),最舊的先。只看最近 naReactDays 天。
-func (db *DB) newsReactTodo(cut1, cut2 int64, limit int) []NewsEvent {
+// newsReactTodo:有時間點到期、還沒補的事件(最近 naReactDays 天)。完成度低的先(剛出的消息 1m 優先)。
+func (db *DB) newsReactTodo(now int64, limit int) []NewsEvent {
 	out := []NewsEvent{}
 	if db.sql == nil {
 		return out
 	}
-	rows, err := db.sql.Query(`SELECT `+naCols+` FROM news_events WHERE coin <> '' AND ts > ? AND
-		((filled = 0 AND ts < ?) OR (filled = 1 AND ts < ?)) ORDER BY ts ASC LIMIT ?`,
-		time.Now().UnixMilli()-naReactDays*86400_000, cut1, cut2, limit)
+	cond := make([]string, 0, len(naHorizons))
+	args := []any{now - naReactDays*86400_000}
+	for i, h := range naHorizons {
+		cond = append(cond, fmt.Sprintf("(stage = %d AND ts <= ?)", i))
+		args = append(args, now-int64(h.Min+1)*60_000)
+	}
+	args = append(args, limit)
+	rows, err := db.sql.Query(`SELECT `+naCols+` FROM news_events WHERE coin <> '' AND ts > ? AND stage < 5 AND (`+
+		strings.Join(cond, " OR ")+`) ORDER BY stage ASC, ts ASC LIMIT ?`, args...)
 	if err != nil {
 		return out
 	}

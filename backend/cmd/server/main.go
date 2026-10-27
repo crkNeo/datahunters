@@ -197,7 +197,7 @@ func main() {
 	}()
 
 	// 消息雷達(資訊落差):各來源依自己的間隔輪詢(幣安公告 20 秒、Telegram 60 秒、GitHub 30 分…),
-	// 由 NewsAlphaTick 每 5 秒檢查誰到期;價格反應每 2 分鐘回填;模擬單每 15 秒檢查止盈 / 止損 / 逾時。
+	// 由 NewsAlphaTick 每 5 秒檢查誰到期;價格反應每 30 秒回填到期的時間點;模擬單每 15 秒檢查止盈 / 止損 / 逾時。
 	go func() {
 		time.Sleep(20 * time.Second) // 等行情 / 解鎖 / 日曆先載入
 		ticker := time.NewTicker(5 * time.Second)
@@ -206,7 +206,7 @@ func main() {
 		}
 	}()
 	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(30 * time.Second) // 各時間點一到就補(1m 約 1~2 分鐘後出現)
 		for range ticker.C {
 			store.NewsAlphaReactTick()
 		}

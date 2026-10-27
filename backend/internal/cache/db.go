@@ -45,8 +45,10 @@ CREATE TABLE IF NOT EXISTS news_events (
   filled      TINYINT NOT NULL DEFAULT 0,
   traded      TINYINT NOT NULL DEFAULT 0,
   late        TINYINT NOT NULL DEFAULT 0,
+  stage       TINYINT NOT NULL DEFAULT 0,
+  nopx        TINYINT NOT NULL DEFAULT 0,
   KEY idx_ne_ts (ts),
-  KEY idx_ne_fill (filled, ts),
+  KEY idx_ne_fill (stage, ts),
   KEY idx_ne_cat (category, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -293,6 +295,21 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='news_events' AND COLUMN_NAME='late'`).Scan(&hasLate)
 	if hasLate == 0 {
 		d.Exec(`ALTER TABLE news_events ADD COLUMN late TINYINT NOT NULL DEFAULT 0`)
+	}
+	// 消息雷達:逐時間點回填(stage)與「幣安沒有這個幣」(nopx)。第一次加欄位時由舊的 filled 換算,
+	// 並把「標成已回填、卻一個價格都沒有」的紀錄(舊版幣價表空著時誤判)重設成 0,讓它重新補。
+	var hasStage int
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='news_events' AND COLUMN_NAME='stage'`).Scan(&hasStage)
+	if hasStage == 0 {
+		if _, err := d.Exec(`ALTER TABLE news_events ADD COLUMN stage TINYINT NOT NULL DEFAULT 0`); err == nil {
+			d.Exec(`UPDATE news_events SET stage = CASE WHEN filled >= 2 THEN 5 WHEN filled = 1 THEN 4 ELSE 0 END`)
+			d.Exec(`UPDATE news_events SET stage = 0, filled = 0 WHERE coin <> '' AND filled > 0 AND r1m IS NULL AND r5m IS NULL AND r15m IS NULL AND r1h IS NULL`)
+		}
+	}
+	var hasNoPx int
+	d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='news_events' AND COLUMN_NAME='nopx'`).Scan(&hasNoPx)
+	if hasNoPx == 0 {
+		d.Exec(`ALTER TABLE news_events ADD COLUMN nopx TINYINT NOT NULL DEFAULT 0`)
 	}
 	// 推薦系統 columns on pre-existing users tables. Idempotent.
 	for col, ddl := range map[string]string{

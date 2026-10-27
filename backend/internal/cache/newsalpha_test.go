@@ -66,14 +66,17 @@ func TestNAEventID(t *testing.T) {
 }
 
 func TestFillNAReact(t *testing.T) {
+	const start = int64(1_700_000_040_000) // 整分鐘
 	cs := make([]exchange.Candle, 240)
 	for i := range cs {
 		p := 100 + float64(i)*0.1 // 每分鐘 +0.1
-		cs[i] = exchange.Candle{Open: p, Close: p + 0.1, High: p + 0.5, Low: p - 0.5}
+		cs[i] = exchange.Candle{Ts: start + int64(i)*60_000, Open: p, Close: p + 0.1, High: p + 0.5, Low: p - 0.5}
 	}
 	cs[10].Low = 90 // 60 分鐘內最深的插針
-	ev := NewsEvent{Price0: 100, Filled: 2}
-	fillNAReact(&ev, cs)
+	ev := NewsEvent{Price0: 100}
+	if got := fillNAReact(&ev, cs, start, 5); got != 5 {
+		t.Fatalf("stage = %d, want 5", got)
+	}
 	chk := func(name string, got *float64, want float64) {
 		t.Helper()
 		if got == nil || *got != want {
@@ -91,20 +94,47 @@ func TestFillNAReact(t *testing.T) {
 	chk("dn60", ev.Dn60, -10)
 	chk("up60", ev.Up60, 6.4) // cs[59].High = 105.9+0.5
 
-	// 只到 1h 階段:不填 4h;K 線不夠 15 根就不填 15m 以後
-	ev2 := NewsEvent{Filled: 1}
-	fillNAReact(&ev2, cs[:10])
-	if ev2.Price0 != 100 || ev2.R5m == nil || ev2.R15m != nil || ev2.R4h != nil {
-		t.Errorf("partial fill wrong: %+v", ev2)
+	// 只到期 2 個時間點:補 1m / 5m,不碰後面的、也不算 60 分鐘高低
+	ev2 := NewsEvent{}
+	if got := fillNAReact(&ev2, cs[:10], start, 2); got != 2 || ev2.Price0 != 100 || ev2.R5m == nil || ev2.R15m != nil || ev2.Up60 != nil {
+		t.Errorf("partial fill wrong: stage=%d %+v", got, ev2)
+	}
+	// K 線缺了第 5 分鐘那根:停在 1m,等下一輪
+	gap := append(append([]exchange.Candle{}, cs[:4]...), cs[5:20]...)
+	ev3 := NewsEvent{}
+	if got := fillNAReact(&ev3, gap, start, 3); got != 1 || ev3.R1m == nil || ev3.R5m != nil {
+		t.Errorf("gap fill wrong: stage=%d %+v", got, ev3)
 	}
 }
+
+func TestNADueStage(t *testing.T) {
+	ts := int64(1_700_000_000_000)
+	for _, c := range []struct {
+		after time.Duration
+		want  int
+	}{{30 * time.Second, 0}, {2 * time.Minute, 1}, {6 * time.Minute, 2}, {16 * time.Minute, 3}, {61 * time.Minute, 4}, {241 * time.Minute, 5}} {
+		if got := naDueStage(ts, ts+c.after.Milliseconds()); got != c.want {
+			t.Errorf("after %v: stage %d, want %d", c.after, got, c.want)
+		}
+	}
+	if naLegacyFilled(3) != 0 || naLegacyFilled(4) != 1 || naLegacyFilled(5) != 2 {
+		t.Error("legacy filled mapping wrong")
+	}
+	if !naInvalidSymbol(errString(`status 400: {"code":-1121,"msg":"Invalid symbol."}`)) || naInvalidSymbol(errString("status 429: too many")) {
+		t.Error("invalid symbol detection wrong")
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
 
 func TestComputeNewsStats(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	evs := []NewsEvent{
-		{Source: "binance", Category: "listing", Coin: "A", Dir: "long", R1h: f(5), Up60: f(8), Dn60: f(-1), AIDir: "long", Filled: 1},
-		{Source: "binance", Category: "listing", Coin: "B", Dir: "long", R1h: f(-1), Up60: f(2), Dn60: f(-3), AIDir: "short", Filled: 1},
-		{Source: "binance", Category: "delist", Coin: "C", Dir: "short", R1h: f(-4), Filled: 1},
+		{Source: "binance", Category: "listing", Coin: "A", Dir: "long", R1h: f(5), Up60: f(8), Dn60: f(-1), AIDir: "long", Stage: 4},
+		{Source: "binance", Category: "listing", Coin: "B", Dir: "long", R1h: f(-1), Up60: f(2), Dn60: f(-3), AIDir: "short", Stage: 4},
+		{Source: "binance", Category: "delist", Coin: "C", Dir: "short", R1h: f(-4), Stage: 4},
 		{Source: "rss", Category: "other"},
 	}
 	st := computeNewsStats(evs, 0)

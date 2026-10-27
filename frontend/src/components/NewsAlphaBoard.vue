@@ -31,6 +31,9 @@ const SRC = {
 }
 const srcName = (s) => SRC[s] || (s && s.startsWith('tg:') ? 'TG ' + s.slice(3) : s)
 const HZ = ['1m', '5m', '15m', '1h', '4h']
+const RKEYS = ['r1m', 'r5m', 'r15m', 'r1h', 'r4h']
+// 這個時間點還沒補(時間未到,或抓 K 線失敗正在重試):顯示「待」;已處理過但沒資料才顯示「—」
+const pending = (e, i) => e.coin && (e.stage || 0) <= i && (e.stage || 0) < 5 && Date.now() - e.ts < 7 * 86400e3
 
 const tab = ref('feed')
 const TABS = [['feed', '消息流'], ['stats', '統計'], ['book', '模擬單'], ['lead', '領先指標'], ['sources', '來源狀態']]
@@ -258,19 +261,26 @@ function fmtUsd(v) {
                   <span v-if="e.ai_reason" class="tsmall">{{ e.ai_reason }}</span>
                 </div>
               </td>
-              <td class="r na-num" :class="rcls(e.r1m)">{{ rv(e.r1m) }}</td>
-              <td class="r na-num" :class="rcls(e.r5m)">{{ rv(e.r5m) }}</td>
-              <td class="r na-num" :class="rcls(e.r15m)">{{ rv(e.r15m) }}</td>
-              <td class="r na-num" :class="rcls(e.r1h)">{{ rv(e.r1h) }}<span v-if="hitOf(e)" class="tsmall"> {{ hitOf(e) }}</span></td>
-              <td class="r na-num" :class="rcls(e.r4h)">{{ rv(e.r4h) }}</td>
-              <td class="r na-num"><span :class="rcls(e.up60)">{{ rv(e.up60) }}</span><div :class="rcls(e.dn60)">{{ rv(e.dn60) }}</div></td>
+              <td v-if="e.nopx" colspan="6" class="r tsmall">幣安沒有這個幣的行情,記不到價格反應</td>
+              <template v-else>
+                <td v-for="(k, i) in RKEYS" :key="k" class="r na-num" :class="rcls(e[k])">
+                  <template v-if="e[k] !== null && e[k] !== undefined">{{ rv(e[k]) }}<span v-if="k === 'r1h' && hitOf(e)" class="tsmall"> {{ hitOf(e) }}</span></template>
+                  <span v-else-if="pending(e, i)" class="tsmall" title="還沒補:時間未到(到點後約 1 分鐘內補上),或抓價格失敗、稍後自動重試">待</span>
+                  <span v-else class="tsmall">—</span>
+                </td>
+                <td class="r na-num">
+                  <template v-if="e.up60 !== null && e.up60 !== undefined"><span :class="rcls(e.up60)">{{ rv(e.up60) }}</span><div :class="rcls(e.dn60)">{{ rv(e.dn60) }}</div></template>
+                  <span v-else-if="pending(e, 3)" class="tsmall">待</span>
+                  <span v-else class="tsmall">—</span>
+                </td>
+              </template>
             </tr>
           </tbody>
         </table>
       </div>
       <PageNav :page="feed.page" :pages="feed.pages" :total="feed.total" @go="(p) => (page = p)" />
       <p v-if="!feed.rows.length && !feedLoading" class="empty">此範圍內沒有消息。剛啟動時各來源的第一輪只建基準,之後新出現的消息才會進來。</p>
-      <p class="loginhint">價格反應在消息出現 1 小時後回填 1m~1h、4 小時後補 4h(用歷史 K 線算,伺服器關機錯過的開機後會自動補上;「停機補記」是關機期間發布、重啟後補進來的公告);「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
+      <p class="loginhint">價格反應在每個時間點到了之後約 1 分鐘內補上(「待」= 時間還沒到;用歷史 K 線算,伺服器關機錯過的開機後會自動補上;「停機補記」是關機期間發布、重啟後補進來的公告;「—」= 那個時間點幣安沒有成交資料);「晚 N 秒 / 分」是來源標示的發布時間到我們看到的差距;1h 欄的 ✓ / ✗ 是照標記方向做有沒有賺。強度 ●● 以上且有幣種的消息會推播「消息雷達」(帳戶設定可關)。</p>
     </template>
 
     <!-- 統計 -->
