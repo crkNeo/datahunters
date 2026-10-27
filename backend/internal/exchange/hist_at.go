@@ -69,3 +69,35 @@ func (c *Client) BinanceFundingAt(symbol string, endMs int64) (FundingPoint, err
 	p := raw[len(raw)-1]
 	return FundingPoint{Ts: p.FundingTime, Rate: atof(p.FundingRate)}, nil
 }
+
+// BinanceSpotKlinesRange 同 BinanceKlinesRange,但走現貨(沒有永續合約的幣,例如韓所新上的幣)。
+func (c *Client) BinanceSpotKlinesRange(symbol, interval string, startMs, endMs int64, limit int) ([]Candle, error) {
+	url := fmt.Sprintf("%s/api/v3/klines?symbol=%s&interval=%s&limit=%d", binanceSpot, symbol, interval, limit)
+	if startMs > 0 {
+		url += fmt.Sprintf("&startTime=%d", startMs)
+	}
+	if endMs > 0 {
+		url += fmt.Sprintf("&endTime=%d", endMs)
+	}
+	var raw []binanceKline
+	if err := c.get(url, &raw); err != nil {
+		return nil, err
+	}
+	return parseKlines(raw), nil
+}
+
+// BinanceSpotAllPrices 回傳所有現貨交易對的最新價(/api/v3/ticker/price,權重 4)。
+func (c *Client) BinanceSpotAllPrices() (map[string]float64, error) {
+	var raw []struct {
+		Symbol string `json:"symbol"`
+		Price  string `json:"price"`
+	}
+	if err := c.get(binanceSpot+"/api/v3/ticker/price", &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(raw))
+	for _, r := range raw {
+		out[r.Symbol] = atof(r.Price)
+	}
+	return out, nil
+}

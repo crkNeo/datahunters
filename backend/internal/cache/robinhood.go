@@ -36,6 +36,9 @@ func (s *Store) RobinhoodTick() {
 	fresh, all, err := s.rhW.Poll()
 	if err != nil {
 		s.apiFail("Robinhood 上架", err.Error())
+		if s.news != nil {
+			s.naMark("robinhood", time.Now(), 0, err)
+		}
 		return
 	}
 	s.apiOK("Robinhood 上架")
@@ -72,7 +75,8 @@ func (s *Store) RobinhoodTick() {
 	s.rhTime = now
 	s.rhMu.Unlock()
 
-	for _, c := range fresh { // alert each newly-tradable coin
+	go s.naRobinhoodHook(fresh) // 消息雷達:記事件 + 價格反應 + 模擬單
+	for _, c := range fresh {   // alert each newly-tradable coin
 		s.PushSendTopic("msg:robinhood", "🤖 Robinhood 上架", c.Code+" 已可交易", "/?tab=robinhood")
 		if s.notifier.Enabled() {
 			go s.notifier.Send(fmt.Sprintf("🤖 <b>[Robinhood 上架]</b> %s(%s)\n已可在 Robinhood 交易 · %s", c.Code, c.Name, c.Symbol))

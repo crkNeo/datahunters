@@ -1122,6 +1122,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV15Book.mu.Lock()
 		s.pulsarV15Book.trades = keepIf(s.pulsarV15Book.trades, closedOnly)
 		s.pulsarV15Book.mu.Unlock()
+	case "newsalpha":
+		s.newsBook.mu.Lock()
+		s.newsBook.trades = keepIf(s.newsBook.trades, closedOnly)
+		s.newsBook.mu.Unlock()
 	case "conv":
 		s.convMu.Lock()
 		s.convTrades = keepIf(s.convTrades, closedOnly)

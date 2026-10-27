@@ -196,6 +196,28 @@ func main() {
 		}
 	}()
 
+	// 消息雷達(資訊落差):各來源依自己的間隔輪詢(幣安公告 20 秒、Telegram 60 秒、GitHub 30 分…),
+	// 由 NewsAlphaTick 每 5 秒檢查誰到期;價格反應每 2 分鐘回填;模擬單每 15 秒檢查止盈 / 止損 / 逾時。
+	go func() {
+		time.Sleep(20 * time.Second) // 等行情 / 解鎖 / 日曆先載入
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			store.NewsAlphaTick()
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		for range ticker.C {
+			store.NewsAlphaReactTick()
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		for range ticker.C {
+			store.NewsAlphaBookTick()
+		}
+	}()
+
 	// 多週期支壓 monitor (純提示,1H + 4H):同樣跑在記憶體 WS klines(4h 由 1h 聚合),
 	// 每根 1h/4h 收盤檢查破位並推播。零 REST;首次 tick 只建基準。
 	go func() {

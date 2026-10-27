@@ -185,6 +185,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/sr", s.gateTab("sr", s.handleSR))                            // 支撐壓力監控
 	mux.HandleFunc("/api/ema200", s.gateTab("ema200", s.handleEMA200))                // EMA200 穿越監控(4H)
 	mux.HandleFunc("/api/ema200-history", s.gateTab("ema200", s.handleEMA200History)) // EMA200 穿越紀錄(DB 分頁)
+	// 消息雷達(資訊落差):總覽 / 事件分頁 / 價格反應統計 / 模擬單
+	mux.HandleFunc("/api/newsalpha", s.gateTab("newsalpha", s.handleNewsAlpha))
+	mux.HandleFunc("/api/newsalpha-events", s.gateTab("newsalpha", s.handleNewsAlphaEvents))
+	mux.HandleFunc("/api/newsalpha-stats", s.gateTab("newsalpha", s.handleNewsAlphaStats))
+	mux.HandleFunc("/api/newsalpha-book", s.gateTab("newsalpha", s.handleNewsAlphaBook))
 
 	// 推薦系統
 	mux.HandleFunc("/api/referral", s.gate(M, s.handleReferral))                      // 我的推廣(帳號遮罩)
@@ -1047,6 +1052,28 @@ func (s *Server) handleEMA200(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEMA200History(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	writeJSON(w, s.store.EMA200History(atoi64(q.Get("win")), atoi(q.Get("page")), atoi(q.Get("size"))))
+}
+
+// handleNewsAlpha serves the 消息雷達 overview (source health, Korean premium, Polymarket movers).
+func (s *Server) handleNewsAlpha(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.NewsAlpha())
+}
+
+// handleNewsAlphaEvents serves one page of tagged news events (filters: source / category / coin).
+func (s *Server) handleNewsAlphaEvents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	writeJSON(w, s.store.NewsAlphaEvents(atoi64(q.Get("win")), atoi(q.Get("page")), atoi(q.Get("size")),
+		q.Get("source"), q.Get("category"), q.Get("coin")))
+}
+
+// handleNewsAlphaStats serves the price-reaction statistics by category / source.
+func (s *Server) handleNewsAlphaStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.NewsAlphaStats(atoi64(r.URL.Query().Get("win"))))
+}
+
+// handleNewsAlphaBook serves the 消息雷達 paper book (observe-only).
+func (s *Server) handleNewsAlphaBook(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.NewsAlphaBookState())
 }
 
 // handleSR serves the VIP 支撐壓力 monitor: mainstream coins' current support &

@@ -152,6 +152,11 @@ func (s *Store) GdeltTick() {
 			}
 			s.PushSendTopic("msg:news", it.Label, it.Title, "/?tab=news")
 		}
+		zh := make([]string, len(items)) // 消息雷達:新文章也進事件表(標題已翻好的直接用)
+		for i, it := range items {
+			zh[i] = it.Title
+		}
+		go s.naRSSHook(fresh, zh)
 	}
 }
 

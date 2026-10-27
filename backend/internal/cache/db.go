@@ -16,6 +16,39 @@ import (
 // does not run multi-statement Exec unless multiStatements=true). VARCHAR(191)
 // is used for indexed/PK string columns so they fit the utf8mb4 index limit.
 const Schema = `
+CREATE TABLE IF NOT EXISTS news_events (
+  id          VARCHAR(191) NOT NULL PRIMARY KEY,
+  ts          BIGINT NOT NULL,
+  pub         BIGINT NOT NULL DEFAULT 0,
+  source      VARCHAR(64) NOT NULL,
+  category    VARCHAR(32) NOT NULL,
+  coin        VARCHAR(32) NOT NULL DEFAULT '',
+  coins       VARCHAR(255) NOT NULL DEFAULT '',
+  title       TEXT,
+  title_zh    TEXT,
+  url         VARCHAR(1024),
+  dir         VARCHAR(8) NOT NULL DEFAULT '',
+  strength    TINYINT NOT NULL DEFAULT 0,
+  tradable    TINYINT NOT NULL DEFAULT 0,
+  value       DOUBLE NOT NULL DEFAULT 0,
+  ai_dir      VARCHAR(8) NOT NULL DEFAULT '',
+  ai_strength TINYINT NOT NULL DEFAULT 0,
+  ai_reason   VARCHAR(255) NOT NULL DEFAULT '',
+  price0      DOUBLE NOT NULL DEFAULT 0,
+  r1m         DOUBLE NULL,
+  r5m         DOUBLE NULL,
+  r15m        DOUBLE NULL,
+  r1h         DOUBLE NULL,
+  r4h         DOUBLE NULL,
+  up60        DOUBLE NULL,
+  dn60        DOUBLE NULL,
+  filled      TINYINT NOT NULL DEFAULT 0,
+  traded      TINYINT NOT NULL DEFAULT 0,
+  KEY idx_ne_ts (ts),
+  KEY idx_ne_fill (filled, ts),
+  KEY idx_ne_cat (category, ts)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS ema200_events (
   ts    BIGINT NOT NULL,
   coin  VARCHAR(32) NOT NULL,

@@ -223,6 +223,9 @@ type Store struct {
 	pushMgr *push.Manager // Web Push (VAPID) sender
 
 	trader *bitunixTrader // optional: mirror strategy opens to a real Bitunix account (admin, Phase 1)
+
+	news     *newsAlpha // 消息雷達:公告 / 鏈上 / Telegram / 治理 / 溢價…事件 + 價格反應(newsalpha*.go)
+	newsBook *microBook // 消息雷達模擬單(觀察書,不實單)(newsalpha_book.go)
 }
 
 func NewStore(coins []string) *Store {
@@ -295,6 +298,8 @@ func NewStore(coins []string) *Store {
 	// 脈衝星v12:盤中書。進場由 microIntraTick 每分鐘用形成中的 K 評估;signal 保留 v3 只給收盤管理流程佔位(不會用來進場)。
 	s.pulsarV12Book = &microBook{name: "pulsarv12", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, intraSignal: surgeV12Signal, tagEntry: true}
 	s.pulsarV15Book = s.newPulsarV15Book()
+	s.newsBook = newNewsAlphaBook()
+	s.initNewsAlpha()
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
@@ -327,6 +332,11 @@ func NewStore(coins []string) *Store {
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV12Book.trades = db.loadTrades("pulsarv12")
 		s.pulsarV15Book.trades = db.loadTrades("pulsarv15")
+		s.newsBook.trades = db.loadTrades("newsalpha")
+		s.news.events = db.loadRecentNews(naKeepEvents)
+		for _, ev := range s.news.events { // 重啟前的事件不再花 AI 額度
+			s.news.aiTried[ev.ID] = true
+		}
 		for _, b := range s.smcBooks {
 			b.trades = db.loadTrades(b.name)
 		}
@@ -639,8 +649,20 @@ func (s *Store) UpbitTick() {
 	}
 	fresh, all, err := s.upbitW.Poll()
 	if err != nil {
+		if s.news != nil {
+			s.naMark("upbit", time.Now(), 0, err)
+		}
 		return
 	}
+	defer func() { // 消息雷達:所有新公告(含非上架)都進事件表,中文標題沿用下面翻好的
+		s.upbitMu.RLock()
+		zh := make(map[int]string, len(fresh))
+		for _, n := range fresh {
+			zh[n.ID] = s.upbitTrans[n.ID]
+		}
+		s.upbitMu.RUnlock()
+		go s.naUpbitHook(fresh, zh)
+	}()
 	// push newly posted notices (Telegram + Web Push); seeding tick has none.
 	for _, n := range fresh {
 		if s.upbitListingsOnly && !n.IsListing() {
