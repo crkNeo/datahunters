@@ -196,6 +196,15 @@ func main() {
 		}
 	}()
 
+	// 脈衝星v12:每張單進場後 1H / 2H / 4H / 8H 的價格回填(每分鐘補到期的,含舊單)。
+	go func() {
+		time.Sleep(60 * time.Second)
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.AfterPriceTick()
+		}
+	}()
+
 	// 消息雷達(資訊落差):各來源依自己的間隔輪詢(幣安公告 20 秒、Telegram 60 秒、GitHub 30 分…),
 	// 由 NewsAlphaTick 每 5 秒檢查誰到期;價格反應每 30 秒回填到期的時間點;模擬單每 15 秒檢查止盈 / 止損 / 逾時。
 	go func() {

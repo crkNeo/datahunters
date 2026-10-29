@@ -74,6 +74,11 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
+// 脈衝星v12 專屬:進場後 1H/2H/4H/8H 的價格相對進場價漲跌%(後端 afterprice.go 回填)。
+const hasAfter = computed(() => props.book === 'pulsarv12')
+const AFTER = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8]]
+// 還沒到時間(或剛到、下一分鐘才補)→「待」;到了卻沒有值 → 「—」
+const afterWait = (t, h) => Date.now() < Date.parse(t.open_time) + h * 3600e3 + 3 * 60e3
 const aiCls = (s) => (s >= 70 ? 'hi' : s >= 40 ? 'mid' : 'lo')
 // AI 信心浮框:掛在 .tblwrap(overflow:auto)裡的 absolute 浮框會撐大滾動區、又被裁掉。
 // 改成單一浮框 Teleport 到 body + fixed 定位到 chip 下方,才能真的浮在策略上、不影響表格滾動。
@@ -144,7 +149,7 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -163,6 +168,9 @@ function tpStatusCls(t) {
             <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
           <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+          <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
+            <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
+          </td>
           <td class="r short">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
@@ -177,7 +185,7 @@ function tpStatusCls(t) {
 
     <h3 class="psub" v-if="hist.total">本月已結束 ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in hist.rows" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -190,6 +198,9 @@ function tpStatusCls(t) {
             <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
           <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+          <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
+            <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
+          </td>
           <td class="r tsmall">{{ fmtClock(t.close_time) }}</td>
         </tr>
       </tbody>

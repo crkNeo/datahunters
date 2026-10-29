@@ -104,6 +104,13 @@ type PaperTrade struct {
 	BarATR   float64 `json:"bar_atr,omitempty"`  // 進場那根全距 / ATR
 	SpikeX   float64 `json:"spike_x,omitempty"`  // 近 6 根最大量 / 截尾基線
 	BTC15m   float64 `json:"btc_15m,omitempty"`  // BTC 對上一根 15m 收盤的漲跌%
+
+	// 進場後 1H / 2H / 4H / 8H 的價格相對進場價的漲跌%(脈衝星v12 回填,見 afterprice.go)。
+	// 跟出場無關,看的是「如果一直抱著」那個時間點的價位。nil = 還沒到時間 / 還沒補。
+	After1h *float64 `json:"after_1h,omitempty"`
+	After2h *float64 `json:"after_2h,omitempty"`
+	After4h *float64 `json:"after_4h,omitempty"`
+	After8h *float64 `json:"after_8h,omitempty"`
 }
 
 // PaperStats summarises closed trades.
