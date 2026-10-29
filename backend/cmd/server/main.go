@@ -196,6 +196,13 @@ func main() {
 		}
 	}()
 
+	// 脈衝星舊單補欄位(啟動時跑一次,補完就結束):健康度因子(1h CVD / 24h 漲幅 / 散戶多空比)與
+	// EMA200 / BTC EMA200。只補缺的、只用進場前的資料;等 3 分鐘讓行情與 EMA200 監控先跑起來。
+	go func() {
+		time.Sleep(3 * time.Minute)
+		store.BackfillPulsarTags()
+	}()
+
 	// 脈衝星v12 / v16:每張單進場後 1H / 2H / 4H / 8H 的價格回填(每分鐘補到期的,含舊單)。
 	go func() {
 		time.Sleep(60 * time.Second)

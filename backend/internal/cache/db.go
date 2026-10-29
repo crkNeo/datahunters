@@ -292,6 +292,8 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"ema200_dist": "ADD COLUMN ema200_dist DOUBLE NOT NULL DEFAULT 0",
 		"btc_ema200":  "ADD COLUMN btc_ema200 DOUBLE NOT NULL DEFAULT 0",
 		"breadth":     "ADD COLUMN breadth DOUBLE NOT NULL DEFAULT 0",
+		// 啟動時舊單補欄位(histtag.go)處理過 = 1,下次啟動不再重抓
+		"hist_tagged": "ADD COLUMN hist_tagged TINYINT NOT NULL DEFAULT 0",
 	} {
 		var has int
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)

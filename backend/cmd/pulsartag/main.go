@@ -292,26 +292,7 @@ func (t *tagger) surgeX(sym string, minuteEnd int64) float64 {
 
 // partialBar 把 [barStart, 進場) 的 1m K 拼成一根 15m 部分 K(開=第一根開、收=最後一根收)。
 func partialBar(ms []exchange.Candle, barStart int64) (exchange.Candle, bool) {
-	p := exchange.Candle{Ts: barStart}
-	n := 0
-	for _, m := range ms {
-		if m.Ts < barStart || m.Ts >= barStart+barMs {
-			continue
-		}
-		if n == 0 {
-			p.Open, p.High, p.Low = m.Open, m.High, m.Low
-		}
-		p.High = math.Max(p.High, m.High)
-		p.Low = math.Min(p.Low, m.Low)
-		p.Close = m.Close
-		p.Volume += m.Volume
-		p.TakerBuy += m.TakerBuy
-		p.QuoteVol += m.QuoteVol
-		p.TakerBuyQuote += m.TakerBuyQuote
-		p.Trades += m.Trades
-		n++
-	}
-	return p, n > 0
+	return cache.PartialBar15m(ms, barStart) // 與伺服器啟動補欄位(cache/histtag.go)共用
 }
 
 // riskPct = 初始風險% = |TP1 − 進場| / 進場 × 100(脈衝星的 TP1 固定在 1R)。沒有 TP1 回 0。
