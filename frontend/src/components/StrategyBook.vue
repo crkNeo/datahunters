@@ -79,6 +79,13 @@ const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'pu
 // 脈衝星v12 / v16:進場健康度燈號(後端 pulsarv16.go 依進場因子算)
 const hasHealth = computed(() => props.book === 'pulsarv12' || props.book === 'pulsarv16')
 const HEALTH = { green: ['🟢', '健康'], yellow: ['🟡', '謹慎'], red: ['🔴', '不健康'] }
+// EMA200 / 大盤環境(進場當下,後端 regime.go):幣離自己 4H EMA200 的 %、BTC 離 EMA200 的 %、全市場在 EMA200 之上的比例
+const hasRegime = (t) => !!(t.ema200_dist || t.btc_ema200 || t.breadth)
+const sgn = (v) => (v > 0 ? '+' : '') + v.toFixed(1) + '%'
+const regimeTip = (t) => !hasRegime(t) ? '這筆沒有 EMA200 資料(功能上線前的單)'
+  : `這個幣:進場價${t.ema200_dist >= 0 ? '在' : '低於'} 4H EMA200 ${t.ema200_dist >= 0 ? '之上 ' : ''}${sgn(t.ema200_dist || 0)}\n` +
+    `BTC:4H 收盤${(t.btc_ema200 || 0) >= 0 ? '站上' : '跌破'} EMA200(${sgn(t.btc_ema200 || 0)})\n` +
+    (t.breadth ? `全市場:成交額前 200 幣有 ${t.breadth.toFixed(0)}% 在 4H EMA200 之上` : '全市場:沒有資料')
 const healthTip = (t) => !t.health ? '這筆沒有進場因子資料' : HEALTH[t.health][1] + '|' + (t.health_flags && t.health_flags.length ? '紅旗:' + t.health_flags.join('、') : '沒有紅旗')
 const AFTER = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8]]
 // 還沒到時間(或剛到、下一分鐘才補)→「待」;到了卻沒有值 → 「—」
@@ -153,13 +160,20 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
           <td v-if="hasHealth" class="health" :title="healthTip(t)"><template v-if="t.health">{{ HEALTH[t.health][0] }}</template><span v-else class="tsmall">—</span></td>
+          <td v-if="hasHealth" class="regime" :title="regimeTip(t)">
+            <template v-if="hasRegime(t)">
+              <span :class="t.ema200_dist >= 0 ? 'long' : 'short'">幣 {{ sgn(t.ema200_dist || 0) }}</span>
+              <small>BTC <b :class="(t.btc_ema200 || 0) >= 0 ? 'long' : 'short'">{{ (t.btc_ema200 || 0) >= 0 ? '▲' : '▼' }}{{ sgn(Math.abs(t.btc_ema200 || 0)).replace('+', '') }}</b><template v-if="t.breadth"> · 廣度 {{ t.breadth.toFixed(0) }}%</template></small>
+            </template>
+            <span v-else class="tsmall">—</span>
+          </td>
           <td v-if="hasAI">
             <span v-if="t.ai_score" class="aichip" :class="aiCls(t.ai_score)" tabindex="0" @click.stop
               @mouseenter="showAiPop($event, t)" @mouseleave="hideAiPop" @focus="showAiPop($event, t)" @blur="hideAiPop">
@@ -190,13 +204,20 @@ function tpStatusCls(t) {
 
     <h3 class="psub" v-if="hist.total">本月已結束 ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in hist.rows" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
           <td v-if="hasTf"><span class="tfbadge">{{ tfLabel(t.tf) }}</span></td>
           <td><span class="dir" :class="t.dir === 'long' ? 'long' : 'short'">{{ t.dir === 'long' ? '做多' : '做空' }}</span></td>
           <td v-if="hasHealth" class="health" :title="healthTip(t)"><template v-if="t.health">{{ HEALTH[t.health][0] }}</template><span v-else class="tsmall">—</span></td>
+          <td v-if="hasHealth" class="regime" :title="regimeTip(t)">
+            <template v-if="hasRegime(t)">
+              <span :class="t.ema200_dist >= 0 ? 'long' : 'short'">幣 {{ sgn(t.ema200_dist || 0) }}</span>
+              <small>BTC <b :class="(t.btc_ema200 || 0) >= 0 ? 'long' : 'short'">{{ (t.btc_ema200 || 0) >= 0 ? '▲' : '▼' }}{{ sgn(Math.abs(t.btc_ema200 || 0)).replace('+', '') }}</b><template v-if="t.breadth"> · 廣度 {{ t.breadth.toFixed(0) }}%</template></small>
+            </template>
+            <span v-else class="tsmall">—</span>
+          </td>
           <td class="r">{{ fmtPrice(t.entry) }}</td>
           <td class="r">{{ t.outcome === 'cancel' ? '—' : fmtPrice(t.cur) }}</td>
           <td><span class="otag" :class="outcomeCls(t.outcome, t.pnl_pct)">{{ outcomeCN(t.outcome, t.pnl_pct) }}</span></td>
@@ -229,6 +250,9 @@ function tpStatusCls(t) {
 
 <style scoped>
 .health { white-space: nowrap; cursor: help; }
+.regime { white-space: nowrap; cursor: help; font-family: var(--f-mono); font-size: 12px; }
+.regime small { display: block; font-size: 10.5px; color: var(--c-mut); margin-top: 2px; }
+.regime small b { font-weight: 600; }
 /* 欄位多(脈衝星v12/v16 加了 1H~8H、健康)時不要把方向 / 幣種 / 表頭擠成兩行,改成表格左右捲 */
 .grid th, .grid .dir, .grid .coin { white-space: nowrap; }
 .pendtag { margin-left: 6px; font-size: 10px; color: var(--c-gold-b); background: var(--c-gold-soft); border-radius: 6px; padding: 1px 5px; white-space: nowrap; font-family: var(--f-mono); }

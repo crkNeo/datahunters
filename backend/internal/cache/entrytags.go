@@ -124,6 +124,7 @@ func (s *Store) tagEntry(b *microBook, tr *PaperTrade, cs []exchange.Candle) {
 	b.mu.Lock()
 	tags.apply(tr)
 	b.mu.Unlock()
+	s.tagRegime(b, tr) // EMA200 / 大盤環境(regime.go)
 }
 
 // btc15mRet 回傳 BTC 現價對上一根 15m 收盤的報酬(小數),快取 30 秒(15m 的指標不能用太舊的值)。

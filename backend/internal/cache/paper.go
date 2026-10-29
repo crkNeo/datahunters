@@ -105,6 +105,11 @@ type PaperTrade struct {
 	SpikeX   float64 `json:"spike_x,omitempty"`  // 近 6 根最大量 / 截尾基線
 	BTC15m   float64 `json:"btc_15m,omitempty"`  // BTC 對上一根 15m 收盤的漲跌%
 
+	// EMA200 / 大盤環境(進場當下,regime.go;0 = 沒資料)
+	Ema200Dist float64 `json:"ema200_dist,omitempty"` // 進場價離這個幣 4H EMA200 的 %
+	BtcEma200  float64 `json:"btc_ema200,omitempty"`  // BTC 4H 收盤離 BTC 4H EMA200 的 %
+	Breadth    float64 `json:"breadth,omitempty"`     // 成交額前 200 幣裡 4H 收在 EMA200 之上的比例 %
+
 	// 進場健康度(脈衝星v12 / v16,serve 時由上面的因子算,不存 DB,見 pulsarv16.go):
 	// green 0~1 個紅旗 / yellow 2 個 / red 3 個以上;HealthFlags = 亮起的紅旗(白話)。
 	Health      string   `json:"health,omitempty"`

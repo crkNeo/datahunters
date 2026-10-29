@@ -596,7 +596,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		"book", "id", "tp1", "tp2", "legs", "max_gain",
 		"oi_1h", "cvd_1h", "long_acct", "chg_24", "surge_x", "btc_1h", "vol_24",
 		"wick_pct", "ema_dist", "bar_atr", "spike_x", "btc_15m",
-		"after_1h", "after_2h", "after_4h", "after_8h"})
+		"after_1h", "after_2h", "after_4h", "after_8h",
+		"ema200_dist", "btc_ema200", "breadth"})
 	// 進場後 1H/2H/4H/8H 的價格漲跌%(只有脈衝星v12 會回填;空白 = 還沒補)
 	pf := func(v *float64) string {
 		if v == nil {
@@ -618,6 +619,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			f(t.OI1h), f(t.CVD1h), f(t.LongAcct), f(t.Chg24), f(t.SurgeX), f(t.BTC1h), f(t.Vol24),
 			f(t.WickPct), f(t.EMADist), f(t.BarATR), f(t.SpikeX), f(t.BTC15m),
 			pf(t.After1h), pf(t.After2h), pf(t.After4h), pf(t.After8h),
+			f(t.Ema200Dist), f(t.BtcEma200), f(t.Breadth),
 		})
 	}
 	cw.Flush()

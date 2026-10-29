@@ -13,6 +13,8 @@
 //	v3_confirm 盤中單才有:那根 15m 收完後,v3 的進場條件是否也成立(1/0)
 //	t_oi12h t_oi1h t_cvd6h t_cvd1h t_funding t_long_acct t_chg24 t_surge_x t_btc1h t_vol24
 //	t_wick_pct t_ema_dist t_bar_atr t_spike_x t_btc15m
+//	t_ema200_dist  進場價離這個幣 4H EMA200 的 %(只用進場前已收的 4H K,與線上 regime.go 同口徑)
+//	t_btc_ema200   BTC 最新已收 4H 收盤離 BTC 4H EMA200 的 %(大盤環境)
 //	tag_err    抓資料失敗的項目(空 = 全部成功)
 //
 // 防偷看未來:所有資料都只取進場時刻之前的。盤中進場那根 15m 用 1m K 拼出「進場前」的部分 K,
@@ -43,7 +45,8 @@ const (
 var newCols = []string{"r_pct", "pnl_r", "intrabar", "v3_confirm",
 	"t_oi12h", "t_oi1h", "t_cvd6h", "t_cvd1h", "t_funding", "t_long_acct",
 	"t_chg24", "t_surge_x", "t_btc1h", "t_vol24",
-	"t_wick_pct", "t_ema_dist", "t_bar_atr", "t_spike_x", "t_btc15m", "tag_err"}
+	"t_wick_pct", "t_ema_dist", "t_bar_atr", "t_spike_x", "t_btc15m",
+	"t_ema200_dist", "t_btc_ema200", "tag_err"}
 
 func main() {
 	out := flag.String("out", "pulsar-tagged.csv", "輸出 CSV 路徑")
@@ -86,7 +89,8 @@ func main() {
 	w := csv.NewWriter(f)
 	w.Write(append(append([]string{}, header...), newCols...))
 
-	t := &tagger{ex: exchange.NewClient(), sleep: *sleep, btcPrevHour: map[int64]float64{}, btcPrev15: map[int64]float64{}}
+	t := &tagger{ex: exchange.NewClient(), sleep: *sleep, btcPrevHour: map[int64]float64{}, btcPrev15: map[int64]float64{},
+		btcEMA200: map[int64]string{}}
 	for i, r := range rows {
 		get := func(k string) string { return r[col[k]] }
 		w.Write(append(append([]string{}, r...), t.tagRow(get)...))
@@ -132,6 +136,7 @@ type tagger struct {
 	sleep       time.Duration
 	btcPrevHour map[int64]float64 // 整點 → 上一個整點 BTC 收盤(同一小時的單共用)
 	btcPrev15   map[int64]float64 // 15m 棒開盤 → 上一根 15m BTC 收盤
+	btcEMA200   map[int64]string  // 4H 棒開盤 → BTC 離 4H EMA200 的 %(同一根 4H 的單共用)
 }
 
 func (t *tagger) pause() { time.Sleep(t.sleep) }
@@ -210,6 +215,29 @@ func (t *tagger) tagRow(get func(string) string) []string {
 	}
 
 	tags := cache.ComputeEntryTags(cs, oi, fr.Rate, ls.LongAccount, btc, btc15, surgeX)
+
+	// EMA200 / 大盤環境:只用進場那根 4H 之前已收的 4H K
+	bar4 := entryMs - entryMs%(4*hourMs)
+	e200 := ""
+	if cs4, err := t.ex.BinanceKlinesRange(sym, "4h", 0, bar4-1, 260); err == nil {
+		if d, ok := cache.EMA200Dist(cs4, entry); ok {
+			e200 = ff(d)
+		}
+	}
+	t.pause()
+	if e200 == "" {
+		errs = append(errs, "EMA200(K線不足?)")
+	}
+	btcE, ok := t.btcEMA200[bar4]
+	if !ok {
+		if cs4, err := t.ex.BinanceKlinesRange("BTCUSDT", "4h", 0, bar4-1, 260); err == nil && len(cs4) > 0 {
+			if d, ok := cache.EMA200Dist(cs4, cs4[len(cs4)-1].Close); ok {
+				btcE = ff(d)
+			}
+		}
+		t.pause()
+		t.btcEMA200[bar4] = btcE
+	}
 	ib := "0"
 	if intrabar {
 		ib = "1"
@@ -217,7 +245,8 @@ func (t *tagger) tagRow(get func(string) string) []string {
 	return []string{ff(rPct), pnlR, ib, v3c,
 		ff(tags.OI12h), ff(tags.OI1h), ff(tags.CVD6h), ff(tags.CVD1h), ff(tags.Funding), ff(tags.LongAcct),
 		ff(tags.Chg24), ff(tags.SurgeX), ff(tags.BTC1h), ff(tags.Vol24),
-		ff(tags.WickPct), ff(tags.EMADist), ff(tags.BarATR), ff(tags.SpikeX), ff(tags.BTC15m), strings.Join(errs, "|")}
+		ff(tags.WickPct), ff(tags.EMADist), ff(tags.BarATR), ff(tags.SpikeX), ff(tags.BTC15m),
+		e200, btcE, strings.Join(errs, "|")}
 }
 
 // btcRets = BTC 進場前最後一根 1m 收盤,分別對「上一個整點收盤」與「上一根 15m 收盤」的漲跌%

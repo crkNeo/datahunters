@@ -288,6 +288,10 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"after_2h": "ADD COLUMN after_2h DOUBLE NULL",
 		"after_4h": "ADD COLUMN after_4h DOUBLE NULL",
 		"after_8h": "ADD COLUMN after_8h DOUBLE NULL",
+		// EMA200 / 大盤環境(regime.go)
+		"ema200_dist": "ADD COLUMN ema200_dist DOUBLE NOT NULL DEFAULT 0",
+		"btc_ema200":  "ADD COLUMN btc_ema200 DOUBLE NOT NULL DEFAULT 0",
+		"breadth":     "ADD COLUMN breadth DOUBLE NOT NULL DEFAULT 0",
 	} {
 		var has int
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)
@@ -509,8 +513,9 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 	}
 	db.sql.Exec(`INSERT INTO paper_trades
 	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
-	   oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m)
-	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	   oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m,
+	   ema200_dist,btc_ema200,breadth)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	  ON DUPLICATE KEY UPDATE
 	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
 	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl),
@@ -521,7 +526,8 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		t.Status, t.Outcome, t.OpenTime.UnixMilli(), ct, t.OI, t.CVD, t.Funding,
 		t.TP1, t.TP2, t.TP3, t.Legs, t.Filled, t.Realized, t.BEHit, t.BEPrice, t.MaxGain,
 		t.OI1h, t.CVD1h, t.LongAcct, t.Chg24, t.SurgeX, t.BTC1h, t.Vol24,
-		t.WickPct, t.EMADist, t.BarATR, t.SpikeX, t.BTC15m)
+		t.WickPct, t.EMADist, t.BarATR, t.SpikeX, t.BTC15m,
+		t.Ema200Dist, t.BtcEma200, t.Breadth)
 }
 
 func (db *DB) insertLiquidation(r LiqRow) {
@@ -559,7 +565,7 @@ func (db *DB) clearClosedTrades(book string) {
 func (db *DB) loadTrades(book string) []*PaperTrade {
 	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
 	  oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m,
-	  after_1h,after_2h,after_4h,after_8h
+	  after_1h,after_2h,after_4h,after_8h,ema200_dist,btc_ema200,breadth
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -574,7 +580,8 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
 			&t.TP1, &t.TP2, &t.TP3, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain,
 			&t.OI1h, &t.CVD1h, &t.LongAcct, &t.Chg24, &t.SurgeX, &t.BTC1h, &t.Vol24,
-			&t.WickPct, &t.EMADist, &t.BarATR, &t.SpikeX, &t.BTC15m, &a1, &a2, &a4, &a8); err != nil {
+			&t.WickPct, &t.EMADist, &t.BarATR, &t.SpikeX, &t.BTC15m, &a1, &a2, &a4, &a8,
+			&t.Ema200Dist, &t.BtcEma200, &t.Breadth); err != nil {
 			continue
 		}
 		t.After1h, t.After2h, t.After4h, t.After8h = nullPtr(a1), nullPtr(a2), nullPtr(a4), nullPtr(a8)
