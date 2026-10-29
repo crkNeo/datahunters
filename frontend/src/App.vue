@@ -883,12 +883,12 @@ function withinWin(iso) {
   return Date.now() - new Date(iso).getTime() <= timeWin.value
 }
 const scoreLogF = computed(() => scoreLog.value.filter((e) => withinWin(e.time)))
-// filterBook:把一個策略 state(open/closed/stats)依時間窗過濾,並重算統計。
-// 給紙上策略頁(bookF)、冥王星(convF)、微策略(microF)共用,確保「統計依所選範圍重算」。
+// filterBook:整理一個策略 state(open/closed)供顯示。進行中(open)是即時部位,一律全列;
+// 已結束記錄與上方統計改由後端 /api/strat-history 提供(記錄=本月、統計=全歷史),這裡不再依時間窗過濾。
 function filterBook(b) {
   if (!b) return null
-  const open = (b.open || []).filter((t) => withinWin(t.open_time))
-  const closed = (b.closed || []).filter((t) => withinWin(t.close_time))
+  const open = b.open || []
+  const closed = b.closed || []
   let wins = 0, sum = 0, gW = 0, gL = 0, tp1 = 0, tp2 = 0, tp3 = 0
   for (const t of closed) {
     if (t.pnl_pct > 0) { wins++; gW += t.pnl_pct } else { gL += -t.pnl_pct }
@@ -2682,11 +2682,10 @@ watch([role, tabPerms, authReady], () => {
         <span class="mk-actions"><span class="mk-count" v-if="conv">進行中 {{ conv.open.length }}</span><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, true)">清已結束</button><button v-if="can('admin')" class="clearbtn" @click="clearStrat('conv', loadConv, false)">全部</button></span>
       </div>
       <div class="shead-row" v-if="stratTagsOf('conv').length"><span class="shead-badge">{{ stratBadge('conv') }}</span><span v-for="tg in stratTagsOf('conv')" :key="tg" class="stag2"># {{ tg }}</span></div>
-      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
       <StrategyBook
         :state="conv"
         :book="'conv'"
-        :win="timeWin"
+        :win="0"
         :risky="stratRisky('conv')"
         :tags="stratTagsOf('conv')"
         :stats-order="['type', 'win', 'avg', 'total']"
@@ -2704,12 +2703,11 @@ watch([role, tabPerms, authReady], () => {
         <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && mainTab.startsWith('pulsar')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
       <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
-      <div class="timefilter"><span class="tf-label">時間範圍</span><button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button></div>
 
       <StrategyBook
         :state="microState"
         :book="curStrat"
-        :win="timeWin"
+        :win="0"
         :risky="stratRisky(curStrat)"
         :tags="stratTagsOf(curStrat)"
         :stats-order="['total', 'win', 'avg', 'type']"
@@ -3040,11 +3038,6 @@ watch([role, tabPerms, authReady], () => {
         </span>
       </div>
 
-      <div class="timefilter">
-        <span class="tf-label">時間範圍</span>
-        <button v-for="p in timePresets" :key="p.ms" :class="{ on: timeWin === p.ms }" @click="timeWin = p.ms">{{ p.label }}</button>
-        <span class="tf-note">統計依所選範圍重算</span>
-      </div>
       <p v-if="stratRisky(curStrat)" class="riskwarn">⚠️ 目前盤面使用此策略風險較大,請謹慎操作</p>
       <div v-if="bookF" class="pstats">
         <div class="pstat"><div class="stat-k">策略類型</div><div class="stat-v stat-tags">{{ stratTagsOf(curStrat).join('・') || '—' }}</div></div>
@@ -3082,9 +3075,9 @@ watch([role, tabPerms, authReady], () => {
           </tr>
         </tbody>
       </table></div>
-      <p v-else-if="bookF" class="empty">此範圍內無進行中的模擬部位</p>
+      <p v-else-if="bookF" class="empty">目前無進行中的模擬部位</p>
 
-      <h3 class="psub" v-if="paperHist.total">已結束 ({{ paperHist.total }})</h3>
+      <h3 class="psub" v-if="paperHist.total">本月已結束 ({{ paperHist.total }})</h3>
       <div class="tblwrap" v-if="paperHist.rows.length"><table class="grid">
         <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
         <tbody>
@@ -3104,7 +3097,7 @@ watch([role, tabPerms, authReady], () => {
         </tbody>
       </table></div>
       <PageNav :page="paperHist.page" :pages="paperHist.pages" :total="paperHist.total" @go="(p) => (paperPage = p)" />
-      <p v-if="bookF && !paperHist.total" class="empty">此範圍內尚無已結束的模擬交易</p>
+      <p v-if="bookF && !paperHist.total" class="empty">本月尚無已結束的模擬交易</p>
     </section>
 
     <!-- 財經事件 (high-impact US economic calendar) -->

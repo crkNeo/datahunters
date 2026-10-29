@@ -175,7 +175,7 @@ function tpStatusCls(t) {
     </table>
     </div>
 
-    <h3 class="psub" v-if="hist.total">已結束 ({{ hist.total }})</h3>
+    <h3 class="psub" v-if="hist.total">本月已結束 ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
       <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r">出場時間</th></tr></thead>
       <tbody>

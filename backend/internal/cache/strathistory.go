@@ -92,6 +92,10 @@ func (s *Store) strategyHistFull(key string, winMs int64, tf string) *stratHist 
 }
 
 // StrategyHistory 回一頁(size 筆)已結束 + 統計。page 從 1 起;tf ""=全部,"1h"/"4h" 篩週期。
+//
+// 刻意拆成兩種口徑(依產品需求):
+//   - 統計(勝率/賺賠比/累計損益/漏斗)維持「策略『總』記錄」= 全歷史,忽略傳入的 winMs。
+//   - 列表只顯示「本月(當月 1 號起)」的已結束記錄,total/分頁也只算本月。
 func (s *Store) StrategyHistory(key string, winMs int64, page, size int, tf string) StratHistoryResult {
 	if size <= 0 || size > 200 {
 		size = 50
@@ -99,8 +103,15 @@ func (s *Store) StrategyHistory(key string, winMs int64, page, size int, tf stri
 	if page <= 0 {
 		page = 1
 	}
-	h := s.strategyHistFull(key, winMs, tf)
-	total := len(h.all)
+	full := s.strategyHistFull(key, 0, tf) // 全歷史:統計用它,不受 winMs 影響
+	monthStart := startOfMonthMs()
+	month := make([]*PaperTrade, 0, len(full.all))
+	for _, t := range full.all { // full.all 已依 close_time 由新到舊排序
+		if t.CloseTime != nil && t.CloseTime.UnixMilli() >= monthStart {
+			month = append(month, t)
+		}
+	}
+	total := len(month)
 	pages := (total + size - 1) / size
 	if pages < 1 {
 		pages = 1
@@ -116,11 +127,22 @@ func (s *Store) StrategyHistory(key string, winMs int64, page, size int, tf stri
 	if end > total {
 		end = total
 	}
-	rows := h.all[start:end]
+	rows := month[start:end]
 	if rows == nil {
 		rows = []*PaperTrade{}
 	}
-	return StratHistoryResult{Rows: rows, Total: total, Pages: pages, Page: page, Size: size, Stats: h.stats}
+	return StratHistoryResult{Rows: rows, Total: total, Pages: pages, Page: page, Size: size, Stats: full.stats}
+}
+
+// startOfMonthMs 回「本月 1 號 00:00(台北時間)」的 epoch 毫秒。tzdata 已內嵌(見 main.go),
+// 所以 Windows/伺服器都載得到 Asia/Taipei;載不到就退回 UTC。
+func startOfMonthMs() int64 {
+	loc, err := time.LoadLocation("Asia/Taipei")
+	if err != nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc).UnixMilli()
 }
 
 // computeClosedStats 於全篩選集算勝率/平均/累計/獲利因子/分批漏斗(與前端 filterBook 同口徑)。
