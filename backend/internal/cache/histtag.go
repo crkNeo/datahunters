@@ -17,7 +17,7 @@ import (
 //
 // 全部只用「進場時刻之前」的資料,口徑跟線上進場時記的一樣(盤中單那根 15m 用 1m K 拼出進場前的部分 K)。
 // 「廣度」(全市場站上 EMA200 的比例)要 200 個幣的歷史 K 線,太重,不補 —— 只有新單會有。
-// 幣安的多空比歷史只保留約 30 天,更早的單那一欄補不到(燈號照其他紅旗算)。
+// 只補最近一個月內進場的單(histTagDays);幣安的多空比歷史也只保留約 30 天。
 // 每筆補完(不論成敗)標 hist_tagged=1,下次啟動不再重抓。新單由 tagEntry 記錄,但萬一當時抓失敗,
 // 這裡也會在下次啟動時補上。
 
@@ -27,6 +27,7 @@ const (
 	histTagBatch = 50
 	histTagPace  = 1200 * time.Millisecond // 每筆約 4~5 個請求,放慢一點不要跟線上搶幣安額度
 	lsHistDays   = 29                      // 多空比歷史只查這麼多天內的單
+	histTagDays  = 30                      // 只補最近一個月內進場的單,更舊的不補
 )
 
 type histTagRow struct {
@@ -166,16 +167,16 @@ func PartialBar15m(ms []exchange.Candle, barStart int64) (exchange.Candle, bool)
 	return p, n > 0
 }
 
-// histTagTodo:還沒補過、而且缺健康度因子或 EMA200 的脈衝星單,新的先。
+// histTagTodo:最近一個月內、還沒補過、而且缺健康度因子或 EMA200 的脈衝星單,新的先。
 func (db *DB) histTagTodo(limit int) []histTagRow {
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(histTagBooks)), ",")
 	args := make([]any, 0, len(histTagBooks)+1)
 	for _, b := range histTagBooks {
 		args = append(args, b)
 	}
-	args = append(args, limit)
+	args = append(args, time.Now().AddDate(0, 0, -histTagDays).UnixMilli(), limit)
 	rows, err := db.sql.Query(`SELECT id,book,coin,entry,open_time,cvd_1h,chg_24,long_acct,ema200_dist,btc_ema200
-	  FROM paper_trades WHERE book IN (`+ph+`) AND hist_tagged=0 AND entry>0
+	  FROM paper_trades WHERE book IN (`+ph+`) AND hist_tagged=0 AND entry>0 AND open_time >= ?
 	    AND ((cvd_1h=0 AND chg_24=0 AND long_acct=0) OR ema200_dist=0 OR btc_ema200=0)
 	  ORDER BY open_time DESC LIMIT ?`, args...)
 	if err != nil {

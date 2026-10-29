@@ -14,14 +14,15 @@ import (
 // 跟出場規則無關:看的是「如果進場後一直抱著」,那幾個時間點的價格相對進場價漲跌多少%,
 // 用來判斷 v12 進場後通常怎麼走、出場是不是太早 / 太晚。
 // 價格 = 該時間點那一分鐘的 1 分 K 開盤價(幣安永續)。用的是歷史 K 線,伺服器關機錯過的時間點
-// 開機後照樣補得回來;資料庫裡全部的單(含已平倉、這個功能上線前的舊單)都會補,新的單先補。
+// 開機後照樣補得回來;資料庫裡最近一個月內的單(含已平倉、這個功能上線前的舊單)都會補,新的單先補。
 
 var afterHours = []int{1, 2, 4, 8}
 
 const (
 	afterBatch    = 40 // 每輪最多抓幾個時間點(每個 1 次 K 線請求,權重 1)
 	afterPace     = 80 * time.Millisecond
-	afterMaxTries = 5 // 同一個時間點抓不到幾次就放棄(例如幣已下架)
+	afterMaxTries = 5  // 同一個時間點抓不到幾次就放棄(例如幣已下架)
+	afterDays     = 30 // 只補最近一個月內進場的單
 )
 
 // afterBooks 是要回填的書(脈衝星v12、v16)。
@@ -104,7 +105,7 @@ func (s *Store) afterMemTodo(now int64) []afterJob {
 		b.mu.Lock()
 		for k := len(b.trades) - 1; k >= 0 && len(jobs) < afterBatch; k-- {
 			tr := b.trades[k]
-			if tr.Entry <= 0 || tr.Status == "pending" {
+			if tr.Entry <= 0 || tr.Status == "pending" || now-tr.OpenTime.UnixMilli() > afterDays*86400_000 {
 				continue
 			}
 			for i := range afterHours {
@@ -166,13 +167,13 @@ func (db *DB) afterTodo(book string, now int64, dead []string, limit int) []afte
 		return nil
 	}
 	cond := make([]string, len(afterHours))
-	args := []any{book}
+	args := []any{book, now - afterDays*86400_000} // 只補最近一個月內進場的單
 	for i, h := range afterHours {
 		cond[i] = fmt.Sprintf("(after_%dh IS NULL AND open_time <= ?)", h)
 		args = append(args, now-int64(h)*3600_000-60_000)
 	}
 	q := `SELECT id,coin,entry,open_time,after_1h,after_2h,after_4h,after_8h FROM paper_trades
-	  WHERE book=? AND status<>'pending' AND entry>0 AND (` + strings.Join(cond, " OR ") + `)`
+	  WHERE book=? AND status<>'pending' AND entry>0 AND open_time >= ? AND (` + strings.Join(cond, " OR ") + `)`
 	if len(dead) > 0 {
 		q += ` AND id NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(dead)), ",") + `)`
 		for _, d := range dead {
