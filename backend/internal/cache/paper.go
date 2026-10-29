@@ -105,6 +105,11 @@ type PaperTrade struct {
 	SpikeX   float64 `json:"spike_x,omitempty"`  // 近 6 根最大量 / 截尾基線
 	BTC15m   float64 `json:"btc_15m,omitempty"`  // BTC 對上一根 15m 收盤的漲跌%
 
+	// 進場健康度(脈衝星v12 / v16,serve 時由上面的因子算,不存 DB,見 pulsarv16.go):
+	// green 0~1 個紅旗 / yellow 2 個 / red 3 個以上;HealthFlags = 亮起的紅旗(白話)。
+	Health      string   `json:"health,omitempty"`
+	HealthFlags []string `json:"health_flags,omitempty"`
+
 	// 進場後 1H / 2H / 4H / 8H 的價格相對進場價的漲跌%(脈衝星v12 回填,見 afterprice.go)。
 	// 跟出場無關,看的是「如果一直抱著」那個時間點的價位。nil = 還沒到時間 / 還沒補。
 	After1h *float64 `json:"after_1h,omitempty"`
@@ -488,6 +493,8 @@ func bookLabel(name string) string {
 		return "脈衝星v12"
 	case "pulsarv15":
 		return "脈衝星v15"
+	case "pulsarv16":
+		return "脈衝星v16"
 	case "newsalpha":
 		return "消息雷達"
 	case "orderblock", "orderblock_4h":
@@ -545,7 +552,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv15", "orderblock", "orderblockv2", "newsalpha":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16", "orderblock", "orderblockv2", "newsalpha":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
@@ -660,7 +667,7 @@ func (s *Store) notifyOpenBook(book string, tr *PaperTrade) bool {
 		return false
 	}
 	title := bookLabel(book) + " 開倉"
-	body := fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry))
+	body := fmt.Sprintf("%s %s · 進場 $%s", tr.Coin, dirCN(tr.Dir), fmtPx(tr.Entry)) + healthNote(book, tr)
 	url := "/?tab=" + bookTab(book)
 	s.PushSendTopic(stratTopic(book), title, body, url)
 	// Telegram 策略推播已停用;Web Push 不受影響。
@@ -861,7 +868,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12", "pulsarv15":
+	case "pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16":
 		return true
 	}
 	return false
@@ -884,6 +891,8 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV12Book
 	case "pulsarv15":
 		return s.pulsarV15Book
+	case "pulsarv16":
+		return s.pulsarV16Book
 	}
 	return nil
 }

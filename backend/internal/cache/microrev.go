@@ -1012,6 +1012,9 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
 	}
 	markLiveOpen(st.Open, px)
+	if len(bs) == 1 {
+		annotateHealth(bs[0].name, st.Open) // 脈衝星v12 / v16:進場健康度燈號
+	}
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
 	sort.Slice(st.Closed, func(i, j int) bool {
 		return st.Closed[i].CloseTime != nil && st.Closed[j].CloseTime != nil && st.Closed[i].CloseTime.After(*st.Closed[j].CloseTime)
@@ -1043,9 +1046,13 @@ func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
 func (s *Store) PulsarV15Tick()     { s.microTick(s.pulsarV15Book) }
 func (s *Store) PulsarV15MarkTick() { s.microMarkTick(s.pulsarV15Book) }
+func (s *Store) PulsarV16Tick()     { s.microTick(s.pulsarV16Book) }
+func (s *Store) PulsarV16MarkTick() { s.microMarkTick(s.pulsarV16Book) }
 
 // PulsarIntraTick:v12、v15 一起掃,每個幣只抓一次 K 線、兩本共用(見 microIntraTick)。
-func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book, s.pulsarV15Book) }
+func (s *Store) PulsarIntraTick() {
+	s.microIntraTick(s.pulsarV12Book, s.pulsarV15Book, s.pulsarV16Book)
+}
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1122,6 +1129,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV15Book.mu.Lock()
 		s.pulsarV15Book.trades = keepIf(s.pulsarV15Book.trades, closedOnly)
 		s.pulsarV15Book.mu.Unlock()
+	case "pulsarv16":
+		s.pulsarV16Book.mu.Lock()
+		s.pulsarV16Book.trades = keepIf(s.pulsarV16Book.trades, closedOnly)
+		s.pulsarV16Book.mu.Unlock()
 	case "newsalpha":
 		s.newsBook.mu.Lock()
 		s.newsBook.trades = keepIf(s.newsBook.trades, closedOnly)
@@ -1193,5 +1204,6 @@ func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook)
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
 func (s *Store) PulsarV15State() PaperState { return s.microState(s.pulsarV15Book) }
+func (s *Store) PulsarV16State() PaperState { return s.microState(s.pulsarV16Book) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

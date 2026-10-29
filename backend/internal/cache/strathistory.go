@@ -83,6 +83,7 @@ func (s *Store) strategyHistFull(key string, winMs int64, tf string) *stratHist 
 			since = time.Now().UnixMilli() - winMs
 		}
 		all := s.db.loadClosedFiltered(booksForTF(key, tf), since)
+		annotateHealth(key, all) // 脈衝星v12 / v16:進場健康度燈號
 		multiTP := s.StratConfigOf(key).ExitMode == "split"
 		return &stratHist{all: all, stats: computeClosedStats(all, multiTP)}, nil
 	})
@@ -196,7 +197,7 @@ func (db *DB) loadClosedFiltered(books []string, sinceMs int64) []*PaperTrade {
 		args = append(args, b)
 	}
 	q := `SELECT id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
-	  after_1h,after_2h,after_4h,after_8h
+	  after_1h,after_2h,after_4h,after_8h,cvd_1h,chg_24,long_acct
 	  FROM paper_trades WHERE book IN (` + ph + `) AND status='closed'`
 	if sinceMs > 0 {
 		q += ` AND close_time >= ?`
@@ -217,7 +218,7 @@ func (db *DB) loadClosedFiltered(books []string, sinceMs int64) []*PaperTrade {
 		if rows.Scan(&t.ID, &book, &t.Coin, &t.Dir, &t.Score, &t.Entry, &t.TP, &t.SL,
 			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
 			&t.TP1, &t.TP2, &t.TP3, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain,
-			&a1, &a2, &a4, &a8) != nil {
+			&a1, &a2, &a4, &a8, &t.CVD1h, &t.Chg24, &t.LongAcct) != nil {
 			continue
 		}
 		t.After1h, t.After2h, t.After4h, t.After8h = nullPtr(a1), nullPtr(a2), nullPtr(a4), nullPtr(a8)

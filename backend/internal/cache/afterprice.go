@@ -24,12 +24,15 @@ const (
 	afterMaxTries = 5 // 同一個時間點抓不到幾次就放棄(例如幣已下架)
 )
 
-// afterBooks 是要回填的書(目前只有脈衝星v12)。
+// afterBooks 是要回填的書(脈衝星v12、v16)。
 func (s *Store) afterBooks() []*microBook {
-	if s.pulsarV12Book == nil {
-		return nil
+	var out []*microBook
+	for _, b := range []*microBook{s.pulsarV12Book, s.pulsarV16Book} {
+		if b != nil {
+			out = append(out, b)
+		}
 	}
-	return []*microBook{s.pulsarV12Book}
+	return out
 }
 
 var afterFails = struct {
