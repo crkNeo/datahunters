@@ -2,7 +2,9 @@ package cache
 
 import (
 	"database/sql"
+	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,7 +14,7 @@ import (
 // 跟出場規則無關:看的是「如果進場後一直抱著」,那幾個時間點的價格相對進場價漲跌多少%,
 // 用來判斷 v12 進場後通常怎麼走、出場是不是太早 / 太晚。
 // 價格 = 該時間點那一分鐘的 1 分 K 開盤價(幣安永續)。用的是歷史 K 線,伺服器關機錯過的時間點
-// 開機後照樣補得回來;記憶體裡的單(含已平倉的)都會補,包含這個功能上線前的舊單。
+// 開機後照樣補得回來;資料庫裡全部的單(含已平倉、這個功能上線前的舊單)都會補,新的單先補。
 
 var afterHours = []int{1, 2, 4, 8}
 
@@ -41,9 +43,8 @@ func afterSlot(tr *PaperTrade, i int) **float64 {
 }
 
 type afterJob struct {
-	b     *microBook
-	tr    *PaperTrade
-	i     int
+	id    string // 單號
+	i     int    // 第幾個時間點(afterHours 的索引)
 	coin  string
 	entry float64
 	at    int64 // 要取價的時間點(整分,ms)
@@ -51,41 +52,21 @@ type afterJob struct {
 }
 
 // AfterPriceTick 每分鐘由 main 呼叫:補上已到時間、還沒補的 1H/2H/4H/8H 價格。
+// 有資料庫時直接從資料庫找還沒補的單(全部歷史,不受記憶體只留 500 張的限制),新的單先補;
+// 開機時也一樣,停機期間到期的、這個功能上線前的舊單都會補上。沒有資料庫才看記憶體。
 func (s *Store) AfterPriceTick() {
 	now := time.Now().UnixMilli()
 	var jobs []afterJob
-	for _, b := range s.afterBooks() {
-		b.mu.Lock()
-		for _, tr := range b.trades {
-			if tr.Entry <= 0 || tr.Status == "pending" {
-				continue
-			}
-			open := tr.OpenTime.UnixMilli()
-			for i, h := range afterHours {
-				at := (open + int64(h)*3600_000) / 60_000 * 60_000
-				if *afterSlot(tr, i) != nil || now < at+60_000 { // 已補 / 那一分鐘的 K 還沒開始
-					continue
-				}
-				key := tr.ID + "|" + time.Duration(h*int(time.Hour)).String()
-				afterFails.Lock()
-				dead := afterFails.m[key] >= afterMaxTries
-				afterFails.Unlock()
-				if dead {
-					continue
-				}
-				jobs = append(jobs, afterJob{b: b, tr: tr, i: i, coin: tr.Coin, entry: tr.Entry, at: at, key: key})
-			}
+	if s.db != nil && s.db.sql != nil {
+		for _, b := range s.afterBooks() {
+			jobs = append(jobs, s.db.afterTodo(b.name, now, afterDead(), afterBatch-len(jobs))...)
 			if len(jobs) >= afterBatch {
 				break
 			}
 		}
-		b.mu.Unlock()
-		if len(jobs) >= afterBatch {
-			jobs = jobs[:afterBatch]
-			break
-		}
+	} else {
+		jobs = s.afterMemTodo(now)
 	}
-	dirty := map[*PaperTrade]*microBook{}
 	for _, j := range jobs {
 		cs, err := s.ex.BinanceKlinesRange(j.coin+"USDT", "1m", j.at, j.at+59_999, 1)
 		time.Sleep(afterPace)
@@ -96,28 +77,144 @@ func (s *Store) AfterPriceTick() {
 			continue
 		}
 		v := math.Round((cs[0].Open-j.entry)/j.entry*100*100) / 100
-		j.b.mu.Lock()
-		*afterSlot(j.tr, j.i) = &v
-		j.b.mu.Unlock()
-		dirty[j.tr] = j.b
-	}
-	if s.db == nil {
-		return
-	}
-	for tr, b := range dirty {
-		b.mu.Lock()
-		a1, a2, a4, a8, id := tr.After1h, tr.After2h, tr.After4h, tr.After8h, tr.ID
-		b.mu.Unlock()
-		s.db.updateTradeAfter(id, a1, a2, a4, a8)
+		if s.db != nil {
+			s.db.updateTradeAfterOne(j.id, afterHours[j.i], v)
+		}
+		// 記憶體裡也有這張單(進行中 / 近期)→ 同步,畫面不用等重啟
+		for _, b := range s.afterBooks() {
+			b.mu.Lock()
+			for _, tr := range b.trades {
+				if tr.ID == j.id {
+					x := v
+					*afterSlot(tr, j.i) = &x
+				}
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
-func (db *DB) updateTradeAfter(id string, a1, a2, a4, a8 *float64) {
+// afterMemTodo:沒有資料庫時,從記憶體裡的單找到期、還沒補的時間點(新的單先)。
+func (s *Store) afterMemTodo(now int64) []afterJob {
+	var jobs []afterJob
+	for _, b := range s.afterBooks() {
+		b.mu.Lock()
+		for k := len(b.trades) - 1; k >= 0 && len(jobs) < afterBatch; k-- {
+			tr := b.trades[k]
+			if tr.Entry <= 0 || tr.Status == "pending" {
+				continue
+			}
+			for i := range afterHours {
+				if *afterSlot(tr, i) != nil {
+					continue
+				}
+				if j, ok := newAfterJob(tr.ID, tr.Coin, tr.Entry, tr.OpenTime.UnixMilli(), i, now); ok {
+					jobs = append(jobs, j)
+				}
+			}
+		}
+		b.mu.Unlock()
+	}
+	if len(jobs) > afterBatch {
+		jobs = jobs[:afterBatch]
+	}
+	return jobs
+}
+
+// newAfterJob:第 i 個時間點到了沒、是不是已經放棄;ok=false 代表現在不用抓。
+func newAfterJob(id, coin string, entry float64, openMs int64, i int, now int64) (afterJob, bool) {
+	h := afterHours[i]
+	at := (openMs + int64(h)*3600_000) / 60_000 * 60_000
+	if now < at+60_000 { // 那一分鐘的 K 還沒開始
+		return afterJob{}, false
+	}
+	key := fmt.Sprintf("%s|%dh", id, h)
+	afterFails.Lock()
+	dead := afterFails.m[key] >= afterMaxTries
+	afterFails.Unlock()
+	if dead {
+		return afterJob{}, false
+	}
+	return afterJob{id: id, i: i, coin: coin, entry: entry, at: at, key: key}, true
+}
+
+// afterDead 回傳已放棄的單(任一時間點抓不到超過上限),資料庫查詢時排除,免得一直佔住名額。
+func afterDead() []string {
+	afterFails.Lock()
+	defer afterFails.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for key, n := range afterFails.m {
+		if n < afterMaxTries {
+			continue
+		}
+		id := key[:strings.LastIndex(key, "|")]
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// afterTodo:資料庫裡這本書有時間點到期、還沒補的單,新的先。
+func (db *DB) afterTodo(book string, now int64, dead []string, limit int) []afterJob {
+	if limit <= 0 {
+		return nil
+	}
+	cond := make([]string, len(afterHours))
+	args := []any{book}
+	for i, h := range afterHours {
+		cond[i] = fmt.Sprintf("(after_%dh IS NULL AND open_time <= ?)", h)
+		args = append(args, now-int64(h)*3600_000-60_000)
+	}
+	q := `SELECT id,coin,entry,open_time,after_1h,after_2h,after_4h,after_8h FROM paper_trades
+	  WHERE book=? AND status<>'pending' AND entry>0 AND (` + strings.Join(cond, " OR ") + `)`
+	if len(dead) > 0 {
+		q += ` AND id NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(dead)), ",") + `)`
+		for _, d := range dead {
+			args = append(args, d)
+		}
+	}
+	q += ` ORDER BY open_time DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := db.sql.Query(q, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var jobs []afterJob
+	for rows.Next() {
+		var id, coin string
+		var entry float64
+		var ot int64
+		var a [4]sql.NullFloat64
+		if rows.Scan(&id, &coin, &entry, &ot, &a[0], &a[1], &a[2], &a[3]) != nil {
+			continue
+		}
+		for i := range afterHours {
+			if a[i].Valid {
+				continue
+			}
+			if j, ok := newAfterJob(id, coin, entry, ot, i, now); ok {
+				jobs = append(jobs, j)
+			}
+		}
+		if len(jobs) >= limit {
+			break
+		}
+	}
+	if len(jobs) > limit {
+		jobs = jobs[:limit]
+	}
+	return jobs
+}
+
+func (db *DB) updateTradeAfterOne(id string, hour int, v float64) {
 	if db.sql == nil {
 		return
 	}
-	db.sql.Exec(`UPDATE paper_trades SET after_1h=?, after_2h=?, after_4h=?, after_8h=? WHERE id=?`,
-		nullF(a1), nullF(a2), nullF(a4), nullF(a8), id)
+	db.sql.Exec(fmt.Sprintf(`UPDATE paper_trades SET after_%dh=? WHERE id=?`, hour), v, id)
 }
 
 // nullPtr 把可為 NULL 的欄位轉成 *float64(NULL → nil)。
