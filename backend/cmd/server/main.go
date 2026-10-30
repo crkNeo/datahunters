@@ -313,7 +313,6 @@ func main() {
 			store.BollEMAMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV12MarkTick()
-			store.DumpRevMarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
@@ -332,15 +331,6 @@ func main() {
 		ticker := time.NewTicker(10 * time.Second)
 		for range ticker.C {
 			store.SMCHFTriggerTick()
-		}
-	}()
-
-	// 流星(爆量崩盤反轉):1h 收盤檢查巨量長黑,買入後 48h 計時出場(無價格止損)。
-	go func() {
-		store.DumpRevTick()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			store.DumpRevTick()
 		}
 	}()
 

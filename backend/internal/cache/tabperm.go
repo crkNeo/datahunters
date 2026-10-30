@@ -64,7 +64,6 @@ var tabMeta = []struct {
 	{"srmtf", "反轉訊號", "admin", false},
 	{"surge", "爆量脈搏", "admin", false},
 	{"pulsarv12", "脈衝星v12", "admin", false},
-	{"dumprev", "流星", "admin", false}, // 爆量崩盤反轉(事件型買崩,無止損)
 	{"smchf", "獵戶座", "admin", false},  // SMC 共振高頻(市價觸發版)
 	{"newsalpha", "消息雷達", "admin", false}, // 消息面 / 資訊落差:事件流 + 價格反應統計 + 模擬單
 	{"orderblock", "訂單塊", "admin", false},
@@ -85,7 +84,7 @@ var tabDefaultKind = map[string]string{
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollema": "signal",
 	"srmtf":   "signal",
-	"surge": "signal", "pulsarv3": "signal", "pulsarv12": "signal", "dumprev": "signal", "smchf": "signal",
+	"surge": "signal", "pulsarv3": "signal", "pulsarv12": "signal", "smchf": "signal",
 	"newsalpha": "signal",
 	"orderblock": "signal", "orderblockv2": "signal",
 }
@@ -256,7 +255,7 @@ var tabOfRoute = map[string]string{
 	"/api/conv": "conv", "/api/sr": "sr", "/api/ema200": "ema200", "/api/ema200-history": "ema200", "/api/whales": "whales",
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
-	"/api/admin/surge": "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/dumprev": "dumprev", "/api/smchf": "smchf",
+	"/api/admin/surge": "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/smchf": "smchf",
 	"/api/newsalpha": "newsalpha", "/api/newsalpha-events": "newsalpha", "/api/newsalpha-stats": "newsalpha", "/api/newsalpha-book": "newsalpha",
 	"/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
 }

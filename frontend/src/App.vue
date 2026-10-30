@@ -720,15 +720,6 @@ async function loadSMCHF() {
     /* secondary */
   }
 }
-const dumprev = ref(null)
-async function loadDumpRev() {
-  try {
-    const res = await authFetch('/api/dumprev')
-    if (res.ok) dumprev.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 const pulsarv12 = ref(null)
 async function loadPulsarV12() {
   try {
@@ -807,10 +798,6 @@ const microMeta = {
   smchf: {
     title: '獵戶座 · SMC 共振高頻（市價觸發）· 1h', load: loadSMCHF, get: () => smchf.value,
     help: '<b>一句話：價格突破前高／前低（結構破壞）後，在突破前最後一根反向 K（訂單塊）的中點等回檔，碰到就市價進場，多空都做。</b><br><b>【找訊號】</b>每根 1 小時 K 收盤檢查（成交額前 200 的加密幣）：① 收盤剛突破最近一個「前後各 5 根都比它低」的高點（做多），或跌破最近的低點（做空）② 往回 12 根找最近一根反向 K（做多找黑 K、做空找紅 K）當訂單塊 ③ 進場價 = 訂單塊中點，止損 = 訂單塊另一端再多 0.15 倍 ATR ④ 突破後的高點／低點離進場至少要有 1.5 倍風險的空間 ⑤ 至少符合一項共振：缺口（FVG）跟訂單塊重疊／中點離 1 小時 EMA50 不到 0.5 倍 ATR／4 小時和日線 EMA20 方向都一致。<br><b>【等觸發】</b>條件成立先掛「待觸發」計畫（之後不再改），最多等 10 小時。每 10 秒看即時價：回到中點就用當下價格進場；價格一下子跳過中點超過 0.08% 就先不進、繼續等；還沒進場就先碰到止損 → 撤掉計畫。<br><b>【出場】</b>用實際進場價重算風險 R：漲到 1R 先平一半、1.5R 平掉剩下；<b>止損永遠不動</b>（TP1 後不移保本，回測就是這樣算的）。所以「TP1 後止損」這種單，實際大約打平。<br><b>【限制】</b>每個幣同時只有一張（計畫或持倉），全部持倉最多 8 張。損益顯示的是<b>真實分批加權</b>（一半在 TP1、一半在出場價），不是最高止盈階梯。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，單量會更多）每天約 11～15 張、每張平均 +0.15～0.20 倍風險（市價版扣滑價後），勝率約 42～44%，止損出場約 57%。紅線：前 500 張平均 < 0、勝率 < 35%、止損出場 > 67%。<br><br>⚠️ 待觸發的計畫只存在記憶體，伺服器重啟會清掉（已成交的持倉不受影響）。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  dumprev: {
-    title: '流星 · 爆量崩盤反轉 · 1h', load: loadDumpRev, get: () => dumprev.value,
-    help: '<b>一句話：山寨幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。主流幣（BTC／ETH／SOL／BNB）崩了通常會續跌，所以不做。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的山寨（排除代幣化股票）。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
@@ -1427,7 +1414,6 @@ function loadAll() {
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv12')) loadPulsarV12()
-  if (canTab('dumprev')) loadDumpRev()
   if (canTab('smchf')) loadSMCHF()
   if (canTab('orderblock')) loadOrderBlock()
   if (canTab('orderblockv2')) loadOrderBlockV2()
@@ -1522,7 +1508,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1671,7 +1657,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', dumprev: 'admin', smchf: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', smchf: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1735,7 +1721,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
-  pulsarv12: '脈衝星v12', dumprev: '流星', smchf: '獵戶座', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
+  pulsarv12: '脈衝星v12', smchf: '獵戶座', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1755,7 +1741,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', dumprev: 'signal', smchf: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', smchf: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1763,7 +1749,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2316,9 +2302,6 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('pulsarv12', grp[0])" :class="{ active: mainTab === 'pulsarv12', lk: !canTab('pulsarv12') }" @click="navTo('pulsarv12', loadPulsarV12)">
             脈衝星v12<em v-if="pulsarv12 && pulsarv12.open.length" class="navbadge">{{ pulsarv12.open.length }}</em><i v-if="!canTab('pulsarv12')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('dumprev', grp[0])" :class="{ active: mainTab === 'dumprev', lk: !canTab('dumprev') }" @click="navTo('dumprev', loadDumpRev)">
-            流星<em v-if="dumprev && dumprev.open.length" class="navbadge">{{ dumprev.open.length }}</em><i v-if="!canTab('dumprev')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('smchf', grp[0])" :class="{ active: mainTab === 'smchf', lk: !canTab('smchf') }" @click="navTo('smchf', loadSMCHF)">
             獵戶座<em v-if="smchf && smchf.open.length" class="navbadge">{{ smchf.open.length }}</em><i v-if="!canTab('smchf')" class="navlk">🔒</i>
