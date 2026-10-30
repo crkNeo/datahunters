@@ -810,7 +810,7 @@ const microMeta = {
   },
   dumprev: {
     title: '流星 · 爆量崩盤反轉 v1.1 · 1h', load: loadDumpRev, get: () => dumprev.value,
-    help: '<b>一句話：山寨幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。主流幣（BTC／ETH／SOL／BNB）崩了通常會續跌，所以不做。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的山寨（排除代幣化股票）。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<b>BTC 熔斷（v1.1）</b>：觸發當下 BTC 24 小時跌超過 5% 就不進場——全市場一起崩時，三筆會同時接到一起往下的刀，這是這個策略唯一會大虧的情況。<br><b>【實單倉位鐵律】</b>每筆名目不超過帳戶權益的 1/4（例如 1000U 帳戶：5U 保證金 × 50 倍 = 250U）。100U 帳戶用 5U 會爆倉，只能用 2U。價格止損（包括 −25%／−35% 的災難止損）和延後進場都實測無效或更差，風控只有「倉位」和「熔斷」兩個。<br><b>【1H～24H 欄】</b>進場後過了 1、2、4、8、16、24 小時，價格比進場價漲跌多少（看的是「一直抱著」那個時間點的價位，跟 48 小時出場無關）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到；伺服器關機錯過的時間點開機後也會補，最近一個月內的舊單一樣會補。用來看反彈通常在哪個時間點最強、48 小時是不是抱太久。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失；長期每天超過 3 筆代表市場異常，要暫停；權益回撤超過 40% 停機檢查。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+    help: '<b>一句話：幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的加密幣，BTC／ETH／SOL／BNB 也做（規格書原本排除主流幣，認為主流崩了通常會續跌；這裡改成一起觀察），只排除代幣化股票。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<b>BTC 熔斷（v1.1）</b>：觸發當下 BTC 24 小時跌超過 5% 就不進場——全市場一起崩時，三筆會同時接到一起往下的刀，這是這個策略唯一會大虧的情況。<br><b>【實單倉位鐵律】</b>每筆名目不超過帳戶權益的 1/4（例如 1000U 帳戶：5U 保證金 × 50 倍 = 250U）。100U 帳戶用 5U 會爆倉，只能用 2U。價格止損（包括 −25%／−35% 的災難止損）和延後進場都實測無效或更差，風控只有「倉位」和「熔斷」兩個。<br><b>【1H～24H 欄】</b>進場後過了 1、2、4、8、16、24 小時，價格比進場價漲跌多少（看的是「一直抱著」那個時間點的價位，跟 48 小時出場無關）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到；伺服器關機錯過的時間點開機後也會補，最近一個月內的舊單一樣會補。用來看反彈通常在哪個時間點最強、48 小時是不是抱太久。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失；長期每天超過 3 筆代表市場異常，要暫停；權益回撤超過 40% 停機檢查。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
@@ -1091,6 +1091,10 @@ async function fetchEMA200Hist() {
 watch(timeWin, () => { if (mainTab.value === 'ema200') { ema200Page.value = 1; fetchEMA200Hist() } })
 watch(ema200Page, fetchEMA200Hist)
 // EMA200 卡片的狀態標籤:最新 4H 收盤剛穿越 → 醒目框;否則顯示幾小時前穿越、現在在上/下方
+// 卡片分成「上穿 / 下穿」兩個內頁(依最近一次穿越的方向)
+const ema200Dir = ref('up')
+const ema200Cards = computed(() => (ema200.value?.rows || []).filter((c) => (c.cross_dir === 'up') === (ema200Dir.value === 'up')))
+const ema200Count = (dir) => (ema200.value?.rows || []).filter((c) => (c.cross_dir === 'up') === (dir === 'up')).length
 function ema200Tag(c) {
   const up = c.cross_dir === 'up'
   if (c.bars_since === 0) return up ? { txt: '📈 剛上穿', cls: 'long', card: 'broke' } : { txt: '📉 剛下穿', cls: 'short', card: 'broken' }
@@ -2547,13 +2551,17 @@ watch([role, tabPerms, authReady], () => {
     <!-- EMA200 穿越(4H · 爆量脈搏面板的幣 · 純提示)-->
     <section v-else-if="mainTab === 'ema200' && canTab('ema200')">
       <div class="mk-head">
-        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>全市場裡<b>成交額前 200 名</b>(跟爆發雷達同一批規模,扣掉穩定幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>頁面只列<b>最近 24 小時(6 根 4H)內</b>穿越的幣,剛穿越的排最前;「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠算 EMA200 的幣會跳過。每根 4H 收盤後約 1 分鐘內掃完。下方「穿越紀錄」永久保存,可依時間範圍篩選、分頁查看。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
+        <h2>EMA200 穿越<span class="help" tabindex="0">?<span class="help-pop">掃描<b>爆量脈搏</b>全市場裡<b>成交額前 200 名</b>(跟爆發雷達同一批規模,扣掉穩定幣),看 <b>4H 收盤價</b>與 <b>4H EMA200</b> 的關係。<br><b>上穿</b>:上一根 4H 收在 EMA200 下方,這一根收在上方;<b>下穿</b>反之。<br>每根 4H 收盤後檢查,剛穿越就推播(需在「個人中心 → 帳戶設定」開啟「EMA200 穿越」通知)。<br>頁面只列<b>最近 24 小時(6 根 4H)內</b>穿越的幣,依穿越方向分成<b>上穿 / 下穿</b>兩個標籤,剛穿越的排最前;「距離」是現價離 EMA200 的 %。上市太新、4H K 線不夠算 EMA200 的幣會跳過。每根 4H 收盤後約 1 分鐘內掃完。下方「穿越紀錄」永久保存,可依時間範圍篩選、分頁查看。<br><b>僅提示,不進場、無止盈止損</b>。⚠️ 僅供參考,非投資建議。</span></span></h2>
         <span class="mk-count" v-if="ema200 && ema200.scanned">掃描 {{ ema200.scanned }} 檔 · EMA200 上方 <b class="long">{{ ema200.above }}</b> / 下方 <b class="short">{{ ema200.below }}</b> · 近 24h 穿越 {{ ema200.rows.length }} 檔</span>
       </div>
 
       <template v-if="ema200">
-        <div class="sup-cards" v-if="ema200.rows.length">
-          <div v-for="c in ema200.rows" :key="c.coin" class="sup-card" :class="ema200Tag(c).card" @click="openDetail(c.coin)" style="cursor:pointer">
+        <div class="subtabs" v-if="ema200.scanned">
+          <button class="subtab" :class="{ on: ema200Dir === 'up' }" @click="ema200Dir = 'up'">📈 上穿 ({{ ema200Count('up') }})</button>
+          <button class="subtab" :class="{ on: ema200Dir === 'down' }" @click="ema200Dir = 'down'">📉 下穿 ({{ ema200Count('down') }})</button>
+        </div>
+        <div class="sup-cards" v-if="ema200Cards.length">
+          <div v-for="c in ema200Cards" :key="c.coin" class="sup-card" :class="ema200Tag(c).card" @click="openDetail(c.coin)" style="cursor:pointer">
             <div class="sup-coin">{{ c.coin }}</div>
             <div class="sup-price">現價 {{ c.price ? fmtPrice(c.price) : '—' }}</div>
             <div class="sup-level">EMA200 <b>{{ fmtPrice(c.ema) }}</b></div>
@@ -2561,7 +2569,7 @@ watch([role, tabPerms, authReady], () => {
             <div class="sup-tag" :class="ema200Tag(c).cls">{{ ema200Tag(c).txt }}</div>
           </div>
         </div>
-        <p v-else-if="ema200.scanned" class="empty">最近 24 小時內沒有幣穿越 EMA200。</p>
+        <p v-else-if="ema200.scanned" class="empty">最近 24 小時內沒有幣{{ ema200Dir === 'up' ? '上穿' : '下穿' }} EMA200。</p>
         <p v-else class="empty">正在掃描(剛啟動約需 1 分鐘)…</p>
       </template>
       <p v-else class="loading">載入中…</p>
