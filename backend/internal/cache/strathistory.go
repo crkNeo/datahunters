@@ -229,6 +229,9 @@ func (db *DB) loadClosedFiltered(books []string, sinceMs int64) []*PaperTrade {
 		}
 		t.TF = bookTF(book)
 		t.PnLPct = round2(settledPnL(t, t.Cur)) // 統一階梯口徑,不依賴 DB 舊值
+		if realPnLBooks[book] {                 // 獵戶座:真實分批加權
+			t.PnLPct = round2(t.Realized)
+		}
 		out = append(out, t)
 	}
 	return out

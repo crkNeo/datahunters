@@ -597,6 +597,9 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 		// → 就是 pnl(entry, 出場價),不變。
 		if t.Status == "closed" {
 			t.PnLPct = round2(settledPnL(t, t.Cur))
+			if realPnLBooks[book] { // 獵戶座:真實分批加權
+				t.PnLPct = round2(t.Realized)
+			}
 		}
 		out = append(out, t)
 	}

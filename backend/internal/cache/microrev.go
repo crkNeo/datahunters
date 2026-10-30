@@ -906,7 +906,7 @@ func microCooling(b *microBook, coin string, barTs, barMs int64) bool {
 func microTrim(b *microBook) {
 	var open, closed []*PaperTrade
 	for _, tr := range b.trades {
-		if tr.Status == "open" {
+		if tr.Status == "open" || tr.Status == "pending" {
 			open = append(open, tr)
 		} else {
 			closed = append(closed, tr)
@@ -998,7 +998,7 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		b.mu.Unlock()
 	}
 	for _, tr := range all {
-		if tr.Status == "open" {
+		if tr.Status == "open" || tr.Status == "pending" { // 待觸發計畫放在「進行中」顯示
 			st.Open = append(st.Open, tr)
 			continue
 		}
@@ -1013,6 +1013,13 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
 	}
 	markLiveOpen(st.Open, px)
+	if realPnLBooks[bs[0].name] { // 獵戶座:真實分批加權(markLiveOpen 用的是階梯口徑)
+		for _, tr := range st.Open {
+			if tr.Status == "open" && tr.Cur > 0 {
+				tr.PnLPct = realPnL(tr, tr.Cur)
+			}
+		}
+	}
 	if len(bs) == 1 {
 		annotateHealth(bs[0].name, st.Open) // 脈衝星v12:進場健康度燈號
 	}
@@ -1080,7 +1087,7 @@ func keepIf(trades []*PaperTrade, closedOnly bool) []*PaperTrade {
 	}
 	var open []*PaperTrade
 	for _, tr := range trades {
-		if tr.Status == "open" {
+		if tr.Status == "open" || tr.Status == "pending" { // 待觸發的計畫(獵戶座)也算還沒結束
 			open = append(open, tr)
 		}
 	}
@@ -1126,6 +1133,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.dumpRevBook.mu.Lock()
 		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
 		s.dumpRevBook.mu.Unlock()
+	case "smchf":
+		s.smcHFBook.mu.Lock()
+		s.smcHFBook.trades = keepIf(s.smcHFBook.trades, closedOnly)
+		s.smcHFBook.mu.Unlock()
 	case "newsalpha":
 		s.newsBook.mu.Lock()
 		s.newsBook.trades = keepIf(s.newsBook.trades, closedOnly)
@@ -1197,5 +1208,6 @@ func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook)
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
 func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
+func (s *Store) SMCHFState() PaperState     { return s.microState(s.smcHFBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

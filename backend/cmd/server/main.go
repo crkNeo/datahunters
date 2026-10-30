@@ -319,6 +319,22 @@ func main() {
 		}
 	}()
 
+	// 獵戶座(SMC 共振高頻,市價觸發):每分鐘掃新收盤的 1h 棒建計畫(開機第一輪只建基準),
+	// 每 10 秒用全市場即時價觸發計畫、管理 TP1 / TP2 / SL。
+	go func() {
+		store.SMCHFScanTick()
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.SMCHFScanTick()
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		for range ticker.C {
+			store.SMCHFTriggerTick()
+		}
+	}()
+
 	// 流星(爆量崩盤反轉):1h 收盤檢查巨量長黑,買入後 48h 計時出場(無價格止損)。
 	go func() {
 		store.DumpRevTick()

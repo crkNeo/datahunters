@@ -198,7 +198,7 @@ function tpStatusCls(t) {
           <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
-          <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template><span v-else class="tsmall">無</span></td>
+          <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<template v-if="book !== 'smchf'"><small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template></template><span v-else class="tsmall">無</span></td>
           <td v-if="hasTimer" class="r tsmall">{{ timerLeft(t) }}</td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>

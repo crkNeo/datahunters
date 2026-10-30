@@ -58,6 +58,7 @@ export function outcomeCN(o, pnl) {
   if (isBE(o, pnl)) return '保本出場'
   return o === 'tp' ? '止盈 TP' : o === 'tp3' ? 'TP3 完整'
     : o === 'tp2sl' ? 'TP2後出場' : o === 'tp1sl' ? 'TP1後保本'
+      : o === 'tp1stop' ? 'TP1後止損' : o === 'tp2' ? 'TP2 完整' // 獵戶座:TP1 後止損不動
       : o === 'sl' ? '止損 SL' : o === 'trail' ? '移動止損'
         : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
           : o === 'cancel' ? '未成交撤銷' // SMC_V2 觸發器逾時/滿倉未成交,非交易結果
@@ -68,8 +69,8 @@ export function outcomeCN(o, pnl) {
 // 出場結果 → 樣式類別
 export function outcomeCls(o, pnl) {
   if (isBE(o, pnl)) return 'reversed' // 保本出場用中性色,不能是紅的
-  if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
-  if (o === 'tp1sl') return 'reversed'
+  if (o === 'tp' || o === 'tp3' || o === 'tp2sl' || o === 'tp2') return 'tp'
+  if (o === 'tp1sl' || o === 'tp1stop') return 'reversed'
   if (o === 'sl') return 'sl'
   if (o === 'trail' || o === 'reversed' || o === 'hedge') return 'reversed'
   // manual/momdead 對外當逾時 → 落到 expired 樣式(灰色),與文字一致

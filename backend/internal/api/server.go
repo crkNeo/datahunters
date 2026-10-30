@@ -160,6 +160,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
 	mux.HandleFunc("/api/dumprev", s.gateTab("dumprev", s.handleDumpRev))                // 流星 (爆量崩盤反轉)
+	mux.HandleFunc("/api/smchf", s.gateTab("smchf", s.handleSMCHF))                      // 獵戶座 (SMC 共振高頻,市價觸發)
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
@@ -794,6 +795,11 @@ func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV12 serves the 脈衝星v12 (v3 條件盤中成立即進) tracker.
 func (s *Server) handlePulsarV12(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV12State())
+}
+
+// handleSMCHF serves the 獵戶座 (SMC 共振高頻,市價觸發版) tracker:待觸發計畫 + 持倉 + 已結束。
+func (s *Server) handleSMCHF(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.SMCHFState())
 }
 
 // handleDumpRev serves the 流星 (爆量崩盤反轉:1h 巨量長黑買入、48h 計時出場) tracker.
