@@ -13,7 +13,7 @@ import (
 //	出場            進場後 48 小時整,收盤價平倉(純計時)
 //	價格止損 / 止盈 無 —— 回測顯示任何價格止損都把反彈接成虧損;獲利在右尾,不能提前停利
 //	同幣冷卻        平倉後 24 小時內不再進
-//	幣池            銀河 top-80,排除 BTC / ETH / SOL / BNB(主流崩了會續跌,效應不存在)
+//	幣池            成交額前 200 的加密幣(規格書是 top80,依需求放大),排除 BTC / ETH / SOL / BNB(主流崩了會續跌)
 //	同時持有        最多 3 筆(崩盤日常一次很多幣一起崩)
 //
 // 回測(規格書):超額報酬 +2~4% / 事件,中位 +0.7%,勝率約 52%,p95 +28.6%、p05 −16.9%、最壞 −76%。
@@ -40,11 +40,16 @@ func (s *Store) newDumpRevBook() *microBook {
 	return b
 }
 
-// dumpRevUniverse = 銀河 top-80 扣掉主流幣。
+// dumpRevUniverse = 成交額前 200(與 EMA200 監控 / 爆發雷達 / 獵戶座同一批,已排除穩定幣)扣掉主流幣與
+// 代幣化股票 / 商品。剛開機爆量脈搏還沒掃到行情時,先用銀河 top-80 頂著。
 func (s *Store) dumpRevUniverse() []string {
+	base := s.e2Universe()
+	if len(base) == 0 {
+		base = s.emaCoins()
+	}
 	var out []string
-	for _, c := range s.emaCoins() {
-		if !drExcluded[c] {
+	for _, c := range base {
+		if !drExcluded[c] && s.cryptoOnly(c, nil) {
 			out = append(out, c)
 		}
 	}

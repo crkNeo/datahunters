@@ -79,7 +79,8 @@ func TestDumpRevBookLifecycle(t *testing.T) {
 }
 
 func TestDumpRevUniverse(t *testing.T) {
-	s := &Store{coins: []string{"BTC", "ETH", "AAA", "SOL", "BNB", "BBB"}}
+	s := &Store{coins: []string{"BTC", "ETH", "AAA", "SOL", "BNB", "BBB", "NVDA"},
+		symTypes: map[string]string{"NVDA": "EQUITY"}, symTime: time.Now()} // 代幣化股票也排除
 	if got := s.dumpRevUniverse(); len(got) != 2 || got[0] != "AAA" || got[1] != "BBB" {
 		t.Fatalf("universe = %v", got)
 	}
