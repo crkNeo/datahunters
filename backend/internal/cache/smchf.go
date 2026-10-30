@@ -18,6 +18,7 @@ import (
 //	BOS         收盤上穿最近確認的擺動高(做多)/ 下穿擺動低(做空)
 //	訂單塊 OB   往回 12 根內最近一根「反向」K(做多找陰線、做空找陽線)
 //	計畫        進場 = OB 中點;SL = OB 下緣 − 0.15×ATR14(空:上緣 + 0.15×ATR);TP1 = 1R、TP2 = 1.5R
+//	幣池        成交額前 200 的正規加密幣(規格書原本是 top80,依需求放大)
 //	預檢        前極值(OB 之後的最高 / 最低)離進場 ≥ 1.5R;共振至少 1 項:
 //	            FVG 與 OB 重疊 / OB 中點離 1h EMA50 ≤ 0.5 ATR / 4h、1d EMA20 斜率都跟方向一致(只看已收盤)
 //
@@ -61,10 +62,15 @@ func newSMCHFBook() *microBook {
 	return &microBook{name: "smchf", tf: shfTF, barSec: 3600, keep: 500}
 }
 
-// smcHFUniverse = 銀河 top-80 中的正規加密幣(排除代幣化股票 / 商品)。
+// smcHFUniverse = 成交額前 200 的幣(與 EMA200 監控 / 爆發雷達同一批,已排除穩定幣)中的正規加密幣
+// (再排除代幣化股票 / 商品)。剛開機爆量脈搏還沒掃到行情時,先用銀河 top-80 頂著。
 func (s *Store) smcHFUniverse() []string {
+	base := s.e2Universe()
+	if len(base) == 0 {
+		base = s.emaCoins()
+	}
 	var out []string
-	for _, c := range s.emaCoins() {
+	for _, c := range base {
 		if s.cryptoOnly(c, nil) {
 			out = append(out, c)
 		}
