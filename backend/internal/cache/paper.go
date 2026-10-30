@@ -496,6 +496,8 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
+	case "dumprev":
+		return "流星"
 	case "smchf":
 		return "獵戶座"
 	case "newsalpha":
@@ -555,7 +557,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2", "newsalpha", "smchf":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2", "newsalpha", "dumprev", "smchf":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"

@@ -693,7 +693,7 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
 		exit, outcome, px := false, "", 0.0
-		// SL / TP = 0 代表沒有價格止損 / 止盈,不檢查。
+		// SL / TP = 0 代表沒有價格止損 / 止盈(流星:純計時出場),不檢查。
 		if open.Dir == "long" {
 			if open.SL > 0 && last.Low <= open.SL {
 				exit, outcome, px = true, slOutcome(open), open.SL
@@ -1052,6 +1052,8 @@ func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
+func (s *Store) DumpRevTick()       { s.microTick(s.dumpRevBook) }
+func (s *Store) DumpRevMarkTick()   { s.microMarkTick(s.dumpRevBook) }
 
 // PulsarIntraTick:脈衝星v12 盤中進場(見 microIntraTick)。
 func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book) }
@@ -1127,6 +1129,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
+	case "dumprev":
+		s.dumpRevBook.mu.Lock()
+		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
+		s.dumpRevBook.mu.Unlock()
 	case "smchf":
 		s.smcHFBook.mu.Lock()
 		s.smcHFBook.trades = keepIf(s.smcHFBook.trades, closedOnly)
@@ -1201,6 +1207,7 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
+func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
 func (s *Store) SMCHFState() PaperState     { return s.microState(s.smcHFBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }
