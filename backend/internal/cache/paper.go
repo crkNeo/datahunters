@@ -115,12 +115,14 @@ type PaperTrade struct {
 	Health      string   `json:"health,omitempty"`
 	HealthFlags []string `json:"health_flags,omitempty"`
 
-	// 進場後 1H / 2H / 4H / 8H 的價格相對進場價的漲跌%(脈衝星v12 回填,見 afterprice.go)。
+	// 進場後 1H / 2H / 4H / 8H(流星再加 16H / 24H)的價格相對進場價的漲跌%(脈衝星v12、流星回填,見 afterprice.go)。
 	// 跟出場無關,看的是「如果一直抱著」那個時間點的價位。nil = 還沒到時間 / 還沒補。
-	After1h *float64 `json:"after_1h,omitempty"`
-	After2h *float64 `json:"after_2h,omitempty"`
-	After4h *float64 `json:"after_4h,omitempty"`
-	After8h *float64 `json:"after_8h,omitempty"`
+	After1h  *float64 `json:"after_1h,omitempty"`
+	After2h  *float64 `json:"after_2h,omitempty"`
+	After4h  *float64 `json:"after_4h,omitempty"`
+	After8h  *float64 `json:"after_8h,omitempty"`
+	After16h *float64 `json:"after_16h,omitempty"`
+	After24h *float64 `json:"after_24h,omitempty"`
 }
 
 // PaperStats summarises closed trades.
@@ -850,6 +852,14 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 			mb.mu.Unlock()
 		}
 		return out
+	}
+	if book == "dumprev" { // 流星:沒 DB 時退回記憶體
+		if mb := s.dumpRevBook; mb != nil {
+			mb.mu.Lock()
+			defer mb.mu.Unlock()
+			return append([]*PaperTrade(nil), mb.trades...)
+		}
+		return nil
 	}
 	s.paperMu.Lock()
 	defer s.paperMu.Unlock()

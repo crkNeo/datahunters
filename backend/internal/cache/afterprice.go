@@ -9,14 +9,16 @@ import (
 	"time"
 )
 
-// afterprice.go — 脈衝星v12:每張單「進場後 1H / 2H / 4H / 8H」的價格回填。
+// afterprice.go — 每張單「進場後 N 小時」的價格回填:脈衝星v12 補 1H / 2H / 4H / 8H,
+// 流星(48 小時計時出場)多補 16H / 24H。
 //
 // 跟出場規則無關:看的是「如果進場後一直抱著」,那幾個時間點的價格相對進場價漲跌多少%,
-// 用來判斷 v12 進場後通常怎麼走、出場是不是太早 / 太晚。
+// 用來判斷進場後通常怎麼走、出場是不是太早 / 太晚。
 // 價格 = 該時間點那一分鐘的 1 分 K 開盤價(幣安永續)。用的是歷史 K 線,伺服器關機錯過的時間點
 // 開機後照樣補得回來;資料庫裡最近一個月內的單(含已平倉、這個功能上線前的舊單)都會補,新的單先補。
 
-var afterHours = []int{1, 2, 4, 8}
+// afterHours 是全部的時間點(對應 after_1h … after_24h 欄);每本書用前 n 個。
+var afterHours = []int{1, 2, 4, 8, 16, 24}
 
 const (
 	afterBatch    = 40 // 每輪最多抓幾個時間點(每個 1 次 K 線請求,權重 1)
@@ -25,12 +27,17 @@ const (
 	afterDays     = 30 // 只補最近一個月內進場的單
 )
 
-// afterBooks 是要回填的書(脈衝星v12)。
-func (s *Store) afterBooks() []*microBook {
-	var out []*microBook
-	for _, b := range []*microBook{s.pulsarV12Book} {
-		if b != nil {
-			out = append(out, b)
+type afterBook struct {
+	b *microBook
+	n int // 用 afterHours 的前幾個時間點
+}
+
+// afterBooks 是要回填的書:脈衝星v12 補到 8H,流星補到 24H。
+func (s *Store) afterBooks() []afterBook {
+	var out []afterBook
+	for _, ab := range []afterBook{{s.pulsarV12Book, 4}, {s.dumpRevBook, 6}} {
+		if ab.b != nil {
+			out = append(out, ab)
 		}
 	}
 	return out
@@ -43,7 +50,7 @@ var afterFails = struct {
 
 // afterSlot 回傳某張單第 i 個時間點的欄位指標。
 func afterSlot(tr *PaperTrade, i int) **float64 {
-	return [](**float64){&tr.After1h, &tr.After2h, &tr.After4h, &tr.After8h}[i]
+	return [](**float64){&tr.After1h, &tr.After2h, &tr.After4h, &tr.After8h, &tr.After16h, &tr.After24h}[i]
 }
 
 type afterJob struct {
@@ -55,15 +62,15 @@ type afterJob struct {
 	key   string
 }
 
-// AfterPriceTick 每分鐘由 main 呼叫:補上已到時間、還沒補的 1H/2H/4H/8H 價格。
+// AfterPriceTick 每分鐘由 main 呼叫:補上已到時間、還沒補的時間點價格。
 // 有資料庫時直接從資料庫找還沒補的單(全部歷史,不受記憶體只留 500 張的限制),新的單先補;
 // 開機時也一樣,停機期間到期的、這個功能上線前的舊單都會補上。沒有資料庫才看記憶體。
 func (s *Store) AfterPriceTick() {
 	now := time.Now().UnixMilli()
 	var jobs []afterJob
 	if s.db != nil && s.db.sql != nil {
-		for _, b := range s.afterBooks() {
-			jobs = append(jobs, s.db.afterTodo(b.name, now, afterDead(), afterBatch-len(jobs))...)
+		for _, ab := range s.afterBooks() {
+			jobs = append(jobs, s.db.afterTodo(ab.b.name, ab.n, now, afterDead(), afterBatch-len(jobs))...)
 			if len(jobs) >= afterBatch {
 				break
 			}
@@ -85,15 +92,15 @@ func (s *Store) AfterPriceTick() {
 			s.db.updateTradeAfterOne(j.id, afterHours[j.i], v)
 		}
 		// 記憶體裡也有這張單(進行中 / 近期)→ 同步,畫面不用等重啟
-		for _, b := range s.afterBooks() {
-			b.mu.Lock()
-			for _, tr := range b.trades {
+		for _, ab := range s.afterBooks() {
+			ab.b.mu.Lock()
+			for _, tr := range ab.b.trades {
 				if tr.ID == j.id {
 					x := v
 					*afterSlot(tr, j.i) = &x
 				}
 			}
-			b.mu.Unlock()
+			ab.b.mu.Unlock()
 		}
 	}
 }
@@ -101,14 +108,15 @@ func (s *Store) AfterPriceTick() {
 // afterMemTodo:沒有資料庫時,從記憶體裡的單找到期、還沒補的時間點(新的單先)。
 func (s *Store) afterMemTodo(now int64) []afterJob {
 	var jobs []afterJob
-	for _, b := range s.afterBooks() {
+	for _, ab := range s.afterBooks() {
+		b := ab.b
 		b.mu.Lock()
 		for k := len(b.trades) - 1; k >= 0 && len(jobs) < afterBatch; k-- {
 			tr := b.trades[k]
 			if tr.Entry <= 0 || tr.Status == "pending" || now-tr.OpenTime.UnixMilli() > afterDays*86400_000 {
 				continue
 			}
-			for i := range afterHours {
+			for i := range ab.n {
 				if *afterSlot(tr, i) != nil {
 					continue
 				}
@@ -161,18 +169,18 @@ func afterDead() []string {
 	return out
 }
 
-// afterTodo:資料庫裡這本書有時間點到期、還沒補的單,新的先。
-func (db *DB) afterTodo(book string, now int64, dead []string, limit int) []afterJob {
+// afterTodo:資料庫裡這本書(前 n 個時間點)有到期、還沒補的單,新的先。
+func (db *DB) afterTodo(book string, n int, now int64, dead []string, limit int) []afterJob {
 	if limit <= 0 {
 		return nil
 	}
-	cond := make([]string, len(afterHours))
+	cond := make([]string, n)
 	args := []any{book, now - afterDays*86400_000} // 只補最近一個月內進場的單
-	for i, h := range afterHours {
+	for i, h := range afterHours[:n] {
 		cond[i] = fmt.Sprintf("(after_%dh IS NULL AND open_time <= ?)", h)
 		args = append(args, now-int64(h)*3600_000-60_000)
 	}
-	q := `SELECT id,coin,entry,open_time,after_1h,after_2h,after_4h,after_8h FROM paper_trades
+	q := `SELECT id,coin,entry,open_time,after_1h,after_2h,after_4h,after_8h,after_16h,after_24h FROM paper_trades
 	  WHERE book=? AND status<>'pending' AND entry>0 AND open_time >= ? AND (` + strings.Join(cond, " OR ") + `)`
 	if len(dead) > 0 {
 		q += ` AND id NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(dead)), ",") + `)`
@@ -192,11 +200,11 @@ func (db *DB) afterTodo(book string, now int64, dead []string, limit int) []afte
 		var id, coin string
 		var entry float64
 		var ot int64
-		var a [4]sql.NullFloat64
-		if rows.Scan(&id, &coin, &entry, &ot, &a[0], &a[1], &a[2], &a[3]) != nil {
+		var a [6]sql.NullFloat64
+		if rows.Scan(&id, &coin, &entry, &ot, &a[0], &a[1], &a[2], &a[3], &a[4], &a[5]) != nil {
 			continue
 		}
-		for i := range afterHours {
+		for i := range n {
 			if a[i].Valid {
 				continue
 			}

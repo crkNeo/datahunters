@@ -283,11 +283,13 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"bar_atr":   "ADD COLUMN bar_atr DOUBLE NOT NULL DEFAULT 0",
 		"spike_x":   "ADD COLUMN spike_x DOUBLE NOT NULL DEFAULT 0",
 		"btc_15m":   "ADD COLUMN btc_15m DOUBLE NOT NULL DEFAULT 0",
-		// 進場後 1H/2H/4H/8H 價格漲跌%(afterprice.go);NULL = 還沒補
-		"after_1h": "ADD COLUMN after_1h DOUBLE NULL",
-		"after_2h": "ADD COLUMN after_2h DOUBLE NULL",
-		"after_4h": "ADD COLUMN after_4h DOUBLE NULL",
-		"after_8h": "ADD COLUMN after_8h DOUBLE NULL",
+		// 進場後 1H/2H/4H/8H/16H/24H 價格漲跌%(afterprice.go);NULL = 還沒補
+		"after_1h":  "ADD COLUMN after_1h DOUBLE NULL",
+		"after_2h":  "ADD COLUMN after_2h DOUBLE NULL",
+		"after_4h":  "ADD COLUMN after_4h DOUBLE NULL",
+		"after_8h":  "ADD COLUMN after_8h DOUBLE NULL",
+		"after_16h": "ADD COLUMN after_16h DOUBLE NULL",
+		"after_24h": "ADD COLUMN after_24h DOUBLE NULL",
 		// EMA200 / 大盤環境(regime.go)
 		"ema200_dist": "ADD COLUMN ema200_dist DOUBLE NOT NULL DEFAULT 0",
 		"btc_ema200":  "ADD COLUMN btc_ema200 DOUBLE NOT NULL DEFAULT 0",
@@ -567,7 +569,7 @@ func (db *DB) clearClosedTrades(book string) {
 func (db *DB) loadTrades(book string) []*PaperTrade {
 	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
 	  oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m,
-	  after_1h,after_2h,after_4h,after_8h,ema200_dist,btc_ema200,breadth
+	  after_1h,after_2h,after_4h,after_8h,ema200_dist,btc_ema200,breadth,after_16h,after_24h
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -577,16 +579,17 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 	for rows.Next() {
 		t := &PaperTrade{}
 		var ot, ct int64
-		var a1, a2, a4, a8 sql.NullFloat64
+		var a1, a2, a4, a8, a16, a24 sql.NullFloat64
 		if err := rows.Scan(&t.ID, &t.Coin, &t.Dir, &t.Score, &t.Entry, &t.TP, &t.SL,
 			&t.Cur, &t.PnLPct, &t.Status, &t.Outcome, &ot, &ct, &t.OI, &t.CVD, &t.Funding,
 			&t.TP1, &t.TP2, &t.TP3, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain,
 			&t.OI1h, &t.CVD1h, &t.LongAcct, &t.Chg24, &t.SurgeX, &t.BTC1h, &t.Vol24,
 			&t.WickPct, &t.EMADist, &t.BarATR, &t.SpikeX, &t.BTC15m, &a1, &a2, &a4, &a8,
-			&t.Ema200Dist, &t.BtcEma200, &t.Breadth); err != nil {
+			&t.Ema200Dist, &t.BtcEma200, &t.Breadth, &a16, &a24); err != nil {
 			continue
 		}
 		t.After1h, t.After2h, t.After4h, t.After8h = nullPtr(a1), nullPtr(a2), nullPtr(a4), nullPtr(a8)
+		t.After16h, t.After24h = nullPtr(a16), nullPtr(a24)
 		t.OpenTime = time.UnixMilli(ot).UTC()
 		if ct > 0 {
 			tt := time.UnixMilli(ct).UTC()

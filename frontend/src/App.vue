@@ -810,7 +810,7 @@ const microMeta = {
   },
   dumprev: {
     title: '流星 · 爆量崩盤反轉 v1.1 · 1h', load: loadDumpRev, get: () => dumprev.value,
-    help: '<b>一句話：山寨幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。主流幣（BTC／ETH／SOL／BNB）崩了通常會續跌，所以不做。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的山寨（排除代幣化股票）。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<b>BTC 熔斷（v1.1）</b>：觸發當下 BTC 24 小時跌超過 5% 就不進場——全市場一起崩時，三筆會同時接到一起往下的刀，這是這個策略唯一會大虧的情況。<br><b>【實單倉位鐵律】</b>每筆名目不超過帳戶權益的 1/4（例如 1000U 帳戶：5U 保證金 × 50 倍 = 250U）。100U 帳戶用 5U 會爆倉，只能用 2U。價格止損（包括 −25%／−35% 的災難止損）和延後進場都實測無效或更差，風控只有「倉位」和「熔斷」兩個。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失；長期每天超過 3 筆代表市場異常，要暫停；權益回撤超過 40% 停機檢查。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+    help: '<b>一句話：山寨幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。主流幣（BTC／ETH／SOL／BNB）崩了通常會續跌，所以不做。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的山寨（排除代幣化股票）。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<b>BTC 熔斷（v1.1）</b>：觸發當下 BTC 24 小時跌超過 5% 就不進場——全市場一起崩時，三筆會同時接到一起往下的刀，這是這個策略唯一會大虧的情況。<br><b>【實單倉位鐵律】</b>每筆名目不超過帳戶權益的 1/4（例如 1000U 帳戶：5U 保證金 × 50 倍 = 250U）。100U 帳戶用 5U 會爆倉，只能用 2U。價格止損（包括 −25%／−35% 的災難止損）和延後進場都實測無效或更差，風控只有「倉位」和「熔斷」兩個。<br><b>【1H～24H 欄】</b>進場後過了 1、2、4、8、16、24 小時，價格比進場價漲跌多少（看的是「一直抱著」那個時間點的價位，跟 48 小時出場無關）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到；伺服器關機錯過的時間點開機後也會補，最近一個月內的舊單一樣會補。用來看反彈通常在哪個時間點最強、48 小時是不是抱太久。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失；長期每天超過 3 筆代表市場異常，要暫停；權益回撤超過 40% 停機檢查。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
@@ -866,7 +866,7 @@ async function manualExit(t) {
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
   const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
-  const bookName = map[mainTab.value] || (mainTab.value.startsWith('pulsar') ? mainTab.value : '') // 脈衝星家族:分頁名 = book 名
+  const bookName = map[mainTab.value] || (mainTab.value.startsWith('pulsar') || mainTab.value === 'dumprev' ? mainTab.value : '') // 脈衝星家族、流星:分頁名 = book 名
   if (!bookName) return
   try {
     const res = await authFetch('/api/admin/export?book=' + bookName)
@@ -2717,7 +2717,7 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && mainTab.startsWith('pulsar')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && (mainTab.startsWith('pulsar') || mainTab === 'dumprev')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
       <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
 

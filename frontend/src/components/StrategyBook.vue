@@ -74,8 +74,8 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
-// 脈衝星v12 專屬:進場後 1H/2H/4H/8H 的價格相對進場價漲跌%(後端 afterprice.go 回填)。
-const hasAfter = computed(() => props.book === 'pulsarv12')
+// 進場後 N 小時的價格相對進場價漲跌%(後端 afterprice.go 回填):脈衝星v12 到 8H,流星(48h 計時出場)到 24H。
+const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'dumprev')
 // 脈衝星v12:進場健康度燈號(後端 pulsarhealth.go 依進場因子算)
 const hasHealth = computed(() => props.book === 'pulsarv12')
 const HEALTH = { green: ['🟢', '健康'], yellow: ['🟡', '謹慎'], red: ['🔴', '不健康'] }
@@ -87,7 +87,8 @@ const regimeTip = (t) => !hasRegime(t) ? '這筆沒有 EMA200 資料(功能上�
     `BTC:4H 收盤${(t.btc_ema200 || 0) >= 0 ? '站上' : '跌破'} EMA200(${sgn(t.btc_ema200 || 0)})\n` +
     (t.breadth ? `全市場:成交額前 200 幣有 ${t.breadth.toFixed(0)}% 在 4H EMA200 之上` : '全市場:沒有資料')
 const healthTip = (t) => !t.health ? '這筆沒有進場因子資料' : HEALTH[t.health][1] + '|' + (t.health_flags && t.health_flags.length ? '紅旗:' + t.health_flags.join('、') : '沒有紅旗')
-const AFTER = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8]]
+const AFTER_ALL = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8], ['after_16h', '16H', 16], ['after_24h', '24H', 24]]
+const AFTER = computed(() => AFTER_ALL.slice(0, props.book === 'dumprev' ? 6 : 4))
 // 還沒到時間(或剛到、下一分鐘才補)→「待」;到了卻沒有值 → 「—」
 const afterWait = (t, h) => Date.now() < Date.parse(t.open_time) + h * 3600e3 + 3 * 60e3
 // 流星:沒有價格止損 / 止盈,進場後 48 小時計時出場 → 進行中顯示「還剩多久到期」
@@ -199,7 +200,7 @@ function tpStatusCls(t) {
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<template v-if="book !== 'smchf'"><small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template></template><span v-else class="tsmall">無</span></td>
-          <td v-if="hasTimer" class="r tsmall">{{ timerLeft(t) }}</td>
+          <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft(t) }}</td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
           <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
@@ -259,6 +260,7 @@ function tpStatusCls(t) {
 
 <style scoped>
 .health { white-space: nowrap; cursor: help; }
+.nowrap { white-space: nowrap; }
 .regime { white-space: nowrap; cursor: help; font-family: var(--f-mono); font-size: 12px; }
 .regime small { display: block; font-size: 10.5px; color: var(--c-mut); margin-top: 2px; }
 .regime small b { font-weight: 600; }

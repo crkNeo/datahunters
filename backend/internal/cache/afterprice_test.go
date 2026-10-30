@@ -48,3 +48,25 @@ func TestAfterJobs(t *testing.T) {
 		t.Fatal("given-up slot should be skipped")
 	}
 }
+
+func TestAfterDumpRevHours(t *testing.T) {
+	now := time.Now().UnixMilli()
+	open := now - int64(20*time.Hour/time.Millisecond) // 20 小時前進場:1~16H 到期,24H 還沒
+	v12 := &microBook{name: "pulsarv12"}
+	dr := &microBook{name: "dumprev"}
+	v12.trades = []*PaperTrade{{ID: "p", Coin: "PPP", Entry: 1, Status: "closed", OpenTime: time.UnixMilli(open)}}
+	dr.trades = []*PaperTrade{{ID: "d", Coin: "DDD", Entry: 1, Status: "open", OpenTime: time.UnixMilli(open)}}
+	s := &Store{pulsarV12Book: v12, dumpRevBook: dr}
+	n := map[string]int{}
+	for _, j := range s.afterMemTodo(now) {
+		n[j.id]++
+	}
+	if n["p"] != 4 || n["d"] != 5 { // v12 只補到 8H;流星補到 16H,24H 還沒到
+		t.Fatalf("jobs = %v", n)
+	}
+	x := 2.0
+	*afterSlot(dr.trades[0], 5) = &x
+	if dr.trades[0].After24h == nil || *dr.trades[0].After24h != 2 {
+		t.Fatal("24h slot mapping wrong")
+	}
+}
