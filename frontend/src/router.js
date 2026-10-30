@@ -18,7 +18,7 @@ export const ROUTE_TABS = [
   'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'gamble', 'emaonly', 'conv', 'sr', 'ema200',
-  'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'pulsarv16', 'orderblock', 'orderblockv2', 'srmtf', 'polyscout', 'newsalpha',
+  'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv15', 'pulsarv16', 'dumprev', 'orderblock', 'orderblockv2', 'srmtf', 'polyscout', 'newsalpha',
   'admin', 'referral', 'account',
 ]
 

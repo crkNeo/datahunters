@@ -693,16 +693,17 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
 		exit, outcome, px := false, "", 0.0
+		// SL / TP = 0 代表沒有價格止損 / 止盈(流星:純計時出場),不檢查。
 		if open.Dir == "long" {
-			if last.Low <= open.SL {
+			if open.SL > 0 && last.Low <= open.SL {
 				exit, outcome, px = true, slOutcome(open), open.SL
-			} else if last.High >= open.TP {
+			} else if open.TP > 0 && last.High >= open.TP {
 				exit, outcome, px = true, "tp3", open.TP
 			}
 		} else {
-			if last.High >= open.SL {
+			if open.SL > 0 && last.High >= open.SL {
 				exit, outcome, px = true, slOutcome(open), open.SL
-			} else if last.Low <= open.TP {
+			} else if open.TP > 0 && last.Low <= open.TP {
 				exit, outcome, px = true, "tp3", open.TP
 			}
 		}
@@ -1047,6 +1048,8 @@ func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
 func (s *Store) PulsarV15Tick()     { s.microTick(s.pulsarV15Book) }
 func (s *Store) PulsarV15MarkTick() { s.microMarkTick(s.pulsarV15Book) }
 func (s *Store) PulsarV16Tick()     { s.microTick(s.pulsarV16Book) }
+func (s *Store) DumpRevTick()       { s.microTick(s.dumpRevBook) }
+func (s *Store) DumpRevMarkTick()   { s.microMarkTick(s.dumpRevBook) }
 func (s *Store) PulsarV16MarkTick() { s.microMarkTick(s.pulsarV16Book) }
 
 // PulsarIntraTick:v12、v15 一起掃,每個幣只抓一次 K 線、兩本共用(見 microIntraTick)。
@@ -1133,6 +1136,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV16Book.mu.Lock()
 		s.pulsarV16Book.trades = keepIf(s.pulsarV16Book.trades, closedOnly)
 		s.pulsarV16Book.mu.Unlock()
+	case "dumprev":
+		s.dumpRevBook.mu.Lock()
+		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
+		s.dumpRevBook.mu.Unlock()
 	case "newsalpha":
 		s.newsBook.mu.Lock()
 		s.newsBook.trades = keepIf(s.newsBook.trades, closedOnly)
@@ -1205,5 +1212,6 @@ func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
 func (s *Store) PulsarV15State() PaperState { return s.microState(s.pulsarV15Book) }
 func (s *Store) PulsarV16State() PaperState { return s.microState(s.pulsarV16Book) }
+func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }
