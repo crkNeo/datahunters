@@ -37,7 +37,7 @@ func TestTagRegime(t *testing.T) {
 	if p, ok := s.ema200Breadth(); !ok || p != 75.81 { // 62 個裡 47 個在上方(45 + BTC + AAA)
 		t.Fatalf("breadth = %v %v", p, ok)
 	}
-	b := &microBook{name: "pulsarv16"}
+	b := &microBook{name: "pulsarv12"}
 	tr := &PaperTrade{Coin: "AAA", Entry: 44}
 	s.tagRegime(b, tr)
 	if tr.Ema200Dist != 10 || tr.BtcEma200 != 3 || tr.Breadth != 75.81 {

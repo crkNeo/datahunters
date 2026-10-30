@@ -25,10 +25,10 @@ const (
 	afterDays     = 30 // 只補最近一個月內進場的單
 )
 
-// afterBooks 是要回填的書(脈衝星v12、v16)。
+// afterBooks 是要回填的書(脈衝星v12)。
 func (s *Store) afterBooks() []*microBook {
 	var out []*microBook
-	for _, b := range []*microBook{s.pulsarV12Book, s.pulsarV16Book} {
+	for _, b := range []*microBook{s.pulsarV12Book} {
 		if b != nil {
 			out = append(out, b)
 		}

@@ -21,7 +21,7 @@ import (
 // 每筆補完(不論成敗)標 hist_tagged=1,下次啟動不再重抓。新單由 tagEntry 記錄,但萬一當時抓失敗,
 // 這裡也會在下次啟動時補上。
 
-var histTagBooks = []string{"pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16"}
+var histTagBooks = []string{"pulsarv3", "pulsarv12"}
 
 const (
 	histTagBatch = 50

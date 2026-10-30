@@ -83,7 +83,7 @@ func (s *Store) strategyHistFull(key string, winMs int64, tf string) *stratHist 
 			since = time.Now().UnixMilli() - winMs
 		}
 		all := s.db.loadClosedFiltered(booksForTF(key, tf), since)
-		annotateHealth(key, all) // 脈衝星v12 / v16:進場健康度燈號
+		annotateHealth(key, all) // 脈衝星v12:進場健康度燈號
 		multiTP := s.StratConfigOf(key).ExitMode == "split"
 		return &stratHist{all: all, stats: computeClosedStats(all, multiTP)}, nil
 	})

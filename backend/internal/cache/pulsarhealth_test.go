@@ -19,12 +19,12 @@ func TestPulsarHealthFlags(t *testing.T) {
 		t.Fatalf("missing data should not count: %v", f)
 	}
 	trs := []*PaperTrade{{CVD1h: 12, Chg24: 1, LongAcct: 0.5, OpenTime: afternoon}, {OpenTime: afternoon}}
-	annotateHealth("pulsarv16", trs)
+	annotateHealth("pulsarv12", trs)
 	if trs[0].Health != "red" || len(trs[0].HealthFlags) != 4 || trs[1].Health != "" {
 		t.Fatalf("annotate wrong: %+v %+v", trs[0], trs[1])
 	}
 	annotateHealth("pulsarv3", []*PaperTrade{{CVD1h: 12}}) // 非燈號書不動
-	if healthNote("pulsarv16", trs[0]) != " · 🔴 不健康" || healthNote("pulsarv3", trs[0]) != "" {
+	if healthNote("pulsarv12", trs[0]) != " · 🔴 不健康" || healthNote("pulsarv3", trs[0]) != "" {
 		t.Fatal("health note wrong")
 	}
 }

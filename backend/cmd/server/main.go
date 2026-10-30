@@ -203,7 +203,7 @@ func main() {
 		store.BackfillPulsarTags()
 	}()
 
-	// 脈衝星v12 / v16:每張單進場後 1H / 2H / 4H / 8H 的價格回填(每分鐘補到期的,含舊單)。
+	// 脈衝星v12:每張單進場後 1H / 2H / 4H / 8H 的價格回填(每分鐘補到期的,含舊單)。
 	go func() {
 		time.Sleep(60 * time.Second)
 		ticker := time.NewTicker(1 * time.Minute)
@@ -313,8 +313,6 @@ func main() {
 			store.BollEMAMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV12MarkTick()
-			store.PulsarV15MarkTick()
-			store.PulsarV16MarkTick()
 			store.DumpRevMarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
@@ -342,17 +340,13 @@ func main() {
 	go func() {
 		store.PulsarV3Tick()
 		store.PulsarV12Tick()
-		store.PulsarV15Tick()
-		store.PulsarV16Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarV3Tick()
 			store.PulsarV12Tick()
-			store.PulsarV15Tick()
-			store.PulsarV16Tick()
 		}
 	}()
-	// 脈衝星v12 / v15 / v16 盤中進場:每 20 秒用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程);兩本共用每個幣的一次抓取。
+	// 脈衝星v12 盤中進場:每 20 秒用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程);兩本共用每個幣的一次抓取。
 	go func() {
 		ticker := time.NewTicker(20 * time.Second) // 盤中即進:掃越密越能即時抓到條件成立的那一刻
 		for range ticker.C {

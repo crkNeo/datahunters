@@ -497,7 +497,7 @@ func surgeV12Signal(cs []exchange.Candle, elapsedSec int64) (dir string, entry, 
 // ---- generic engine ----
 
 // microIntraTick 是盤中書的進場掃描:對各書宇宙裡「還沒持倉」的幣抓含形成中那根的最新 K 線,
-// 條件成立就以當下價開倉。多本盤中書一起傳進來時(v12 / v15),每個幣只抓一次、各書共用,
+// 條件成立就以當下價開倉。多本盤中書一起傳進來時,每個幣只抓一次、各書共用,
 // 不會因為多一本就多一倍 REST。直接抓、不走快取:盤中即進要的是此刻形成中那根的最新狀態。
 func (s *Store) microIntraTick(bs ...*microBook) {
 	var live []*microBook
@@ -1014,7 +1014,7 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 	}
 	markLiveOpen(st.Open, px)
 	if len(bs) == 1 {
-		annotateHealth(bs[0].name, st.Open) // 脈衝星v12 / v16:進場健康度燈號
+		annotateHealth(bs[0].name, st.Open) // 脈衝星v12:進場健康度燈號
 	}
 	sort.Slice(st.Open, func(i, j int) bool { return st.Open[i].OpenTime.After(st.Open[j].OpenTime) })
 	sort.Slice(st.Closed, func(i, j int) bool {
@@ -1045,17 +1045,11 @@ func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
-func (s *Store) PulsarV15Tick()     { s.microTick(s.pulsarV15Book) }
-func (s *Store) PulsarV15MarkTick() { s.microMarkTick(s.pulsarV15Book) }
-func (s *Store) PulsarV16Tick()     { s.microTick(s.pulsarV16Book) }
 func (s *Store) DumpRevTick()       { s.microTick(s.dumpRevBook) }
 func (s *Store) DumpRevMarkTick()   { s.microMarkTick(s.dumpRevBook) }
-func (s *Store) PulsarV16MarkTick() { s.microMarkTick(s.pulsarV16Book) }
 
-// PulsarIntraTick:v12、v15 一起掃,每個幣只抓一次 K 線、兩本共用(見 microIntraTick)。
-func (s *Store) PulsarIntraTick() {
-	s.microIntraTick(s.pulsarV12Book, s.pulsarV15Book, s.pulsarV16Book)
-}
+// PulsarIntraTick:脈衝星v12 盤中進場(見 microIntraTick)。
+func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book) }
 func (s *Store) SMCTick() {
 	for _, b := range s.smcBooks {
 		s.microTick(b)
@@ -1128,14 +1122,6 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
-	case "pulsarv15":
-		s.pulsarV15Book.mu.Lock()
-		s.pulsarV15Book.trades = keepIf(s.pulsarV15Book.trades, closedOnly)
-		s.pulsarV15Book.mu.Unlock()
-	case "pulsarv16":
-		s.pulsarV16Book.mu.Lock()
-		s.pulsarV16Book.trades = keepIf(s.pulsarV16Book.trades, closedOnly)
-		s.pulsarV16Book.mu.Unlock()
 	case "dumprev":
 		s.dumpRevBook.mu.Lock()
 		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
@@ -1210,8 +1196,6 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
-func (s *Store) PulsarV15State() PaperState { return s.microState(s.pulsarV15Book) }
-func (s *Store) PulsarV16State() PaperState { return s.microState(s.pulsarV16Book) }
 func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

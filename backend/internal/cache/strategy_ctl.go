@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16", "dumprev", "orderblock", "orderblockv2", "newsalpha"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "dumprev", "orderblock", "orderblockv2", "newsalpha"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -86,10 +86,6 @@ var stratDefaults = map[string]StratCfg{
 	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 脈衝星v12:盤中書(不等收K),出場同 v3 家族。
 	"pulsarv12": {Tags: []string{"爆量", "盤中", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v15:v12 + 進場濾網(1h CVD ≤10%、散戶做多 ≥60%),出場同 v3 家族。
-	"pulsarv15": {Tags: []string{"爆量", "盤中", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
-	// 脈衝星v16:v12 + 進場健康度(紅旗 ≥3 不進),出場同 v3 家族。
-	"pulsarv16": {Tags: []string{"爆量", "盤中", "多單", "健康度"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 流星:無價格止損 / 止盈,48h 計時出場(single、沒有分批)。
 	"dumprev": {Tags: []string{"事件", "抄底", "無止損", "48h"}, ExitMode: "single"},
 	// 消息雷達模擬單:單段止盈 / 止損(依消息分類固定 %),最多持有 1 小時。
@@ -472,14 +468,6 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV12Book.mu.Lock()
 		done = closeIn(s.pulsarV12Book.trades)
 		s.pulsarV12Book.mu.Unlock()
-	case "pulsarv15":
-		s.pulsarV15Book.mu.Lock()
-		done = closeIn(s.pulsarV15Book.trades)
-		s.pulsarV15Book.mu.Unlock()
-	case "pulsarv16":
-		s.pulsarV16Book.mu.Lock()
-		done = closeIn(s.pulsarV16Book.trades)
-		s.pulsarV16Book.mu.Unlock()
 	case "dumprev":
 		s.dumpRevBook.mu.Lock()
 		done = closeIn(s.dumpRevBook.trades)

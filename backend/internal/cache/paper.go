@@ -110,7 +110,7 @@ type PaperTrade struct {
 	BtcEma200  float64 `json:"btc_ema200,omitempty"`  // BTC 4H 收盤離 BTC 4H EMA200 的 %
 	Breadth    float64 `json:"breadth,omitempty"`     // 成交額前 200 幣裡 4H 收在 EMA200 之上的比例 %
 
-	// 進場健康度(脈衝星v12 / v16,serve 時由上面的因子算,不存 DB,見 pulsarv16.go):
+	// 進場健康度(脈衝星v12,serve 時由上面的因子算,不存 DB,見 pulsarhealth.go):
 	// green 0~1 個紅旗 / yellow 2 個 / red 3 個以上;HealthFlags = 亮起的紅旗(白話)。
 	Health      string   `json:"health,omitempty"`
 	HealthFlags []string `json:"health_flags,omitempty"`
@@ -496,10 +496,6 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
-	case "pulsarv15":
-		return "脈衝星v15"
-	case "pulsarv16":
-		return "脈衝星v16"
 	case "dumprev":
 		return "流星"
 	case "newsalpha":
@@ -559,7 +555,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16", "orderblock", "orderblockv2", "newsalpha", "dumprev":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2", "newsalpha", "dumprev":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
@@ -875,7 +871,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12", "pulsarv15", "pulsarv16":
+	case "pulsarv3", "pulsarv12":
 		return true
 	}
 	return false
@@ -896,10 +892,6 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV3Book
 	case "pulsarv12":
 		return s.pulsarV12Book
-	case "pulsarv15":
-		return s.pulsarV15Book
-	case "pulsarv16":
-		return s.pulsarV16Book
 	}
 	return nil
 }

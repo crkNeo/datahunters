@@ -75,9 +75,9 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
 // 脈衝星v12 專屬:進場後 1H/2H/4H/8H 的價格相對進場價漲跌%(後端 afterprice.go 回填)。
-const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'pulsarv16')
-// 脈衝星v12 / v16:進場健康度燈號(後端 pulsarv16.go 依進場因子算)
-const hasHealth = computed(() => props.book === 'pulsarv12' || props.book === 'pulsarv16')
+const hasAfter = computed(() => props.book === 'pulsarv12')
+// 脈衝星v12:進場健康度燈號(後端 pulsarhealth.go 依進場因子算)
+const hasHealth = computed(() => props.book === 'pulsarv12')
 const HEALTH = { green: ['🟢', '健康'], yellow: ['🟡', '謹慎'], red: ['🔴', '不健康'] }
 // EMA200 / 大盤環境(進場當下,後端 regime.go):幣離自己 4H EMA200 的 %、BTC 離 EMA200 的 %、全市場在 EMA200 之上的比例
 const hasRegime = (t) => !!(t.ema200_dist || t.btc_ema200 || t.breadth)
@@ -262,7 +262,7 @@ function tpStatusCls(t) {
 .regime { white-space: nowrap; cursor: help; font-family: var(--f-mono); font-size: 12px; }
 .regime small { display: block; font-size: 10.5px; color: var(--c-mut); margin-top: 2px; }
 .regime small b { font-weight: 600; }
-/* 欄位多(脈衝星v12/v16 加了 1H~8H、健康)時不要把方向 / 幣種 / 表頭擠成兩行,改成表格左右捲 */
+/* 欄位多(脈衝星v12 加了 1H~8H、健康、EMA200)時不要把方向 / 幣種 / 表頭擠成兩行,改成表格左右捲 */
 .grid th, .grid .dir, .grid .coin { white-space: nowrap; }
 .pendtag { margin-left: 6px; font-size: 10px; color: var(--c-gold-b); background: var(--c-gold-soft); border-radius: 6px; padding: 1px 5px; white-space: nowrap; font-family: var(--f-mono); }
 .pendcount { color: var(--c-gold-b); font-weight: 600; font-size: 13px; font-family: var(--f-mono); }
