@@ -534,6 +534,16 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		t.Ema200Dist, t.BtcEma200, t.Breadth)
 }
 
+// deleteTrade 刪掉一筆(獵戶座撤掉的待觸發計畫)。
+func (db *DB) deleteTrade(id string) {
+	db.sql.Exec(`DELETE FROM paper_trades WHERE id=?`, id)
+}
+
+// fillTrade 寫入計畫成交時才定下來的欄位(進場價、進場時間、止盈);upsertTrade 的 UPDATE 不會動這幾欄。
+func (db *DB) fillTrade(t *PaperTrade) {
+	db.sql.Exec(`UPDATE paper_trades SET entry=?, open_time=?, tp=? WHERE id=?`, t.Entry, t.OpenTime.UnixMilli(), t.TP, t.ID)
+}
+
 func (db *DB) insertLiquidation(r LiqRow) {
 	db.sql.Exec(`INSERT INTO liquidations(ts,coin,side,px,usd) VALUES(?,?,?,?,?)`,
 		r.Time, r.Coin, r.Side, r.Px, r.USD)

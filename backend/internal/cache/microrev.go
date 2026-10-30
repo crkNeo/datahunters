@@ -68,6 +68,12 @@ type microBook struct {
 	// (訂單塊 SMC). tr.TP stays the signal's final target. Gets the final so it can
 	// recover the fib grid. nil = not a 4-stage book.
 	tpLevels4 func(entry, sl, finalTP float64) (tp1, tp2, tp3 float64)
+	// wideMark: 持倉幣不在 WS 即時價裡時(幣池超出 top-80),用爆量脈搏的全市場快照價補,
+	// 現價 / 未實現 / 最大獲利才會即時更新。流星(幣池 top-200)用。
+	wideMark bool
+	// barMaxGain: 每根收盤(和開機時)用進場後的 K 線高低點重算最大獲利,只會往上調。
+	// 重啟、WS 沒涵蓋到的幣都不會漏掉進場後的高點。流星用。
+	barMaxGain bool
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -612,6 +618,9 @@ func (s *Store) microTick(b *microBook) {
 	b.bucket = bkt
 	if !b.seeded { // boot: just set the baseline; only bars that close from now on can open trades
 		b.seeded = true
+		if b.barMaxGain {
+			s.microRefreshMaxGain(b) // 補回停機期間 / 上次存檔後的最大獲利
+		}
 		return
 	}
 	now := time.Now().UTC()
@@ -690,6 +699,9 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	reason := "" // 給 log 的結果碼(見函式說明)
 	if open != nil {
 		reason = "持倉中"
+		if b.barMaxGain {
+			barMaxGain(open, cs, barMs)
+		}
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
 		exit, outcome, px := false, "", 0.0
@@ -924,6 +936,9 @@ func microTrim(b *microBook) {
 // microTick; the closed-bar convExit in microRun stays a backstop for feed-down.
 func (s *Store) microMarkTick(b *microBook) {
 	px := s.livePrices()
+	if b.wideMark {
+		px = s.fillOpenPx(px, b)
+	}
 	if len(px) == 0 {
 		return
 	}
@@ -983,6 +998,9 @@ func (s *Store) microMarkTick(b *microBook) {
 // Variadic so a multi-leg family (布乖v2) merges into ONE tab payload.
 func (s *Store) microState(bs ...*microBook) PaperState {
 	px := s.livePrices() // read before the locks; open positions get live 現價
+	if bs[0].wideMark {
+		px = s.fillOpenPx(px, bs...)
+	}
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
 	st.Stats.MultiTP = bs[0].plan != nil
 	var sum, grossWin, grossLoss float64
@@ -1043,6 +1061,84 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		s.attachPulsarAI(st.Open)
 	}
 	return st
+}
+
+// barMaxGain 用進場後的 K 線高點(做多)/ 低點(做空)更新最大獲利,只會往上調。
+// cs 的每根都要「收在進場之後」才算:結束時間 ≤ 進場時間的(含觸發那根)不算。
+func barMaxGain(tr *PaperTrade, cs []exchange.Candle, barMs int64) {
+	from := tr.OpenTime.UnixMilli()
+	for _, c := range cs {
+		if c.Ts+barMs <= from {
+			continue
+		}
+		px := c.High
+		if tr.Dir == "short" {
+			px = c.Low
+		}
+		if g := pnl(tr.Dir, tr.Entry, px); g > tr.MaxGain {
+			tr.MaxGain = round2(g)
+		}
+	}
+}
+
+// microRefreshMaxGain 開機時對每筆持倉抓 K 線(含還在走的那根)重算最大獲利,有變就存回 DB。
+func (s *Store) microRefreshMaxGain(b *microBook) {
+	b.mu.Lock()
+	var coins []string
+	for _, tr := range b.trades {
+		if tr.Status == "open" {
+			coins = append(coins, tr.Coin)
+		}
+	}
+	b.mu.Unlock()
+	for _, coin := range coins {
+		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
+		if err != nil || len(cs) == 0 {
+			continue
+		}
+		var dirty *PaperTrade
+		b.mu.Lock()
+		for _, tr := range b.trades {
+			if tr.Coin == coin && tr.Status == "open" {
+				before := tr.MaxGain
+				barMaxGain(tr, cs, b.barSec*1000)
+				if tr.MaxGain != before {
+					dirty = tr
+				}
+			}
+		}
+		b.mu.Unlock()
+		if dirty != nil && s.db != nil {
+			s.db.upsertTrade(b.name, dirty)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// fillOpenPx 把這幾本書持倉幣裡、WS 即時價沒有的,用爆量脈搏的全市場快照價補上(px 可為 nil)。
+func (s *Store) fillOpenPx(px map[string]float64, bs ...*microBook) map[string]float64 {
+	var miss []string
+	for _, b := range bs {
+		b.mu.Lock()
+		for _, tr := range b.trades {
+			if tr.Status == "open" && px[tr.Coin] <= 0 {
+				miss = append(miss, tr.Coin)
+			}
+		}
+		b.mu.Unlock()
+	}
+	if len(miss) == 0 {
+		return px
+	}
+	if px == nil {
+		px = map[string]float64{}
+	}
+	for c, p := range s.surgePrices(miss) {
+		if p > 0 {
+			px[c] = p
+		}
+	}
+	return px
 }
 
 // ---- per-book public wrappers (ticks + state) ----

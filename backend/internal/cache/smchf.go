@@ -267,13 +267,18 @@ func (s *Store) SMCHFScanTick() {
 				break
 			}
 		}
+		var plan *PaperTrade
 		if !busy {
-			b.trades = append(b.trades, &PaperTrade{ID: fmt.Sprintf("smchf|%s|%d", coin, now.UnixMilli()), Coin: coin, Dir: p.Dir,
+			plan = &PaperTrade{ID: fmt.Sprintf("smchf|%s|%d", coin, now.UnixMilli()), Coin: coin, Dir: p.Dir,
 				Entry: roundPx(p.Entry), SL: roundPx(p.SL), Cur: cs[len(cs)-1].Close, Status: "pending",
-				OpenTime: time.UnixMilli(lastBar + shfBarMs).UTC()})
+				OpenTime: time.UnixMilli(lastBar + shfBarMs).UTC()}
+			b.trades = append(b.trades, plan)
 			added++
 		}
 		b.mu.Unlock()
+		if plan != nil && s.db != nil {
+			s.db.upsertTrade(b.name, plan) // 待觸發計畫也存 DB,重啟後照樣等觸發
+		}
 	}
 	e.mu.Lock()
 	e.seeded = true
@@ -306,10 +311,16 @@ func (s *Store) SMCHFTriggerTick() {
 	}
 	now := time.Now().UTC()
 	b.mu.Lock()
-	opened, tp1, closed := smcHFProcess(b, px, now)
+	opened, tp1, closed, dropped := smcHFProcess(b, px, now)
 	b.mu.Unlock()
+	if s.db != nil {
+		for _, tr := range dropped {
+			s.db.deleteTrade(tr.ID) // 撤掉的計畫不留紀錄
+		}
+	}
 	for _, tr := range opened {
 		if s.db != nil {
+			s.db.fillTrade(tr) // 成交價 / 時間 / TP 跟計畫不同,upsert 不會改這幾欄
 			s.db.upsertTrade(b.name, tr)
 		}
 		s.notifyOpenBook(b.name, tr)
@@ -332,8 +343,8 @@ func (s *Store) SMCHFTriggerTick() {
 }
 
 // smcHFProcess 是觸發 / 持倉管理的核心(呼叫端持 b.mu):過期或先碰 SL 的計畫撤掉、碰到中點的計畫成交、
-// 持倉走 TP1 / TP2 / SL。回傳這輪成交、TP1 達成、全部平倉的單(給呼叫端寫 DB / 推播)。
-func smcHFProcess(b *microBook, px map[string]float64, now time.Time) (opened, tp1, closed []*PaperTrade) {
+// 持倉走 TP1 / TP2 / SL。回傳這輪成交、TP1 達成、全部平倉、撤掉的計畫(給呼叫端寫 DB / 推播)。
+func smcHFProcess(b *microBook, px map[string]float64, now time.Time) (opened, tp1, closed, dropped []*PaperTrade) {
 	nOpen := 0
 	for _, tr := range b.trades {
 		if tr.Status == "open" {
@@ -346,6 +357,7 @@ func smcHFProcess(b *microBook, px map[string]float64, now time.Time) (opened, t
 		switch tr.Status {
 		case "pending":
 			if now.Sub(tr.OpenTime) >= shfPlanBars*time.Hour || (p > 0 && smcHFHitSL(tr.Dir, p, tr.SL)) {
+				dropped = append(dropped, tr)
 				continue // 過期 / 先碰 SL → 撤計畫(不留紀錄)
 			}
 			if p > 0 {
@@ -370,7 +382,7 @@ func smcHFProcess(b *microBook, px map[string]float64, now time.Time) (opened, t
 	}
 	b.trades = kept
 	microTrim(b)
-	return opened, tp1, closed
+	return opened, tp1, closed, dropped
 }
 
 func hasLive(trs []*PaperTrade) bool {

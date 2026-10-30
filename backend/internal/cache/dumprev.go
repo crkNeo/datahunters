@@ -35,7 +35,8 @@ const (
 
 func (s *Store) newDumpRevBook() *microBook {
 	b := &microBook{name: "dumprev", tf: "1h", barSec: 3600, klimit: drKlineSize, minBars: drMinBars,
-		expiry: drHoldBars, cooldown: drCoolBars, keep: 500, signal: dumpRevSignal, signalWhy: dumpRevWhy}
+		expiry: drHoldBars, cooldown: drCoolBars, keep: 500, signal: dumpRevSignal, signalWhy: dumpRevWhy,
+		wideMark: true, barMaxGain: true}
 	b.universe = s.dumpRevUniverse
 	// microRun 持 b.mu 時呼叫:先看槽位(不用網路),有空位才看 BTC 熔斷
 	b.gate = func(string, []exchange.Candle) bool { return dumpRevRoom(b) && s.dumpRevBTCOK() }

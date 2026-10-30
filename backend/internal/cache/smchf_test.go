@@ -59,7 +59,10 @@ func TestSMCHFProcess(t *testing.T) {
 	b := newSMCHFBook()
 	b.trades = []*PaperTrade{plan("A", time.Hour), plan("B", time.Hour), plan("C", 11*time.Hour), plan("D", time.Hour)}
 	px := map[string]float64{"A": 99.95, "B": 99.5, "C": 99.95, "D": 97.9}
-	opened, _, _ := smcHFProcess(b, px, now)
+	opened, _, _, dropped := smcHFProcess(b, px, now)
+	if len(dropped) != 2 || dropped[0].Coin != "C" || dropped[1].Coin != "D" {
+		t.Fatalf("C (expired) and D (SL first) should be reported as dropped: %+v", dropped)
+	}
 	if len(opened) != 1 || opened[0].Coin != "A" {
 		t.Fatalf("only A should fill (B too far past mid, C expired, D hit SL first): %+v", opened)
 	}
@@ -71,11 +74,11 @@ func TestSMCHFProcess(t *testing.T) {
 		t.Fatalf("R must be recomputed from the fill: %+v", a)
 	}
 	// TP1 → 平一半,止損不動;接著打到原止損 → 剩下一半虧 1R,總共約 0(不是 +1R)
-	_, tp1, _ := smcHFProcess(b, map[string]float64{"A": 102}, now)
+	_, tp1, _, _ := smcHFProcess(b, map[string]float64{"A": 102}, now)
 	if len(tp1) != 1 || a.Legs != 1 || a.SL != 98 {
 		t.Fatalf("TP1 should fill without moving SL: %+v", a)
 	}
-	_, _, closed := smcHFProcess(b, map[string]float64{"A": 97.5}, now)
+	_, _, closed, _ := smcHFProcess(b, map[string]float64{"A": 97.5}, now)
 	if len(closed) != 1 || a.Outcome != "tp1stop" || math.Abs(a.PnLPct) > 0.01 {
 		t.Fatalf("TP1 then stop should net ≈ 0: %+v", a)
 	}
@@ -99,7 +102,7 @@ func TestSMCHFMaxOpen(t *testing.T) {
 		b.trades = append(b.trades, &PaperTrade{ID: coin, Coin: coin, Dir: "long", Entry: 100, SL: 98, Status: "pending", OpenTime: now})
 		px[coin] = 100
 	}
-	opened, _, _ := smcHFProcess(b, px, now)
+	opened, _, _, _ := smcHFProcess(b, px, now)
 	if len(opened) != shfMaxOpen {
 		t.Fatalf("at most %d positions, got %d", shfMaxOpen, len(opened))
 	}

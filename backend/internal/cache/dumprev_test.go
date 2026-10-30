@@ -122,3 +122,37 @@ func TestBTCHalt(t *testing.T) {
 		t.Fatal("forming bar must be ignored")
 	}
 }
+
+func TestDumpRevBarMaxGain(t *testing.T) {
+	const h = int64(3600_000)
+	open := time.UnixMilli(10 * h).UTC() // 觸發那根 [9h,10h) 收盤進場
+	tr := &PaperTrade{Coin: "AAA", Dir: "long", Entry: 100, Status: "open", OpenTime: open, MaxGain: 3}
+	cs := []exchange.Candle{
+		{Ts: 9 * h, High: 150, Low: 90},   // 觸發那根:不算
+		{Ts: 10 * h, High: 102, Low: 95},  // 進場後
+		{Ts: 11 * h, High: 108, Low: 101}, // 最高 +8%
+		{Ts: 12 * h, High: 104, Low: 99},
+	}
+	barMaxGain(tr, cs, h)
+	if tr.MaxGain != 8 {
+		t.Fatalf("max gain = %v, want 8", tr.MaxGain)
+	}
+	tr.MaxGain = 12 // 已經記到更高 → 不會被往下改
+	barMaxGain(tr, cs, h)
+	if tr.MaxGain != 12 {
+		t.Fatalf("max gain must never go down, got %v", tr.MaxGain)
+	}
+}
+
+func TestFillOpenPx(t *testing.T) {
+	s := &Store{surge: newSurgeEngine()}
+	s.surge.hist["FAR"] = []surgeSnap{{price: 1.23}}
+	b := &microBook{trades: []*PaperTrade{{Coin: "FAR", Status: "open"}, {Coin: "WS", Status: "open"}, {Coin: "OLD", Status: "closed"}}}
+	px := s.fillOpenPx(map[string]float64{"WS": 5}, b)
+	if px["FAR"] != 1.23 || px["WS"] != 5 || px["OLD"] != 0 {
+		t.Fatalf("px = %v", px)
+	}
+	if got := s.fillOpenPx(nil, b); got["FAR"] != 1.23 {
+		t.Fatalf("nil map should be filled too: %v", got)
+	}
+}
