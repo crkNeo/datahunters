@@ -1,0 +1,4 @@
+Kronos/
+kline_cache/
+*.csv
+__pycache__/
