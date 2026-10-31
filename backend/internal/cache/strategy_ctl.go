@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "dumprev", "smchf", "orderblock", "orderblockv2", "newsalpha"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv17", "dumprev", "smchf", "orderblock", "orderblockv2", "newsalpha"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -86,6 +86,7 @@ var stratDefaults = map[string]StratCfg{
 	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 脈衝星v12:盤中書(不等收K),出場同 v3 家族。
 	"pulsarv12": {Tags: []string{"爆量", "盤中", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
+	"pulsarv17": {Tags: []string{"爆量", "盤中", "多單", "濾網"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 流星:無價格止損 / 止盈,48h 計時出場(single、沒有分批)。
 	"dumprev": {Tags: []string{"事件", "抄底", "無止損", "48h"}, ExitMode: "single"},
 	// 獵戶座:TP1(1R)平 50%、TP2(1.5R)平剩下、SL 永不移動;出場邏輯在 smchf.go,不吃這裡的分批設定。
@@ -470,6 +471,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV12Book.mu.Lock()
 		done = closeIn(s.pulsarV12Book.trades)
 		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv17":
+		s.pulsarV17Book.mu.Lock()
+		done = closeIn(s.pulsarV17Book.trades)
+		s.pulsarV17Book.mu.Unlock()
 	case "dumprev":
 		s.dumpRevBook.mu.Lock()
 		done = closeIn(s.dumpRevBook.trades)

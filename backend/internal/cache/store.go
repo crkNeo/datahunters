@@ -150,6 +150,7 @@ type Store struct {
 	ema200        *ema200Engine // EMA200 穿越監控(4H,爆量脈搏面板的幣)(ema200.go)
 	pulsarV3Book  *microBook    // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV12Book *microBook    // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
+	pulsarV17Book *microBook    // 脈衝星v17:v12 的影子,進場因子過濾網才跟(pulsarv17.go)
 	smcHFBook     *microBook    // 獵戶座:SMC 共振高頻(市價觸發版),BOS→OB 中點掛計畫、觸價市價進 (smchf.go)
 	smcHF         *smcHFEngine  // 獵戶座的掃描狀態(每幣處理過的 1h 棒)
 	dumpRevBook   *microBook    // 流星:爆量崩盤反轉,1h 巨量長黑買入、48h 計時出場、無止損 (dumprev.go)
@@ -299,6 +300,7 @@ func NewStore(coins []string) *Store {
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, signalWhy: surgeV3Why, tagEntry: true}
 	// 脈衝星v12:盤中書。進場由 microIntraTick 每分鐘用形成中的 K 評估;signal 保留 v3 只給收盤管理流程佔位(不會用來進場)。
 	s.pulsarV12Book = &microBook{name: "pulsarv12", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, intraSignal: surgeV12Signal, tagEntry: true}
+	s.pulsarV17Book = s.newPulsarV17Book()
 	s.dumpRevBook = s.newDumpRevBook()
 	s.smcHFBook = newSMCHFBook()
 	s.smcHF = &smcHFEngine{lastBar: map[string]int64{}}
@@ -335,6 +337,7 @@ func NewStore(coins []string) *Store {
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV12Book.trades = db.loadTrades("pulsarv12")
+		s.pulsarV17Book.trades = db.loadTrades("pulsarv17")
 		s.dumpRevBook.trades = db.loadTrades("dumprev")
 		s.smcHFBook.trades = db.loadTrades("smchf")
 		s.newsBook.trades = db.loadTrades("newsalpha")

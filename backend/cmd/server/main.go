@@ -313,6 +313,7 @@ func main() {
 			store.BollEMAMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV12MarkTick()
+			store.PulsarV17MarkTick()
 			store.DumpRevMarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
@@ -356,10 +357,12 @@ func main() {
 	go func() {
 		store.PulsarV3Tick()
 		store.PulsarV12Tick()
+		store.PulsarV17Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarV3Tick()
 			store.PulsarV12Tick()
+			store.PulsarV17Tick()
 		}
 	}()
 	// 脈衝星v12 盤中進場:每 20 秒用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程);兩本共用每個幣的一次抓取。

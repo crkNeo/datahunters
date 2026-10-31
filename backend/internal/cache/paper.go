@@ -498,6 +498,8 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
+	case "pulsarv17":
+		return "脈衝星v17"
 	case "dumprev":
 		return "流星"
 	case "smchf":
@@ -559,7 +561,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "orderblock", "orderblockv2", "newsalpha", "dumprev", "smchf":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv17", "orderblock", "orderblockv2", "newsalpha", "dumprev", "smchf":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
@@ -883,7 +885,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12":
+	case "pulsarv3", "pulsarv12", "pulsarv17":
 		return true
 	}
 	return false
@@ -904,6 +906,8 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV3Book
 	case "pulsarv12":
 		return s.pulsarV12Book
+	case "pulsarv17":
+		return s.pulsarV17Book
 	}
 	return nil
 }

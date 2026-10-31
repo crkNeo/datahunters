@@ -39,8 +39,8 @@ func pulsarHealthFlags(cvd1h, chg24, longAcct float64, at time.Time) []string {
 	return out
 }
 
-// healthBooks:要顯示「進場健康度」燈號的書(目前只有脈衝星v12)。
-var healthBooks = map[string]bool{"pulsarv12": true}
+// healthBooks:要顯示「進場健康度」燈號的書(脈衝星v12 / v17)。
+var healthBooks = map[string]bool{"pulsarv12": true, "pulsarv17": true}
 
 // annotateHealth 依單上記錄的進場因子補上燈號(serve 時算,不存 DB)。沒有因子的舊單不標。
 func annotateHealth(book string, trs []*PaperTrade) {

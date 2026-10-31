@@ -75,9 +75,9 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
 // 進場後 N 小時的價格相對進場價漲跌%(後端 afterprice.go 回填):脈衝星v12 到 8H,流星(48h 計時出場)到 24H。
-const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'dumprev')
+const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'pulsarv17' || props.book === 'dumprev')
 // 脈衝星v12:進場健康度燈號(後端 pulsarhealth.go 依進場因子算)
-const hasHealth = computed(() => props.book === 'pulsarv12')
+const hasHealth = computed(() => props.book === 'pulsarv12' || props.book === 'pulsarv17')
 const HEALTH = { green: ['🟢', '健康'], yellow: ['🟡', '謹慎'], red: ['🔴', '不健康'] }
 // EMA200 / 大盤環境(進場當下,後端 regime.go):幣離自己 4H EMA200 的 %、BTC 離 EMA200 的 %、全市場在 EMA200 之上的比例
 const hasRegime = (t) => !!(t.ema200_dist || t.btc_ema200 || t.breadth)

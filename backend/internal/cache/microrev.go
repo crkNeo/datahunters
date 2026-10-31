@@ -606,6 +606,9 @@ func (s *Store) microIntraOpen(b *microBook, coin string, cs []exchange.Candle, 
 		s.db.upsertTrade(b.name, tr)
 	}
 	s.notifyOpenBook(b.name, tr)
+	if b == s.pulsarV12Book {
+		s.pulsarV17Follow(tr) // 脈衝星v17:濾網全過就跟一筆一樣的
+	}
 	return true
 }
 
@@ -1148,6 +1151,8 @@ func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
+func (s *Store) PulsarV17Tick()     { s.microTick(s.pulsarV17Book) }
+func (s *Store) PulsarV17MarkTick() { s.microMarkTick(s.pulsarV17Book) }
 func (s *Store) DumpRevTick()       { s.microTick(s.dumpRevBook) }
 func (s *Store) DumpRevMarkTick()   { s.microMarkTick(s.dumpRevBook) }
 
@@ -1225,6 +1230,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv17":
+		s.pulsarV17Book.mu.Lock()
+		s.pulsarV17Book.trades = keepIf(s.pulsarV17Book.trades, closedOnly)
+		s.pulsarV17Book.mu.Unlock()
 	case "dumprev":
 		s.dumpRevBook.mu.Lock()
 		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
@@ -1303,6 +1312,7 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
+func (s *Store) PulsarV17State() PaperState { return s.microState(s.pulsarV17Book) }
 func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
 func (s *Store) SMCHFState() PaperState     { return s.microState(s.smcHFBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }

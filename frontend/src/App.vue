@@ -738,6 +738,15 @@ async function loadPulsarV12() {
     /* secondary */
   }
 }
+const pulsarv17 = ref(null)
+async function loadPulsarV17() {
+  try {
+    const res = await authFetch('/api/pulsarv17')
+    if (res.ok) pulsarv17.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 const orderblock = ref(null)
 async function loadOrderBlock() {
   try {
@@ -815,6 +824,10 @@ const microMeta = {
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
     help: '<b>一句話：不等 15 分鐘 K 線收完，條件一成立就馬上進場。</b><br><b>【跟 v3 的差別】</b>v3 要等這根 K 收完、確認長得對才買；v12 每分鐘看一次還在跑的那根，這一刻符合 v3 的條件就買，最多比 v3 早 15 分鐘。<br><b>【風險】</b>K 線還沒收完，形狀隨時會變。常見情況：拉上去那幾分鐘看起來是漂亮的大漲 K 棒 → v12 買進 → 收盤前被砸回來、變成長上影線（v3 收盤看到這種形狀就不會買）。所以 v12 比較容易買在高點。<br><b>【怎麼看結果】</b>同一個幣、同一根 K，如果 v3 沒開單、v12 有開，那筆就是「盤中看起來對、收盤後不對」的單，可以拿來算這種單的勝率。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><b>【1H / 2H / 4H / 8H 欄】</b>進場後過了 1、2、4、8 小時，價格比進場價漲跌多少（不管那時有沒有出場，看的是「一直抱著」會怎樣）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到。用來判斷出場是不是太早或太晚。<br><b>【健康燈號】</b>🟢 0～1 個紅旗、🟡 2 個、🔴 3 個以上，滑鼠移上去看是哪幾個；只是標示、不會擋單。四個紅旗：① 最近 1 小時買盤過熱（1 小時 CVD 超過 10%）② 24 小時漲幅不到 2% ③ 台灣時間下午 14～19 點進場 ④ 散戶做多不到 64%。⚠️ 用 10/04～10/12 的資料驗證，紅燈單並沒有比較差，只有 ③ 時段這一項前後都站得住，燈號僅供參考。<br><b>【EMA200 / 大盤欄】</b>進場當下記下的三個數字（只記錄）：「幣」= 進場價離這個幣 4H EMA200 幾 %（正 = 在上方）；「BTC ▲／▼」= BTC 4H 收盤站上／跌破 EMA200 幾 %；「廣度」= 成交額前 200 的幣有幾 % 在 4H EMA200 之上。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+  },
+  pulsarv17: {
+    title: '脈衝星v17 · v12 + 進場濾網 · 15m', load: loadPulsarV17, get: () => pulsarv17.value,
+    help: '<b>一句話：跟脈衝星v12 同一個進場，但只挑「進場當下狀態健康」的單。</b><br><b>【怎麼運作】</b>v12 每開一筆，就拿那筆進場當下記下的數字檢查下面 6 條，全部通過才在 v17 開一筆一模一樣的單（同幣、同時間、同進場價、同止損止盈，出場也跟 v12 一樣）。所以 v17 永遠是 v12 的一部分，兩頁對照就知道被濾掉的那些單到底是好是壞。<br><b>【6 條濾網】</b>① 1 小時 CVD 超過 +13% 不進（主動買盤已經爆完，進去是最後一個買家）② 散戶做多帳戶比例要 ≥ 61%（只做正在被持續做多的幣；抓不到資料也不進）③ 24 小時漲幅要 ≥ +3%（只接當天已經走強的幣，不接下跌幣的反彈）④ 幣價要在 4H EMA200 之上⑤ BTC 對上一根 15 分鐘收盤漲超過 +0.07% 不進⑥ BTC 對上一個整點收盤漲超過 +0.2% 不進（⑤⑥：BTC 剛噴就追山寨，等於追大盤，容易回吐）<br><b>【分析預期】</b>（10/04～10/31 v12 共 2,246 筆）v12 平均每筆 +0.17%、勝率 42%、一天約 83 筆；6 條全上：平均每筆 +0.82%、勝率 50%、一天約 11 筆。只有一個月、而且是大跌月的資料，實際數字一定會縮水。<br><b>【怎麼判斷有沒有用】</b>累積 150 筆後跟 v12 同期比：v17 平均每筆要比 v12 多 +0.2% 以上，否則代表濾網只是在背這個月的答案，就退回 v12。不要再往上加第 7 條濾網。<br><b>【1H / 2H / 4H / 8H 欄、健康燈號、EMA200 / 大盤欄】</b>跟 v12 頁一樣。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
   orderblock: {
     title: '訂單塊 · SMC 斐波 · 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
@@ -1431,6 +1444,7 @@ function loadAll() {
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv12')) loadPulsarV12()
+  if (canTab('pulsarv17')) loadPulsarV17()
   if (canTab('dumprev')) loadDumpRev()
   if (canTab('smchf')) loadSMCHF()
   if (canTab('orderblock')) loadOrderBlock()
@@ -1526,7 +1540,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv17', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1675,7 +1689,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', dumprev: 'admin', smchf: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv17: 'admin', dumprev: 'admin', smchf: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1739,7 +1753,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
-  pulsarv12: '脈衝星v12', dumprev: '流星', smchf: '獵戶座', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
+  pulsarv12: '脈衝星v12', pulsarv17: '脈衝星v17', dumprev: '流星', smchf: '獵戶座', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1759,7 +1773,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', dumprev: 'signal', smchf: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', pulsarv17: 'signal', dumprev: 'signal', smchf: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1767,7 +1781,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv17', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2320,6 +2334,9 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('pulsarv12', grp[0])" :class="{ active: mainTab === 'pulsarv12', lk: !canTab('pulsarv12') }" @click="navTo('pulsarv12', loadPulsarV12)">
             脈衝星v12<em v-if="pulsarv12 && pulsarv12.open.length" class="navbadge">{{ pulsarv12.open.length }}</em><i v-if="!canTab('pulsarv12')" class="navlk">🔒</i>
+          </button>
+          <button v-if="inGroup('pulsarv17', grp[0])" :class="{ active: mainTab === 'pulsarv17', lk: !canTab('pulsarv17') }" @click="navTo('pulsarv17', loadPulsarV17)">
+            脈衝星v17<em v-if="pulsarv17 && pulsarv17.open.length" class="navbadge">{{ pulsarv17.open.length }}</em><i v-if="!canTab('pulsarv17')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('dumprev', grp[0])" :class="{ active: mainTab === 'dumprev', lk: !canTab('dumprev') }" @click="navTo('dumprev', loadDumpRev)">
             流星<em v-if="dumprev && dumprev.open.length" class="navbadge">{{ dumprev.open.length }}</em><i v-if="!canTab('dumprev')" class="navlk">🔒</i>

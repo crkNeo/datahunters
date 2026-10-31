@@ -22,6 +22,7 @@ var stratTabKey = [][2]string{
 	{"bollema", "bollema"},
 	{"pulsarv3", "pulsarv3"},
 	{"pulsarv12", "pulsarv12"},
+	{"pulsarv17", "pulsarv17"},
 	{"dumprev", "dumprev"},
 	{"smchf", "smchf"},
 	{"newsalpha", "newsalpha"},
