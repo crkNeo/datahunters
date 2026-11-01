@@ -418,15 +418,18 @@ def cmd_report(a):
         except ValueError:
             continue
         pc = partial_corr(df, f, key, BASES)
-        print(f"   扣掉對照組之後的相關:{pc:+.3f}(|值|<0.05 = Kronos 沒有提供對照組以外的資訊)\n")
+        print(f"   扣掉對照組之後的相關:{pc:+.3f}(太接近 0 = Kronos 沒有提供對照組以外的資訊;門檻見總結)\n")
         summary.append((f, h1, h2, same, pc))
 
     print("== 5. 總結 ==")
-    print("過關條件:前後半 Q5−Q1 同方向、兩段差距都 ≥ 0.2%,而且扣掉對照組之後的相關 |值| ≥ 0.05、方向一致。")
+    # 相關的門檻跟著樣本數走:純隨機時相關大約落在 ±2/√n 以內,小樣本 0.2 都可能只是運氣
+    thr = max(0.05, 2 / len(df) ** 0.5)
+    print(f"過關條件:前後半 Q5−Q1 同方向、兩段差距都 ≥ 0.2%,而且扣掉對照組之後的相關 |值| ≥ {thr:.3f}"
+          f"(= 2/√{len(df)},純隨機很難超過)、方向一致。")
     if len(df) < 500:
         print(f"⚠️ 只有 {len(df)} 筆,每組不到 100 筆,結果很容易是運氣;正式判斷至少要 1000 筆。")
     print("⚠️ 一次看 8 個指標,純隨機也常有 1 個碰巧過關;只有 1 個過、或過的指標彼此矛盾,都不算數。")
-    keep = [x for x in summary if x[3] and min(abs(x[1]), abs(x[2])) >= 0.2 and abs(x[4]) >= 0.05 and x[4] * x[1] > 0]
+    keep = [x for x in summary if x[3] and min(abs(x[1]), abs(x[2])) >= 0.2 and abs(x[4]) >= thr and x[4] * x[1] > 0]
     if not keep:
         print("沒有任何指標過關 → Kronos 對 v12 的進場沒有對照組以外的分辨力,建議停在這一步。")
     for f, h1, h2, _, pc in keep:
