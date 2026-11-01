@@ -36,6 +36,9 @@ import urllib.request
 BAR = 15 * 60 * 1000  # 15m(毫秒)
 HOURS = (1, 4, 8)
 FEATS = ["k_up1", "k_up4", "k_up8", "k_ret1", "k_ret4", "k_ret8", "k_gain8", "k_dd8"]
+# 對照組:不用 Kronos 也算得出來的簡單數字。Kronos 的指標如果只是重複這些,就沒有新資訊。
+BASES = ["b_vol", "b_run1h", "b_bar"]
+KVER = "2"  # 方法版本;v1 沒把進場那根的部分 K 給模型,數字有系統性偏差,不能混用
 
 
 # ----------------------------- K 線(含本機快取) -----------------------------
@@ -68,6 +71,26 @@ def fetch_range(coin, start_ms, end_ms):
         if ok and out:
             return out
     return []
+
+
+def partial_bar(coin, bar_start, open_ms):
+    """用 1m K 拼出「進場那根 15m 到進場前一分鐘為止」的部分 K(線上 v12 進場時看到的那根)。
+    進場在那根的第一分鐘內 → 沒有可拼的,回 None。"""
+    end = open_ms // 60_000 * 60_000 - 1  # 只用已收的 1m
+    if end < bar_start:
+        return None
+    for base, path in (("https://fapi.binance.com", "/fapi/v1/klines"), ("https://api.binance.com", "/api/v3/klines")):
+        q = urllib.parse.urlencode({"symbol": coin + "USDT", "interval": "1m", "startTime": bar_start, "endTime": end, "limit": 15})
+        try:
+            rows = _get(f"{base}{path}?{q}")
+        except Exception:
+            continue
+        rows = [k for k in rows if bar_start <= int(k[0]) <= end]
+        if rows:
+            return {"ts": bar_start, "open": float(rows[0][1]), "high": max(float(k[2]) for k in rows),
+                    "low": min(float(k[3]) for k in rows), "close": float(rows[-1][4]),
+                    "volume": sum(float(k[5]) for k in rows), "amount": sum(float(k[7]) for k in rows)}
+    return None
 
 
 def load_klines(coin, start_ms, end_ms, cache_dir):
@@ -124,10 +147,13 @@ def even_sample(trades, n):
 
 # ----------------------------- predict -----------------------------
 
-def path_feats(paths, entry, open_ms, bar_start):
-    """paths:N 個 Kronos 輸出的 DataFrame(第 0 根 = 進場那根)。回傳各指標(相對進場價 %)。"""
+def path_feats(paths, base, open_ms, first_ts):
+    """paths:N 個 Kronos 輸出的 DataFrame(第 0 根的開盤時間 = first_ts)。
+    回傳各指標,都相對 base(餵給模型的最後一個價格 ≈ 進場價)的 %。"""
+    entry = base
+
     def idx(h):
-        return int((open_ms + h * 3600_000 - bar_start) // BAR)
+        return max(0, int((open_ms + h * 3600_000 - first_ts) // BAR))
     i8 = idx(8)
     rets = {h: [] for h in HOURS}
     gains, dds = [], []
@@ -143,6 +169,18 @@ def path_feats(paths, entry, open_ms, bar_start):
         f[f"k_ret{h}"] = statistics.median(rets[h])
     f["k_gain8"] = statistics.median(gains)
     f["k_dd8"] = statistics.median(dds)
+    return {k: round(v, 4) for k, v in f.items()}
+
+
+def base_feats(closed, last, entry):
+    """對照組數字。closed = 進場那根之前的已收 15m;last = 餵給模型的最後一根(部分 K 或最後一根已收)。
+    b_vol   近 24h(96 根)15m 報酬的標準差 %(這個幣平常多會動)
+    b_run1h 進場價比 1 小時前(4 根前收盤)漲了多少 %
+    b_bar   進場價比進場那根開盤漲了多少 %(盤中這根已經拉了多少;v1 的偏差就是它)"""
+    rets = [(closed[i]["close"] / closed[i - 1]["close"] - 1) * 100 for i in range(len(closed) - 96, len(closed)) if i > 0]
+    f = {"b_vol": statistics.pstdev(rets) if len(rets) > 1 else 0.0,
+         "b_run1h": (entry / closed[-4]["close"] - 1) * 100 if len(closed) >= 4 else 0.0,
+         "b_bar": (entry / (last["open"] if last["ts"] > closed[-1]["ts"] else closed[-1]["close"]) - 1) * 100}
     return {k: round(v, 4) for k, v in f.items()}
 
 
@@ -163,8 +201,11 @@ def cmd_predict(a):
     done = set()
     if os.path.exists(a.out):
         with open(a.out, encoding="utf-8-sig", newline="") as f:
+            rd = csv.DictReader(f)
+            if "k_ver" not in (rd.fieldnames or []):
+                sys.exit(f"{a.out} 是舊版方法跑的(有偏差),不能接著用 → 換一個新的 --out 檔名(或刪掉舊檔)")
             # 只算真的做完的(有結果或有註記);中斷時寫到一半的那行會重做
-            done = {r["id"] for r in csv.DictReader(f) if r.get("k_dd8") or r.get("k_note")}
+            done = {r["id"] for r in rd if r.get("k_dd8") or r.get("k_note")}
     todo = [t for t in trades if t["id"] not in done]
     print(f"共 {len(trades)} 筆,已做 {len(done)} 筆,這次要做 {len(todo)} 筆")
     if not todo:
@@ -189,14 +230,30 @@ def cmd_predict(a):
         kl[coin] = load_klines(coin, start, hi, a.cache)
         print(f"  K 線 {i}/{len(span)} {coin}:{len(kl[coin])} 根")
 
-    out_cols = list(cols) + FEATS + ["k_note"]
+    # 進場那根的部分 K(1m 拼的),一筆一個請求,存在快取裡
+    pcache_path = os.path.join(a.cache, "partial_bars.json")
+    pcache = {}
+    if os.path.exists(pcache_path):
+        with open(pcache_path) as f:
+            pcache = json.load(f)
+    need = [t for t in todo if t["id"] not in pcache]
+    for i, t in enumerate(need, 1):
+        bs = t["_open_ms"] // BAR * BAR
+        pcache[t["id"]] = partial_bar(t["coin"], bs, t["_open_ms"])
+        time.sleep(0.1)
+        if i % 100 == 0 or i == len(need):
+            print(f"  進場那根的部分 K {i}/{len(need)}", flush=True)
+            with open(pcache_path, "w") as f:
+                json.dump(pcache, f)
+
+    out_cols = list(cols) + FEATS + ["k_gap"] + BASES + ["k_ver", "k_note"]
     new_file = not os.path.exists(a.out)
     fout = open(a.out, "a", encoding="utf-8-sig" if new_file else "utf-8", newline="")
     w = csv.DictWriter(fout, fieldnames=out_cols, extrasaction="ignore")
     if new_file:
         w.writeheader()
 
-    pred_len = 33  # 進場那根 + 之後 32 根 = 涵蓋進場後 8 小時
+    pred_len = 33  # 涵蓋進場後 8 小時(還多一根)
     per = max(1, a.batch // a.paths)  # 一批幾筆單(每筆 paths 條)
     cap = [max(1, a.batch)]  # 一次最多丟幾條給模型;顯卡記憶體不夠時自動減半,之後都用減半後的
 
@@ -221,25 +278,37 @@ def cmd_predict(a):
         group, dfs, xts, yts = [], [], [], []
         for t in todo[b: b + per]:
             bar_start = t["_open_ms"] // BAR * BAR
-            hist = [k for k in kl.get(t["coin"], []) if k["ts"] < bar_start][-a.lookback:]
-            if len(hist) < a.lookback:
-                t["k_note"] = f"K線不足({len(hist)})"
+            closed = [k for k in kl.get(t["coin"], []) if k["ts"] < bar_start]
+            t["k_ver"] = KVER
+            if len(closed) < a.lookback:
+                t["k_note"] = f"K線不足({len(closed)})"
                 w.writerow(t)
                 continue
+            # 跟線上 v12 看到的一樣:前面已收的 K + 進場那根到進場為止的部分 K;預測從下一根開始。
+            # 進場在那根第一分鐘內(沒有部分 K)→ 只給已收的,預測從進場那根開始。
+            part = pcache.get(t["id"])
+            if part:
+                hist, first_ts = closed[-(a.lookback - 1):] + [part], bar_start + BAR
+            else:
+                hist, first_ts = closed[-a.lookback:], bar_start
+            base = hist[-1]["close"]
+            entry = float(t["entry"])
+            t.update(base_feats(closed, hist[-1], entry))
+            t["k_gap"] = round((entry / base - 1) * 100, 4)  # 進場價 vs 餵給模型的最後價格(應接近 0)
             df = pd.DataFrame(hist)
             x_df = df[["open", "high", "low", "close", "volume", "amount"]].reset_index(drop=True)
             x_ts = pd.Series(pd.to_datetime(df["ts"], unit="ms")).reset_index(drop=True)
-            y_ts = pd.Series(pd.to_datetime([bar_start + i * BAR for i in range(pred_len)], unit="ms"))
-            group.append((t, bar_start))
+            y_ts = pd.Series(pd.to_datetime([first_ts + i * BAR for i in range(pred_len)], unit="ms"))
+            group.append((t, base, first_ts))
             for _ in range(a.paths):  # 同一筆重複 N 次 = N 條獨立抽樣的走勢
                 dfs.append(x_df)
                 xts.append(x_ts)
                 yts.append(y_ts)
         if group:
             outs = run(dfs, xts, yts)
-            for gi, (t, bar_start) in enumerate(group):
+            for gi, (t, base, first_ts) in enumerate(group):
                 paths = outs[gi * a.paths:(gi + 1) * a.paths]
-                t.update(path_feats(paths, float(t["entry"]), t["_open_ms"], bar_start))
+                t.update(path_feats(paths, base, t["_open_ms"], first_ts))
                 t["k_note"] = ""
                 w.writerow(t)
         fout.flush()
@@ -257,9 +326,50 @@ TARGETS = [("pnl_pct", "損益%"), ("after_1h", "1H%"), ("after_4h", "4H%"), ("a
 # 資料庫直接倒出來的檔有 realized(分批實際結算的加權損益,沒有階梯口徑的高估)→ 有就一起看,並拿它當過關依據
 
 
+def quint(df, f, key, label):
+    """印 f 分 5 組的表,回傳前 / 後半各自的 Q5−Q1(用 key 的平均)。"""
+    import pandas as pd
+    df = df.copy()
+    df["q"] = pd.qcut(df[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+    g = df.groupby("q", observed=True).agg(筆數=(key, "size"), 平均損益=(key, "mean"),
+                                          勝率=("win", "mean"), 平均8H=("after_8h", "mean"),
+                                          平均最大獲利=("max_gain", "mean"), 進場即最高=("ceil", "mean"),
+                                          預測值=(f, "mean"))
+    g["勝率"] = (g["勝率"] * 100).round(0)
+    g["進場即最高"] = (g["進場即最高"] * 100).round(0)
+    print(f"--- {f}{label} ---")
+    print(g.round(3).to_string())
+    diff = {}
+    for h, d in df.groupby("half"):  # 前後半各自分 5 組(用各自的高低)
+        qh = pd.qcut(d[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+        qq = d.groupby(qh, observed=True)[key].mean()
+        diff[h] = qq.get("Q5", float("nan")) - qq.get("Q1", float("nan"))
+    h1, h2 = diff.get("前半", float("nan")), diff.get("後半", float("nan"))
+    same = h1 * h2 > 0
+    print(f"Q5−Q1 平均損益差:前半 {h1:+.2f}% / 後半 {h2:+.2f}% → {'前後同方向' if same else '前後不一致(不可靠)'}\n")
+    return h1, h2, same
+
+
+def partial_corr(df, f, y, ctrl):
+    """扣掉對照組之後的 Spearman:f、y 各自的排名先減掉「能被對照組排名線性解釋的部分」,再算相關。"""
+    import numpy as np
+    d = df[[f, y] + ctrl].dropna()
+    if len(d) < 10:
+        return float("nan")
+    X = np.column_stack([np.ones(len(d))] + [d[c].rank().values for c in ctrl])
+
+    def resid(v):
+        beta, *_ = np.linalg.lstsq(X, v, rcond=None)
+        return v - X @ beta
+    rf, ry = resid(d[f].rank().values), resid(d[y].rank().values)
+    return float(np.corrcoef(rf, ry)[0, 1])
+
+
 def cmd_report(a):
     import pandas as pd
     df = pd.read_csv(a.pred, encoding="utf-8-sig", na_values=["NULL"], dtype={"open_time": str})
+    if "k_ver" not in df.columns:
+        sys.exit("這個檔是舊版方法跑的(沒把進場那根的部分 K 給模型,預測整體偏空),結果不能用 → 用新版重跑")
     df = df.drop_duplicates("id", keep="last")  # 中斷重跑時同一筆可能寫了兩次
     df = df[(df["k_note"].isna() | (df["k_note"] == "")) & df["k_dd8"].notna()].copy()
     if df.empty:
@@ -281,48 +391,46 @@ def cmd_report(a):
     if key == "realized":
         print(f"(頁面口徑 pnl_pct 平均 {df['pnl_pct'].mean():+.2f}%;以下「損益」「勝率」「過關」都用真實損益 realized)")
     print(f"全部:平均損益 {df[key].mean():+.2f}% · 勝率 {df['win'].mean() * 100:.0f}% · "
-          f"8H 平均 {df['after_8h'].mean():+.2f}% · 「進場即最高」比例 {df['ceil'].mean() * 100:.0f}%\n")
+          f"8H 平均 {df['after_8h'].mean():+.2f}% · 「進場即最高」比例 {df['ceil'].mean() * 100:.0f}%")
+    print(f"檢查:進場價 vs 餵給模型的最後價格 中位數差 {df['k_gap'].median():+.2f}%(要接近 0);"
+          f"看漲機率 k_up8 平均 {df['k_up8'].mean():.2f}、預測 8H 中位數 {df['k_ret8'].median():+.2f}%"
+          f"(偏離 0.5 / 0 太多 = 模型整體偏多或偏空)\n")
 
     print("== 1. 相關性(Spearman,|值|>0.05 才算有點東西;正 = 預測越高、實際越好)==")
     # Spearman = 排名後的 Pearson(自己算,不用另外裝 scipy)
     corr = pd.DataFrame({lab: [df[f].rank().corr(df[c].rank()) for f in FEATS] for c, lab in targets}, index=FEATS)
     print(corr.round(3).to_string(), "\n")
 
-    print("== 2. 分 5 組(Q1 = 預測最低、Q5 = 最高)==")
+    print("== 2. Kronos 指標跟對照組有多像(|值| 接近 1 = 只是換個方式算同一件事)==")
+    print("    b_vol = 這個幣平常多會動、b_run1h = 進場前 1 小時漲多少、b_bar = 進場那根盤中已經拉了多少")
+    sim = pd.DataFrame({b: [df[f].rank().corr(df[b].rank()) for f in FEATS] for b in BASES}, index=FEATS)
+    print(sim.round(2).to_string(), "\n")
+
+    print("== 3. 對照組自己的分組(不用 Kronos 就有的資訊,當作比較基準)==")
+    for b in BASES:
+        quint(df, b, key, "(對照組)")
+
+    print("== 4. Kronos 指標分 5 組(Q1 = 預測最低、Q5 = 最高)==")
     summary = []
     for f in FEATS:
         try:
-            df["q"] = pd.qcut(df[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+            h1, h2, same = quint(df, f, key, "")
         except ValueError:
             continue
-        g = df.groupby("q", observed=True).agg(筆數=(key, "size"), 平均損益=(key, "mean"),
-                                              勝率=("win", "mean"), 平均8H=("after_8h", "mean"),
-                                              平均最大獲利=("max_gain", "mean"), 進場即最高=("ceil", "mean"),
-                                              預測值=(f, "mean"))
-        g["勝率"] = (g["勝率"] * 100).round(0)
-        g["進場即最高"] = (g["進場即最高"] * 100).round(0)
-        print(f"--- {f} ---")
-        print(g.round(3).to_string())
-        # 前後半各自分 5 組(用各自的高低),看 Q5−Q1 是不是同方向
-        diff = {}
-        for h, d in df.groupby("half"):
-            qh = pd.qcut(d[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
-            qq = d.groupby(qh, observed=True)[key].mean()
-            diff[h] = qq.get("Q5", float("nan")) - qq.get("Q1", float("nan"))
-        same = diff.get("前半", 0) * diff.get("後半", 0) > 0
-        print(f"Q5−Q1 平均損益差:前半 {diff.get('前半', float('nan')):+.2f}% / 後半 {diff.get('後半', float('nan')):+.2f}%"
-              f" → {'前後同方向' if same else '前後不一致(不可靠)'}\n")
-        summary.append((f, diff.get("前半", float("nan")), diff.get("後半", float("nan")), same))
+        pc = partial_corr(df, f, key, BASES)
+        print(f"   扣掉對照組之後的相關:{pc:+.3f}(|值|<0.05 = Kronos 沒有提供對照組以外的資訊)\n")
+        summary.append((f, h1, h2, same, pc))
 
-    print("== 3. 總結(只看前後同方向、且兩段差距都 ≥ 0.2% 的)==")
+    print("== 5. 總結 ==")
+    print("過關條件:前後半 Q5−Q1 同方向、兩段差距都 ≥ 0.2%,而且扣掉對照組之後的相關 |值| ≥ 0.05、方向一致。")
     if len(df) < 500:
-        print(f"⚠️ 只有 {len(df)} 筆,每組不到 100 筆,結果很容易是運氣;正式判斷請跑全部的單。")
+        print(f"⚠️ 只有 {len(df)} 筆,每組不到 100 筆,結果很容易是運氣;正式判斷至少要 1000 筆。")
     print("⚠️ 一次看 8 個指標,純隨機也常有 1 個碰巧過關;只有 1 個過、或過的指標彼此矛盾,都不算數。")
-    keep = [s for s in summary if s[3] and min(abs(s[1]), abs(s[2])) >= 0.2]
+    keep = [x for x in summary if x[3] and min(abs(x[1]), abs(x[2])) >= 0.2 and abs(x[4]) >= 0.05 and x[4] * x[1] > 0]
     if not keep:
-        print("沒有任何指標過關 → Kronos 對 v12 的進場沒有可靠的分辨力,建議停在這一步。")
-    for f, h1, h2, _ in keep:
-        print(f"{f}:Q5−Q1 前半 {h1:+.2f}% / 後半 {h2:+.2f}% → 值得進下一步(上線只記錄、不擋單)")
+        print("沒有任何指標過關 → Kronos 對 v12 的進場沒有對照組以外的分辨力,建議停在這一步。")
+    for f, h1, h2, _, pc in keep:
+        print(f"{f}:Q5−Q1 前半 {h1:+.2f}% / 後半 {h2:+.2f}%,扣掉對照組後相關 {pc:+.3f} → 值得進下一步(上線只記錄、不擋單)")
 
 
 def main():
