@@ -296,6 +296,13 @@ def cmd_report(a):
 
 
 def main():
+    # Windows 的主控台 / 導到檔案時預設是 cp950,印「−」「⚠️」會整個掛掉 → 一律用 UTF-8
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    print("kronos_eval 開始執行 …", flush=True)
     ap = argparse.ArgumentParser(description="Kronos × 脈衝星v12 離線驗證")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("predict", help="對每筆單跑 Kronos 預測")
