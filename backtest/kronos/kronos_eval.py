@@ -198,6 +198,24 @@ def cmd_predict(a):
 
     pred_len = 33  # 進場那根 + 之後 32 根 = 涵蓋進場後 8 小時
     per = max(1, a.batch // a.paths)  # 一批幾筆單(每筆 paths 條)
+    cap = [max(1, a.batch)]  # 一次最多丟幾條給模型;顯卡記憶體不夠時自動減半,之後都用減半後的
+
+    def run(dfs, xts, yts):
+        """丟給 Kronos;顯卡記憶體不夠就切成兩半分開跑(結果順序不變)。"""
+        if len(dfs) > cap[0]:
+            k = cap[0]
+            return run(dfs[:k], xts[:k], yts[:k]) + run(dfs[k:], xts[k:], yts[k:])
+        try:
+            return pred.predict_batch(df_list=dfs, x_timestamp_list=xts, y_timestamp_list=yts,
+                                      pred_len=pred_len, T=a.temp, top_p=a.top_p, sample_count=1, verbose=False)
+        except RuntimeError as e:
+            if "out of memory" not in str(e) or len(dfs) <= 1:
+                raise
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            cap[0] = max(1, len(dfs) // 2)
+            print(f"  顯卡記憶體不夠 → 改成一次 {cap[0]} 條(下次可以直接加 --batch {cap[0]})", flush=True)
+            return run(dfs, xts, yts)
     t0, n_done = time.time(), 0
     for b in range(0, len(todo), per):
         group, dfs, xts, yts = [], [], [], []
@@ -218,8 +236,7 @@ def cmd_predict(a):
                 xts.append(x_ts)
                 yts.append(y_ts)
         if group:
-            outs = pred.predict_batch(df_list=dfs, x_timestamp_list=xts, y_timestamp_list=yts,
-                                      pred_len=pred_len, T=a.temp, top_p=a.top_p, sample_count=1, verbose=False)
+            outs = run(dfs, xts, yts)
             for gi, (t, bar_start) in enumerate(group):
                 paths = outs[gi * a.paths:(gi + 1) * a.paths]
                 t.update(path_feats(paths, float(t["entry"]), t["_open_ms"], bar_start))
