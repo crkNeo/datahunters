@@ -163,7 +163,8 @@ def cmd_predict(a):
     done = set()
     if os.path.exists(a.out):
         with open(a.out, encoding="utf-8-sig", newline="") as f:
-            done = {r["id"] for r in csv.DictReader(f)}
+            # 只算真的做完的(有結果或有註記);中斷時寫到一半的那行會重做
+            done = {r["id"] for r in csv.DictReader(f) if r.get("k_dd8") or r.get("k_note")}
     todo = [t for t in trades if t["id"] not in done]
     print(f"共 {len(trades)} 筆,已做 {len(done)} 筆,這次要做 {len(todo)} 筆")
     if not todo:
@@ -242,7 +243,8 @@ TARGETS = [("pnl_pct", "損益%"), ("after_1h", "1H%"), ("after_4h", "4H%"), ("a
 def cmd_report(a):
     import pandas as pd
     df = pd.read_csv(a.pred, encoding="utf-8-sig", na_values=["NULL"], dtype={"open_time": str})
-    df = df[df["k_note"].isna() | (df["k_note"] == "")].copy()
+    df = df.drop_duplicates("id", keep="last")  # 中斷重跑時同一筆可能寫了兩次
+    df = df[(df["k_note"].isna() | (df["k_note"] == "")) & df["k_dd8"].notna()].copy()
     if df.empty:
         sys.exit("沒有預測完成的資料")
     targets = list(TARGETS)
