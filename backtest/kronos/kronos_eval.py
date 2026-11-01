@@ -89,7 +89,11 @@ def load_klines(coin, start_ms, end_ms, cache_dir):
 # ----------------------------- 讀匯出的 CSV -----------------------------
 
 def parse_ms(s):
+    """時間欄兩種格式都吃:網站匯出的 RFC3339 文字,或資料庫直接倒出來的毫秒數字。"""
     from datetime import datetime
+    s = s.strip()
+    if s.isdigit():
+        return int(s)
     return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp() * 1000)
 
 
@@ -232,30 +236,37 @@ def cmd_predict(a):
 # ----------------------------- report -----------------------------
 
 TARGETS = [("pnl_pct", "損益%"), ("after_1h", "1H%"), ("after_4h", "4H%"), ("after_8h", "8H%"), ("max_gain", "最大獲利%")]
+# 資料庫直接倒出來的檔有 realized(分批實際結算的加權損益,沒有階梯口徑的高估)→ 有就一起看,並拿它當過關依據
 
 
 def cmd_report(a):
     import pandas as pd
-    df = pd.read_csv(a.pred, encoding="utf-8-sig")
+    df = pd.read_csv(a.pred, encoding="utf-8-sig", na_values=["NULL"], dtype={"open_time": str})
     df = df[df["k_note"].isna() | (df["k_note"] == "")].copy()
     if df.empty:
         sys.exit("沒有預測完成的資料")
-    for c, _ in TARGETS:
-        df[c] = pd.to_numeric(df.get(c), errors="coerce")
-    df["open_dt"] = pd.to_datetime(df["open_time"], utc=True)
+    targets = list(TARGETS)
+    if "realized" in df.columns:
+        targets.insert(1, ("realized", "真實損益%"))
+    key = "realized" if "realized" in df.columns else "pnl_pct"  # 過關看哪個損益
+    for c, _ in targets:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["open_dt"] = pd.to_datetime(df["open_time"].map(parse_ms), unit="ms", utc=True)
     df = df.sort_values("open_dt").reset_index(drop=True)
     df["half"] = ["前半" if i < len(df) / 2 else "後半" for i in range(len(df))]
-    df["win"] = df["pnl_pct"] > 0
+    df["win"] = df[key] > 0
     df["ceil"] = df["max_gain"] < 1.8  # 「進場即最高」:進場後從沒漲超過 +1.8%
     pd.set_option("display.width", 200)
 
     print(f"樣本 {len(df)} 筆 · {df['open_dt'].min():%m/%d} ~ {df['open_dt'].max():%m/%d}")
-    print(f"全部:平均損益 {df['pnl_pct'].mean():+.2f}% · 勝率 {df['win'].mean() * 100:.0f}% · "
+    if key == "realized":
+        print(f"(頁面口徑 pnl_pct 平均 {df['pnl_pct'].mean():+.2f}%;以下「損益」「勝率」「過關」都用真實損益 realized)")
+    print(f"全部:平均損益 {df[key].mean():+.2f}% · 勝率 {df['win'].mean() * 100:.0f}% · "
           f"8H 平均 {df['after_8h'].mean():+.2f}% · 「進場即最高」比例 {df['ceil'].mean() * 100:.0f}%\n")
 
     print("== 1. 相關性(Spearman,|值|>0.05 才算有點東西;正 = 預測越高、實際越好)==")
     # Spearman = 排名後的 Pearson(自己算,不用另外裝 scipy)
-    corr = pd.DataFrame({lab: [df[f].rank().corr(df[c].rank()) for f in FEATS] for c, lab in TARGETS}, index=FEATS)
+    corr = pd.DataFrame({lab: [df[f].rank().corr(df[c].rank()) for f in FEATS] for c, lab in targets}, index=FEATS)
     print(corr.round(3).to_string(), "\n")
 
     print("== 2. 分 5 組(Q1 = 預測最低、Q5 = 最高)==")
@@ -265,7 +276,7 @@ def cmd_report(a):
             df["q"] = pd.qcut(df[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
         except ValueError:
             continue
-        g = df.groupby("q", observed=True).agg(筆數=("pnl_pct", "size"), 平均損益=("pnl_pct", "mean"),
+        g = df.groupby("q", observed=True).agg(筆數=(key, "size"), 平均損益=(key, "mean"),
                                               勝率=("win", "mean"), 平均8H=("after_8h", "mean"),
                                               平均最大獲利=("max_gain", "mean"), 進場即最高=("ceil", "mean"),
                                               預測值=(f, "mean"))
@@ -277,7 +288,7 @@ def cmd_report(a):
         diff = {}
         for h, d in df.groupby("half"):
             qh = pd.qcut(d[f].rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
-            qq = d.groupby(qh, observed=True)["pnl_pct"].mean()
+            qq = d.groupby(qh, observed=True)[key].mean()
             diff[h] = qq.get("Q5", float("nan")) - qq.get("Q1", float("nan"))
         same = diff.get("前半", 0) * diff.get("後半", 0) > 0
         print(f"Q5−Q1 平均損益差:前半 {diff.get('前半', float('nan')):+.2f}% / 後半 {diff.get('後半', float('nan')):+.2f}%"
