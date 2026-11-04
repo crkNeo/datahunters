@@ -76,3 +76,10 @@ export function outcomeCls(o, pnl) {
   // manual/momdead 對外當逾時 → 落到 expired 樣式(灰色),與文字一致
   return 'expired'
 }
+
+// 策略頁「已結束」列表的起點(含本月共三個月,跟後端 strathistory.go 的 histFromMs 一致),例如 11 月 → "9/1"
+export function histSince() {
+  const d = new Date()
+  const from = new Date(d.getFullYear(), d.getMonth() - 2, 1)
+  return `${from.getMonth() + 1}/1`
+}

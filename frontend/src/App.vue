@@ -11,7 +11,7 @@ import ReferralRules from './components/admin/ReferralRules.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { token, setToken, authFetch, setUnauthorizedHandler } from './lib/api'
 import { validImage, uploadImage } from './lib/upload'
-import { fmtPct, fmtPrice, fmtNum, fundClock, fmtClock, lvlPct, pctOf, outcomeCls, outcomeCN as convOutcome } from './lib/format'
+import { fmtPct, fmtPrice, fmtNum, fundClock, fmtClock, lvlPct, pctOf, outcomeCls, outcomeCN as convOutcome, histSince } from './lib/format'
 import { socialInfo, socialSvg } from './lib/social'
 import SectorBoard from './components/SectorBoard.vue'
 import StrategyBook from './components/StrategyBook.vue'
@@ -902,7 +902,7 @@ function withinWin(iso) {
 }
 const scoreLogF = computed(() => scoreLog.value.filter((e) => withinWin(e.time)))
 // filterBook:整理一個策略 state(open/closed)供顯示。進行中(open)是即時部位,一律全列;
-// 已結束記錄與上方統計改由後端 /api/strat-history 提供(記錄=本月、統計=全歷史),這裡不再依時間窗過濾。
+// 已結束記錄與上方統計改由後端 /api/strat-history 提供(記錄=含本月共三個月、統計=全歷史),這裡不再依時間窗過濾。
 function filterBook(b) {
   if (!b) return null
   const open = b.open || []
@@ -3107,7 +3107,7 @@ watch([role, tabPerms, authReady], () => {
       </table></div>
       <p v-else-if="bookF" class="empty">目前無進行中的模擬部位</p>
 
-      <h3 class="psub" v-if="paperHist.total">本月已結束 ({{ paperHist.total }})</h3>
+      <h3 class="psub" v-if="paperHist.total">近三個月已結束 <small class="tsmall">{{ histSince() }} 起</small> ({{ paperHist.total }})</h3>
       <div class="tblwrap" v-if="paperHist.rows.length"><table class="grid">
         <thead><tr><th>幣種</th><th>方向</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th class="r" title="進場時資金費率">費率</th><th class="r">進場時間</th><th class="r">出場時間</th><th class="r">持倉</th></tr></thead>
         <tbody>
@@ -3127,7 +3127,7 @@ watch([role, tabPerms, authReady], () => {
         </tbody>
       </table></div>
       <PageNav :page="paperHist.page" :pages="paperHist.pages" :total="paperHist.total" @go="(p) => (paperPage = p)" />
-      <p v-if="bookF && !paperHist.total" class="empty">本月尚無已結束的模擬交易</p>
+      <p v-if="bookF && !paperHist.total" class="empty">近三個月尚無已結束的模擬交易</p>
     </section>
 
     <!-- 財經事件 (high-impact US economic calendar) -->

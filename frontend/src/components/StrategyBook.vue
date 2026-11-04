@@ -13,7 +13,7 @@
 -->
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { fmtPct, fmtPrice, fmtClock, lvlPct, pctOf, outcomeCN, outcomeCls } from '../lib/format'
+import { fmtPct, fmtPrice, fmtClock, lvlPct, pctOf, outcomeCN, outcomeCls, histSince } from '../lib/format'
 import { authFetch } from '../lib/api'
 import PageNav from './PageNav.vue'
 
@@ -224,7 +224,7 @@ function tpStatusCls(t) {
     </table>
     </div>
 
-    <h3 class="psub" v-if="hist.total">本月已結束 ({{ hist.total }})</h3>
+    <h3 class="psub" v-if="hist.total">近三個月已結束 <small class="tsmall">{{ histSince() }} 起</small> ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
       <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
       <tbody>
