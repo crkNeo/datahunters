@@ -17,8 +17,9 @@ import (
 //	         同一根 1h 同時碰到上緣和下緣(方向不明)、或先碰到下緣 → 今天不再交易
 //	出場     UTC 換日那一刻(當日收盤價)平倉,不留倉過夜;沒有停損、沒有止盈
 //
-// 實作:每小時收盤後,拿今天已收的 1h K 從頭重播一次,決定今天是「還在等 / 已成交 / 不做了」——
-// 結果只由 K 線決定,停機期間觸價的開機後照樣補進場。還在等的幣在頁面上顯示成「待觸發」
+// 實作:每小時收盤後,拿今天已收的 1h K 從頭重播一次,決定今天是「還在等 / 已成交 / 不做了」。
+// 伺服器開機那一小時之前就碰到上緣的,當天算「錯過」:不補記成交(那時系統沒在跑,實盤也進不了),
+// 也不再顯示待觸發;開機前已經成交、存在 DB 的單照常管到換日平倉。還在等的幣在頁面上顯示成「待觸發」
 // (觸發價 = 上緣,只放記憶體、每小時重算,不寫 DB)。觀察用,observeOnlyBooks 保證不會跟實單。
 const (
 	vbK      = 0.5 // 上 / 下緣 = 開盤 ± 0.5 × 前一日振幅
@@ -184,6 +185,9 @@ func (s *Store) VolBrkTick() {
 			}
 			if !exists {
 				state, px, at := vbReplay(hours, plan)
+				if state == vbFilled && at < s.vbEng.start/dcBarMs*dcBarMs {
+					state = vbDead // 開機前就觸價了 → 錯過,不補記
+				}
 				switch state {
 				case vbFilled:
 					tr := &PaperTrade{ID: id, Coin: coin, Dir: "long", Entry: roundPx(px), Cur: roundPx(px),

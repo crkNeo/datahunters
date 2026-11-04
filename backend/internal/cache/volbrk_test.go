@@ -123,3 +123,32 @@ func TestVolBrkTickTrendOffAndEOD(t *testing.T) {
 		t.Fatalf("yesterday's trade should close at yesterday's close: %+v", tr)
 	}
 }
+
+func TestVolBrkNoCatchUpBeforeBoot(t *testing.T) {
+	if time.Now().UnixMilli()%vbDayMs < 3*dcBarMs {
+		t.Skip("UTC 前 3 個小時內今天的已收 1h K 不夠,測不到")
+	}
+	// 兩小時前就碰到上緣,伺服器現在才開機 → 錯過:不補記成交、也不顯示待觸發
+	s, _ := vbStore(t, "AAA", func(hours, _ []exchange.Candle) { hours[len(hours)-3].High = 102.5 })
+	s.vbEng = &hourEngine{}
+	s.VolBrkTick()
+	if n := len(s.volBrkBook.trades); n != 0 {
+		t.Fatalf("touched before boot must not be back-filled, got %+v", s.volBrkBook.trades[0])
+	}
+	// 開機那一小時之後才碰到 → 正常進場
+	s2, _ := vbStore(t, "AAA", func(hours, _ []exchange.Candle) { hours[len(hours)-2].High = 102.5 })
+	s2.vbEng = &hourEngine{seeded: true, start: time.Now().Add(-90 * time.Minute).UnixMilli()}
+	s2.VolBrkTick()
+	if tr := s2.volBrkBook.trades; len(tr) != 1 || tr[0].Status != "open" {
+		t.Fatalf("touch after boot should fill: %+v", tr)
+	}
+	// 開機前已成交、從 DB 載回來的單 → 照常管(不會因為「開機前」被拿掉)
+	s3, day := vbStore(t, "AAA", func(hours, _ []exchange.Candle) { hours[len(hours)-3].High = 102.5 })
+	s3.vbEng = &hourEngine{}
+	s3.volBrkBook.trades = []*PaperTrade{{ID: fmt.Sprintf("volbrk|AAA|%d", day), Coin: "AAA", Dir: "long", Entry: 102,
+		Status: "open", OpenTime: time.UnixMilli(day + dcBarMs)}}
+	s3.VolBrkTick()
+	if tr := s3.volBrkBook.trades; len(tr) != 1 || tr[0].Status != "open" {
+		t.Fatalf("trade opened before the restart must stay: %+v", tr)
+	}
+}

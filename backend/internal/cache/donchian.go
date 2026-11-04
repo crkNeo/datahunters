@@ -59,6 +59,7 @@ type hourEngine struct {
 	bucket int64           // 處理到哪一個小時
 	seeded bool            // 開機第一輪(只管持倉、不進場)跑過了沒
 	boot   bool            // 這一小時是不是開機第一輪
+	start  int64           // 開機那一刻(ms);0 = 不限制(測試用)
 	pend   map[string]bool // 這一小時還沒處理到的幣(交易所新棒還沒生成 → 下一分鐘再試)
 }
 
@@ -68,6 +69,9 @@ func (e *hourEngine) due(now time.Time, coins func() []string) []string {
 	if bkt != e.bucket {
 		e.bucket = bkt
 		e.boot = !e.seeded
+		if e.boot {
+			e.start = now.UnixMilli()
+		}
 		e.seeded = true
 		e.pend = map[string]bool{}
 		for _, c := range coins() {
