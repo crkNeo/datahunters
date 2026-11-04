@@ -48,3 +48,21 @@ func TestAfterJobs(t *testing.T) {
 		t.Fatal("given-up slot should be skipped")
 	}
 }
+
+func TestAfterVolBrkHours(t *testing.T) {
+	now := time.Now().UnixMilli()
+	open := now - int64(20*time.Hour/time.Millisecond) // 20 小時前進場:1~16H 都到期
+	vb := &microBook{name: "volbrk"}
+	vb.trades = []*PaperTrade{
+		{ID: "v", Coin: "VVV", Entry: 1, Status: "closed", OpenTime: time.UnixMilli(open)},
+		{ID: "p", Coin: "PPP", Entry: 1, Status: "pending", OpenTime: time.UnixMilli(open)}, // 待觸發計畫不補
+	}
+	s := &Store{volBrkBook: vb}
+	n := map[string]int{}
+	for _, j := range s.afterMemTodo(now) {
+		n[j.id]++
+	}
+	if n["v"] != 5 || n["p"] != 0 { // 波動突破補到 16H(1/2/4/8/16)
+		t.Fatalf("jobs = %v", n)
+	}
+}

@@ -74,8 +74,8 @@ const tfLabel = (tf) => (tf || '').toUpperCase()
 
 // 脈衝星v3 專屬:進場 AI 參考信心分數(後端 pulsarai.go)。只有該策略、且有單已算出分數才顯示欄。
 const hasAI = computed(() => props.book === 'pulsarv3' && (props.state?.open || []).some((t) => t.ai_score))
-// 進場後 N 小時的價格相對進場價漲跌%(後端 afterprice.go 回填):脈衝星v12 到 8H。
-const hasAfter = computed(() => props.book === 'pulsarv12')
+// 進場後 N 小時的價格相對進場價漲跌%(後端 afterprice.go 回填):脈衝星v12 到 8H、波動突破到 16H。
+const hasAfter = computed(() => props.book === 'pulsarv12' || props.book === 'volbrk')
 // 脈衝星v12:進場健康度燈號(後端 pulsarhealth.go 依進場因子算)
 const hasHealth = computed(() => props.book === 'pulsarv12')
 const HEALTH = { green: ['🟢', '健康'], yellow: ['🟡', '謹慎'], red: ['🔴', '不健康'] }
@@ -88,13 +88,17 @@ const regimeTip = (t) => !hasRegime(t) ? '這筆沒有 EMA200 資料(功能上�
     (t.breadth ? `全市場:成交額前 200 幣有 ${t.breadth.toFixed(0)}% 在 4H EMA200 之上` : '全市場:沒有資料')
 const healthTip = (t) => !t.health ? '這筆沒有進場因子資料' : HEALTH[t.health][1] + '|' + (t.health_flags && t.health_flags.length ? '紅旗:' + t.health_flags.join('、') : '沒有紅旗')
 const AFTER_ALL = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8], ['after_16h', '16H', 16], ['after_24h', '24H', 24]]
-const AFTER = computed(() => AFTER_ALL.slice(0, 4))
+const AFTER = computed(() => AFTER_ALL.slice(0, props.book === 'volbrk' ? 5 : 4))
+// 波動突破:沒有停損,記「最大回撤」(進場後到平倉前最不利的位置,≤ 0)
+const hasDD = computed(() => props.book === 'volbrk')
 // 還沒到時間(或剛到、下一分鐘才補)→「待」;到了卻沒有值 → 「—」
 const afterWait = (t, h) => Date.now() < Date.parse(t.open_time) + h * 3600e3 + 3 * 60e3
 // 波動突破:沒有止損 / 止盈,UTC 換日(台北 08:00)收盤平倉 → 進行中顯示「還剩多久換日」
 const hasTimer = computed(() => props.book === 'volbrk')
 // 唐奇安:沒有止盈(獲利靠通道出場)→ TP 欄換成「目前的 ATR(24)」,每小時收盤後更新
 const hasATR = computed(() => props.book === 'donchian')
+// 沒有止盈的書(唐奇安改顯示 ATR、波動突破換日平倉)→ 不顯示永遠是「—」的 TP1 / TP2 / 最終
+const noTP = computed(() => hasATR.value || props.book === 'volbrk')
 const atrPct = (t) => (t.cur > 0 && t.atr ? (t.atr / t.cur * 100).toFixed(2) + '%' : '')
 function atrTip(t) {
   const entryATR = Math.abs(t.entry - t.sl) / 3 // 停損 = 進場 ∓ 3×進場時的 ATR
@@ -178,7 +182,7 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(沒有停損,用來看設停損會砍掉哪些單)">最大回撤</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else-if="!noTP"><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -205,13 +209,14 @@ function tpStatusCls(t) {
             <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
           <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+          <td v-if="hasDD" class="r short"><b v-if="t.status !== 'pending' && t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">{{ t.status === 'pending' ? '—' : '0%' }}</span></td>
           <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
-            <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
+            <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ t.status !== 'pending' && afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template><span v-else class="tsmall">無</span></td>
           <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft() }}</td>
           <td v-if="hasATR" class="r tp-cell nowrap" :title="atrTip(t)"><template v-if="t.atr">{{ fmtPrice(t.atr) }}<small class="tppct">{{ atrPct(t) }}</small></template><span v-else class="tsmall">待</span></td>
-          <template v-else>
+          <template v-else-if="!noTP">
             <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
             <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
             <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
@@ -226,7 +231,7 @@ function tpStatusCls(t) {
 
     <h3 class="psub" v-if="hist.total">近三個月已結束 <small class="tsmall">{{ histSince() }} 起</small> ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(沒有停損,用來看設停損會砍掉哪些單)">最大回撤</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in hist.rows" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -247,6 +252,7 @@ function tpStatusCls(t) {
             <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
           <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
+          <td v-if="hasDD" class="r short"><b v-if="t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">0%</span></td>
           <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>

@@ -127,6 +127,9 @@ type PaperTrade struct {
 	// 唐奇安持倉:目前的 ATR(24)(最新 24 根已收 1h 的平均真實波幅),每小時收盤後更新。
 	// 只放記憶體(開機後第一輪就會算回來),不寫 DB。
 	ATR float64 `json:"atr,omitempty"`
+
+	// 最大回撤%:進場後到平倉前,價格最不利的位置相對進場價(≤ 0,例如 −3.2)。目前只有波動突破會記。
+	MaxDD float64 `json:"max_dd,omitempty"`
 }
 
 // PaperStats summarises closed trades.

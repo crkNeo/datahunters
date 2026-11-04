@@ -123,3 +123,44 @@ func TestVolBrkTickTrendOffAndEOD(t *testing.T) {
 		t.Fatalf("yesterday's trade should close at yesterday's close: %+v", tr)
 	}
 }
+
+func TestVolBrkFillDD(t *testing.T) {
+	m := func(o, h, l, c float64) exchange.Candle { return exchange.Candle{Open: o, High: h, Low: l, Close: c} }
+	// 先在 95 晃(買進之前的低點不算)→ 第 3 分鐘碰到 100(收 100.5)→ 之後最低 98
+	ms := []exchange.Candle{m(97, 98, 95, 97), m(97, 99, 96, 98.5), m(98.5, 100.2, 98, 100.5), m(100.5, 101, 98, 99), m(99, 100, 99, 99.5)}
+	if dd := fillDD(ms, 100, 100); dd != -2 {
+		t.Fatalf("drawdown after the touch = %v, want -2", dd)
+	}
+	// 碰到那一分鐘收盤就在進場價之下 → 用收盤
+	if dd := fillDD([]exchange.Candle{m(99, 100.1, 98, 99.4)}, 100, 100); dd != -0.6 {
+		t.Fatalf("touch-minute close = %v, want -0.6", dd)
+	}
+	// 跳空:開盤就在上緣之上 → 那一分鐘的低點也算
+	if dd := fillDD([]exchange.Candle{m(103, 104, 101, 103.5)}, 100, 103); dd != -1.94 {
+		t.Fatalf("gap fill = %v, want -1.94", dd)
+	}
+	// 一路漲 → 0
+	if dd := fillDD([]exchange.Candle{m(99, 100.5, 99, 100.4), m(100.4, 102, 100.2, 101.5)}, 100, 100); dd != 0 {
+		t.Fatalf("no drawdown = %v", dd)
+	}
+}
+
+func TestVolBrkMaxDD(t *testing.T) {
+	day := int64(200) * vbDayMs
+	tr := &PaperTrade{Dir: "long", Entry: 100, OpenTime: time.UnixMilli(day + 3*dcBarMs)}
+	bars := []exchange.Candle{
+		{Ts: day + 3*dcBarMs, Low: 90},         // 進場那一小時:低點可能在買進前,不算
+		{Ts: day + 4*dcBarMs, Low: 97},         // −3%
+		{Ts: day + 9*dcBarMs, Low: 98.5},       //
+		{Ts: day + vbDayMs + dcBarMs, Low: 80}, // 隔天(已換日平倉):不算
+	}
+	vbMaxDD(tr, bars)
+	if tr.MaxDD != -3 {
+		t.Fatalf("max drawdown = %v, want -3", tr.MaxDD)
+	}
+	tr.MaxDD = -5 // 已經記到更深 → 不會被改淺
+	vbMaxDD(tr, bars)
+	if tr.MaxDD != -5 {
+		t.Fatal("drawdown only goes deeper")
+	}
+}

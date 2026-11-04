@@ -17,6 +17,9 @@ import (
 //	         同一根 1h 同時碰到上緣和下緣(方向不明)、或先碰到下緣 → 今天不再交易
 //	出場     UTC 換日那一刻(當日收盤價)平倉,不留倉過夜;沒有停損、沒有止盈
 //
+// 另外記「最大回撤」(進場後到平倉前最不利的位置):進場那一小時用 1m K 只看碰到上緣之後的部分
+// (那根 1h 的低點可能發生在買進之前),之後用每根 1h 的低點,盤中再用即時價補。
+//
 // 實作:每小時收盤後,拿今天已收的 1h K 從頭重播一次,決定今天是「還在等 / 已成交 / 不做了」——
 // 結果只由 K 線決定,停機期間觸價的開機後照樣補進場。還在等的幣在頁面上顯示成「待觸發」
 // (觸發價 = 上緣,只放記憶體、每小時重算,不寫 DB)。觀察用,observeOnlyBooks 保證不會跟實單。
@@ -101,6 +104,57 @@ func vbDayClose(daily, hours []exchange.Candle, day int64) (float64, bool) {
 	return 0, false
 }
 
+type vbFill struct {
+	tr    *PaperTrade
+	upper float64
+}
+
+// vbMaxDD 用進場那一小時「之後」的 1h 低點更新最大回撤(只會往下調)。進場那一小時的低點可能發生在
+// 碰到上緣之前,不算,另外用 vbFillDD 的 1m K 補。
+func vbMaxDD(tr *PaperTrade, bars []exchange.Candle) {
+	open := tr.OpenTime.UnixMilli()
+	end := open/vbDayMs*vbDayMs + vbDayMs // 換日平倉的時刻
+	for _, c := range bars {
+		if c.Ts < open+dcBarMs || c.Ts >= end {
+			continue // 只看進場那一小時之後、換日之前的 K
+		}
+		if g := r2(pnl(tr.Dir, tr.Entry, c.Low)); g < tr.MaxDD {
+			tr.MaxDD = g
+		}
+	}
+}
+
+// vbFillDD 抓進場那一小時的 1m K,算「碰到上緣之後」最低跌到哪(相對進場價 %,≤ 0)。
+func (s *Store) vbFillDD(coin string, barTs int64, upper, entry float64) (float64, bool) {
+	if s.ex == nil {
+		return 0, false
+	}
+	ms, err := s.ex.BinanceKlinesRange(coin+"USDT", "1m", barTs, barTs+dcBarMs-1, 60)
+	if err != nil || len(ms) == 0 {
+		return 0, false
+	}
+	return fillDD(ms, upper, entry), true
+}
+
+// fillDD:ms 是進場那一小時的 1m K。碰到上緣那一分鐘只算收盤(低點可能在碰到之前),之後每分鐘算低點;
+// 那一分鐘開盤就在上緣之上(跳空成交)→ 整分鐘都在成交之後,低點也算。
+func fillDD(ms []exchange.Candle, upper, entry float64) float64 {
+	dd, touched := 0.0, false
+	for _, m := range ms {
+		switch {
+		case touched:
+			dd = min(dd, pnl("long", entry, m.Low))
+		case m.Open >= upper:
+			touched = true
+			dd = min(dd, pnl("long", entry, m.Low))
+		case m.High >= upper:
+			touched = true
+			dd = min(dd, pnl("long", entry, m.Close))
+		}
+	}
+	return r2(dd)
+}
+
 func (s *Store) volBrkCoins() []string {
 	b := s.volBrkBook
 	coins := b.universe()
@@ -145,6 +199,7 @@ func (s *Store) VolBrkTick() {
 		plan, trend, ready := vbPlanOf(daily, day)
 
 		var exits, entries, dirty []*PaperTrade
+		var fills []vbFill
 		b.mu.Lock()
 		kept := b.trades[:0]
 		for _, tr := range b.trades {
@@ -159,15 +214,15 @@ func (s *Store) VolBrkTick() {
 						dayBars = append(dayBars, c)
 					}
 				}
-				before := tr.MaxGain
 				barMaxGain(tr, dayBars, dcBarMs)
+				vbMaxDD(tr, dayBars)
 				if d < day { // 換日了 → 用那天的收盤價平倉
 					if px, ok := vbDayClose(daily, hours, d); ok {
 						closeTrade(tr, roundPx(px), "eod", time.UnixMilli(d+vbDayMs).UTC())
 						exits = append(exits, tr)
 					}
-				} else if tr.MaxGain != before {
-					dirty = append(dirty, tr)
+				} else {
+					dirty = append(dirty, tr) // 最大獲利 / 回撤每小時存一次(盤中即時價更新的也一起存)
 				}
 			}
 			kept = append(kept, tr)
@@ -189,8 +244,10 @@ func (s *Store) VolBrkTick() {
 					tr := &PaperTrade{ID: id, Coin: coin, Dir: "long", Entry: roundPx(px), Cur: roundPx(px),
 						Status: "open", OpenTime: time.UnixMilli(at).UTC()}
 					barMaxGain(tr, hours, dcBarMs)
+					vbMaxDD(tr, hours)
 					b.trades = append(b.trades, tr)
 					entries = append(entries, tr)
+					fills = append(fills, vbFill{tr, plan.Upper})
 				case vbWait:
 					cur := plan.Upper
 					if n := len(hours); n > 0 {
@@ -205,6 +262,13 @@ func (s *Store) VolBrkTick() {
 			microTrim(b)
 		}
 		b.mu.Unlock()
+		for _, f := range fills { // 進場那一小時的回撤要抓 1m K,放在鎖外
+			if dd, ok := s.vbFillDD(coin, f.tr.OpenTime.UnixMilli(), f.upper, f.tr.Entry); ok {
+				b.mu.Lock()
+				f.tr.MaxDD = min(f.tr.MaxDD, dd)
+				b.mu.Unlock()
+			}
+		}
 		if ready {
 			delete(s.vbEng.pend, coin) // 今天的日 K 還沒生成 → 留著,下一分鐘再試(換日平倉已做的不會重做)
 		}
@@ -234,7 +298,7 @@ func (s *Store) VolBrkTick() {
 	}
 }
 
-// VolBrkMarkTick 每 20 秒:用即時價更新持倉的現價 / 最大獲利,和待觸發計畫的現價(不出場)。
+// VolBrkMarkTick 每 20 秒:用即時價更新持倉的現價 / 最大獲利 / 最大回撤,和待觸發計畫的現價(不出場)。
 func (s *Store) VolBrkMarkTick() {
 	b := s.volBrkBook
 	if b == nil {
@@ -250,8 +314,12 @@ func (s *Store) VolBrkMarkTick() {
 		}
 		tr.Cur = roundPx(p)
 		if tr.Status == "open" {
-			if g := pnl(tr.Dir, tr.Entry, p); g > tr.MaxGain {
+			g := pnl(tr.Dir, tr.Entry, p)
+			if g > tr.MaxGain {
 				tr.MaxGain = round2(g)
+			}
+			if g < tr.MaxDD {
+				tr.MaxDD = r2(g)
 			}
 		}
 	}

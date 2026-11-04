@@ -32,10 +32,10 @@ type afterBook struct {
 	n int // 用 afterHours 的前幾個時間點
 }
 
-// afterBooks 是要回填的書和各補幾個時間點(脈衝星v12 補到 8H)。
+// afterBooks 是要回填的書和各補幾個時間點(脈衝星v12 補到 8H、波動突破補到 16H)。
 func (s *Store) afterBooks() []afterBook {
 	var out []afterBook
-	for _, ab := range []afterBook{{s.pulsarV12Book, 4}} {
+	for _, ab := range []afterBook{{s.pulsarV12Book, 4}, {s.volBrkBook, 5}} {
 		if ab.b != nil {
 			out = append(out, ab)
 		}
