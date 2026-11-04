@@ -93,6 +93,15 @@ const AFTER = computed(() => AFTER_ALL.slice(0, 4))
 const afterWait = (t, h) => Date.now() < Date.parse(t.open_time) + h * 3600e3 + 3 * 60e3
 // 波動突破:沒有止損 / 止盈,UTC 換日(台北 08:00)收盤平倉 → 進行中顯示「還剩多久換日」
 const hasTimer = computed(() => props.book === 'volbrk')
+// 唐奇安:沒有止盈(獲利靠通道出場)→ TP 欄換成「目前的 ATR(24)」,每小時收盤後更新
+const hasATR = computed(() => props.book === 'donchian')
+const atrPct = (t) => (t.cur > 0 && t.atr ? (t.atr / t.cur * 100).toFixed(2) + '%' : '')
+function atrTip(t) {
+  const entryATR = Math.abs(t.entry - t.sl) / 3 // 停損 = 進場 ∓ 3×進場時的 ATR
+  const lines = [`目前 ATR(24):${fmtPrice(t.atr)}(現價的 ${atrPct(t)})`, `進場時 ATR:${fmtPrice(entryATR)}(停損 = 進場 ∓ 3 倍)`]
+  if (t.atr && t.cur > 0) lines.push(`現價離停損 ${(Math.abs(t.cur - t.sl) / t.atr).toFixed(1)} 個目前 ATR`)
+  return lines.join('\n')
+}
 function timerLeft() {
   const ms = 86400e3 - (Date.now() % 86400e3)
   if (ms <= 0) return '即將平倉'
@@ -169,7 +178,7 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -201,9 +210,12 @@ function tpStatusCls(t) {
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template><span v-else class="tsmall">無</span></td>
           <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft() }}</td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
-          <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
+          <td v-if="hasATR" class="r tp-cell nowrap" :title="atrTip(t)"><template v-if="t.atr">{{ fmtPrice(t.atr) }}<small class="tppct">{{ atrPct(t) }}</small></template><span v-else class="tsmall">待</span></td>
+          <template v-else>
+            <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 1 }"><template v-if="t.tp1">{{ fmtPrice(t.tp1) }}<small class="tppct">{{ lvlPct(t, t.tp1) }}</small></template><template v-else>—</template></td>
+            <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 2 }"><template v-if="t.tp2">{{ fmtPrice(t.tp2) }}<small class="tppct">{{ lvlPct(t, t.tp2) }}</small></template><template v-else>—</template></td>
+            <td class="r tp-cell" :class="{ hit: t.status !== 'pending' && t.legs >= 3 }"><template v-if="t.tp">{{ fmtPrice(t.tp) }}<small class="tppct">{{ lvlPct(t, t.tp) }}</small></template><template v-else>—</template></td>
+          </template>
           <td><span class="stag" :class="tpStatusCls(t)">{{ tpStatus(t) }}</span></td>
           <td class="r tsmall">{{ fmtClock(t.open_time) }}</td>
           <td v-if="canExit" class="r"><button v-if="t.status !== 'pending'" class="exitbtn" @click.stop="$emit('exit', t.id)">手動出場</button><small v-else class="tsmall">—</small></td>

@@ -148,6 +148,7 @@ func (s *Store) DonchianTick() {
 			}
 		}
 		if open != nil {
+			open.ATR = roundPx(dcATR(closed)) // 目前的 ATR(24),頁面顯示用
 			before := open.MaxGain
 			px, outcome, at, upto, hit := dcExitScan(open, closed, forming)
 			barMaxGain(open, closed[:upto], dcBarMs) // 最大獲利只算到出場那根
@@ -163,7 +164,8 @@ func (s *Store) DonchianTick() {
 			if dir, entry, sl, ok := dcSignal(closed, forming); ok {
 				sig := closed[len(closed)-1]
 				tr := &PaperTrade{ID: fmt.Sprintf("donchian|%s|%d", coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
-					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC()}
+					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
+					ATR: roundPx(dcATR(closed))}
 				b.trades = append(b.trades, tr)
 				entries = append(entries, tr)
 			}

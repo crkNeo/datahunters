@@ -121,6 +121,15 @@ func TestDonchianTick(t *testing.T) {
 	if tr.Dir != "long" || tr.Entry != 11.1 || tr.SL >= 11.1 || tr.OpenTime.UnixMilli() != cs[len(cs)-1].Ts {
 		t.Fatalf("bad trade: %+v", tr)
 	}
+	if want := roundPx((23*0.2 + 1.1) / 24); tr.ATR != want {
+		t.Fatalf("entry ATR = %v, want %v", tr.ATR, want)
+	}
+	tr.ATR = 0
+	s.dcEng.bucket = 0
+	s.DonchianTick() // 持倉中:每小時更新目前的 ATR
+	if tr.ATR == 0 {
+		t.Fatal("open position should get the current ATR each hour")
+	}
 	s.dcEng.bucket = 0
 	s.DonchianTick() // 同一根已持有 → 不加碼
 	if len(b.trades) != 1 {

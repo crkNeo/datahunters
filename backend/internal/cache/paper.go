@@ -123,6 +123,10 @@ type PaperTrade struct {
 	After8h  *float64 `json:"after_8h,omitempty"`
 	After16h *float64 `json:"after_16h,omitempty"`
 	After24h *float64 `json:"after_24h,omitempty"`
+
+	// 唐奇安持倉:目前的 ATR(24)(最新 24 根已收 1h 的平均真實波幅),每小時收盤後更新。
+	// 只放記憶體(開機後第一輪就會算回來),不寫 DB。
+	ATR float64 `json:"atr,omitempty"`
 }
 
 // PaperStats summarises closed trades.
