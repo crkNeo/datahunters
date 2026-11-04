@@ -711,24 +711,6 @@ async function loadPulsarV3() {
     /* secondary */
   }
 }
-const smchf = ref(null)
-async function loadSMCHF() {
-  try {
-    const res = await authFetch('/api/smchf')
-    if (res.ok) smchf.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
-const dumprev = ref(null)
-async function loadDumpRev() {
-  try {
-    const res = await authFetch('/api/dumprev')
-    if (res.ok) dumprev.value = await res.json()
-  } catch (e) {
-    /* secondary */
-  }
-}
 const pulsarv12 = ref(null)
 async function loadPulsarV12() {
   try {
@@ -738,11 +720,22 @@ async function loadPulsarV12() {
     /* secondary */
   }
 }
-const pulsarv17 = ref(null)
-async function loadPulsarV17() {
+const donchian = ref(null)
+async function loadDonchian() {
   try {
-    const res = await authFetch('/api/pulsarv17')
-    if (res.ok) pulsarv17.value = await res.json()
+    const res = await authFetch('/api/donchian')
+    if (res.ok) donchian.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
+const volbrk = ref(null)
+// 側欄數字只算真的持倉(待觸發的計畫一天可能上百筆,不算)
+const volbrkHeld = computed(() => (volbrk.value?.open || []).filter((t) => t.status === 'open').length)
+async function loadVolBrk() {
+  try {
+    const res = await authFetch('/api/volbrk')
+    if (res.ok) volbrk.value = await res.json()
   } catch (e) {
     /* secondary */
   }
@@ -813,22 +806,21 @@ const microMeta = {
     title: '脈衝星', load: loadPulsarV3, get: () => pulsarv3.value,
     help: '‼️此策略只做多單，小止損換大盈利‼️<br>此為幣種分享，不代表任何投資建議，建議搭配技術分析進場。<br><br>建議使用總本金：1%<br>建議槓桿：25x-30x',
   },
-  smchf: {
-    title: '獵戶座 · SMC 共振高頻（市價觸發）· 1h', load: loadSMCHF, get: () => smchf.value,
-    help: '<b>一句話：價格突破前高／前低（結構破壞）後，在突破前最後一根反向 K（訂單塊）的中點等回檔，碰到就市價進場，多空都做。</b><br><b>【找訊號】</b>每根 1 小時 K 收盤檢查（成交額前 200 的加密幣）：① 收盤剛突破最近一個「前後各 5 根都比它低」的高點（做多），或跌破最近的低點（做空）② 往回 12 根找最近一根反向 K（做多找黑 K、做空找紅 K）當訂單塊 ③ 進場價 = 訂單塊中點，止損 = 訂單塊另一端再多 0.15 倍 ATR ④ 突破後的高點／低點離進場至少要有 1.5 倍風險的空間 ⑤ 至少符合一項共振：缺口（FVG）跟訂單塊重疊／中點離 1 小時 EMA50 不到 0.5 倍 ATR／4 小時和日線 EMA20 方向都一致。<br><b>【等觸發】</b>條件成立先掛「待觸發」計畫（之後不再改），最多等 10 小時。每 10 秒看即時價：回到中點就用當下價格進場；價格一下子跳過中點超過 0.08% 就先不進、繼續等；還沒進場就先碰到止損 → 撤掉計畫。<br><b>【出場】</b>用實際進場價重算風險 R：漲到 1R 先平一半、1.5R 平掉剩下；<b>止損永遠不動</b>（TP1 後不移保本，回測就是這樣算的）。所以「TP1 後止損」這種單，實際大約打平。<br><b>【限制】</b>每個幣同時只有一張（計畫或持倉），全部持倉最多 8 張。損益顯示的是<b>真實分批加權</b>（一半在 TP1、一半在出場價），不是最高止盈階梯。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，單量會更多）每天約 11～15 張、每張平均 +0.15～0.20 倍風險（市價版扣滑價後），勝率約 42～44%，止損出場約 57%。紅線：前 500 張平均 < 0、勝率 < 35%、止損出場 > 67%。<br><br>⚠️ 待觸發的計畫只存在記憶體，伺服器重啟會清掉（已成交的持倉不受影響）。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
-  dumprev: {
-    title: '流星 · 爆量崩盤反轉 v1.1 · 1h', load: loadDumpRev, get: () => dumprev.value,
-    help: '<b>一句話：幣突然爆出超大量的長黑 K（大量強平、恐慌賣），收盤就買，抱滿 48 小時賣掉。</b><br><b>【原理】</b>強平瀑布把價格砸穿之後，賣壓一口氣出清，常常會有反彈。<br><b>【進場】</b>每根 1 小時 K 收盤時檢查：這根成交量 ≥ 前 50 根平均的 10 倍、收黑、實體跌幅 ≥ 1% → 用收盤價做多。幣池是成交額前 200 的加密幣，BTC／ETH／SOL／BNB 也做（規格書原本排除主流幣，認為主流崩了通常會續跌；這裡改成一起觀察），只排除代幣化股票。<br><b>【出場】</b>進場後 48 小時整，用收盤價平倉。<b>沒有止損、沒有止盈</b>：回測顯示任何價格止損都會把反彈砍成虧損，而獲利集中在少數大反彈（右尾），不能提前停利。<br><b>【風控】</b>同時最多 3 筆（崩盤日常一次很多幣一起崩），同一個幣平倉後 24 小時內不再進。<b>BTC 熔斷（v1.1）</b>：觸發當下 BTC 24 小時跌超過 5% 就不進場——全市場一起崩時，三筆會同時接到一起往下的刀，這是這個策略唯一會大虧的情況。<br><b>【實單倉位鐵律】</b>每筆名目不超過帳戶權益的 1/4（例如 1000U 帳戶：5U 保證金 × 50 倍 = 250U）。100U 帳戶用 5U 會爆倉，只能用 2U。價格止損（包括 −25%／−35% 的災難止損）和延後進場都實測無效或更差，風控只有「倉位」和「熔斷」兩個。<br><b>【1H～24H 欄】</b>進場後過了 1、2、4、8、16、24 小時，價格比進場價漲跌多少（看的是「一直抱著」那個時間點的價位，跟 48 小時出場無關）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到；伺服器關機錯過的時間點開機後也會補，最近一個月內的舊單一樣會補。用來看反彈通常在哪個時間點最強、48 小時是不是抱太久。<br><b>【回測預期】</b>（回測是前 80 的幣，現在放大到前 200，事件會更多）每筆平均約 +2～4%，中位數約 +0.7%，勝率約 5 成；好的時候單筆 +20～30%，壞的時候單筆 −17% 以上（歷史最壞 −76%）。大約每天 0.7～1 筆。<br><b>【觀察重點】</b>前 100 筆：平均要 > 0、勝率要 > 42%、要出現過 +20% 級的大反彈，否則代表效應消失；長期每天超過 3 筆代表市場異常，要暫停；權益回撤超過 40% 停機檢查。<br><br>⚠️ 無止損策略，單筆可能大虧，實單請用小倉位。觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
-  },
+
+
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
     help: '<b>一句話：不等 15 分鐘 K 線收完，條件一成立就馬上進場。</b><br><b>【跟 v3 的差別】</b>v3 要等這根 K 收完、確認長得對才買；v12 每分鐘看一次還在跑的那根，這一刻符合 v3 的條件就買，最多比 v3 早 15 分鐘。<br><b>【風險】</b>K 線還沒收完，形狀隨時會變。常見情況：拉上去那幾分鐘看起來是漂亮的大漲 K 棒 → v12 買進 → 收盤前被砸回來、變成長上影線（v3 收盤看到這種形狀就不會買）。所以 v12 比較容易買在高點。<br><b>【怎麼看結果】</b>同一個幣、同一根 K，如果 v3 沒開單、v12 有開，那筆就是「盤中看起來對、收盤後不對」的單，可以拿來算這種單的勝率。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><b>【1H / 2H / 4H / 8H 欄】</b>進場後過了 1、2、4、8 小時，價格比進場價漲跌多少（不管那時有沒有出場，看的是「一直抱著」會怎樣）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到。用來判斷出場是不是太早或太晚。<br><b>【健康燈號】</b>🟢 0～1 個紅旗、🟡 2 個、🔴 3 個以上，滑鼠移上去看是哪幾個；只是標示、不會擋單。四個紅旗：① 最近 1 小時買盤過熱（1 小時 CVD 超過 10%）② 24 小時漲幅不到 2% ③ 台灣時間下午 14～19 點進場 ④ 散戶做多不到 64%。⚠️ 用 10/04～10/12 的資料驗證，紅燈單並沒有比較差，只有 ③ 時段這一項前後都站得住，燈號僅供參考。<br><b>【EMA200 / 大盤欄】</b>進場當下記下的三個數字（只記錄）：「幣」= 進場價離這個幣 4H EMA200 幾 %（正 = 在上方）；「BTC ▲／▼」= BTC 4H 收盤站上／跌破 EMA200 幾 %；「廣度」= 成交額前 200 的幣有幾 % 在 4H EMA200 之上。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
-  pulsarv17: {
-    title: '脈衝星v17 · v12 + 進場濾網 · 15m', load: loadPulsarV17, get: () => pulsarv17.value,
-    help: '<b>一句話：跟脈衝星v12 同一個進場，但只挑「進場當下狀態健康」的單。</b><br><b>【怎麼運作】</b>v12 每開一筆，就拿那筆進場當下記下的數字檢查下面 6 條，全部通過才在 v17 開一筆一模一樣的單（同幣、同時間、同進場價、同止損止盈，出場也跟 v12 一樣）。所以 v17 永遠是 v12 的一部分，兩頁對照就知道被濾掉的那些單到底是好是壞。<br><b>【6 條濾網】</b>① 1 小時 CVD 超過 +13% 不進（主動買盤已經爆完，進去是最後一個買家）② 散戶做多帳戶比例要 ≥ 61%（只做正在被持續做多的幣；抓不到資料也不進）③ 24 小時漲幅要 ≥ +3%（只接當天已經走強的幣，不接下跌幣的反彈）④ 幣價要在 4H EMA200 之上⑤ BTC 對上一根 15 分鐘收盤漲超過 +0.07% 不進⑥ BTC 對上一個整點收盤漲超過 +0.2% 不進（⑤⑥：BTC 剛噴就追山寨，等於追大盤，容易回吐）<br><b>【分析預期】</b>（10/04～10/31 v12 共 2,246 筆）v12 平均每筆 +0.17%、勝率 42%、一天約 83 筆；6 條全上：平均每筆 +0.82%、勝率 50%、一天約 11 筆。只有一個月、而且是大跌月的資料，實際數字一定會縮水。<br><b>【怎麼判斷有沒有用】</b>累積 150 筆後跟 v12 同期比：v17 平均每筆要比 v12 多 +0.2% 以上，否則代表濾網只是在背這個月的答案，就退回 v12。不要再往上加第 7 條濾網。<br><b>【1H / 2H / 4H / 8H 欄、健康燈號、EMA200 / 大盤欄】</b>跟 v12 頁一樣。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+  donchian: {
+    title: '唐奇安 · 長通道突破 168 / 12 · 1h', load: loadDonchian, get: () => donchian.value,
+    help: '<b>一句話：價格收盤突破過去 7 天的最高價就追多（跌破 7 天最低就追空），讓趨勢一路跑，跌破 12 小時低點才出場。</b><br><b>【進場】</b>每根 1 小時 K 收盤時檢查：收盤價高於前 168 根（7 天）的最高價 → 下一根開盤做多；低於前 168 根的最低價 → 下一根開盤做空。只看收盤，盤中衝破又收回去不算。同一個幣同時只有一個方向，不加碼。<br><b>【出場：先碰到哪個用哪個】</b>① <b>通道出場</b>（等於移動停利）：多單收盤跌破前 12 根的最低價、空單收盤突破前 12 根的最高價 → 下一根開盤平倉。這條線會跟著價格走，賺錢時會自動鎖住大部分獲利。② <b>初始停損</b>（固定不動）：進場價 ∓ 3 × ATR(24)。ATR 是進場訊號那根往前 24 根的平均真實波幅。盤中碰到就出場；跳空直接越過停損價就用開盤價成交。<br><b>沒有固定止盈</b>，獲利全靠通道出場，讓趨勢單一路抱著。平倉的那一根如果剛好反向突破，可以馬上<b>反手</b>。<br><b>【幣池】</b>成交額前 200 的加密幣（排除代幣化股票），時間以 UTC 為準。<br><b>【實盤注意】</b>訊號要等 1 小時 K 收盤才確認，每個整點後要立刻處理；進場後停損單要馬上掛上去。系統每個整點收盤後約 1 分鐘內處理完，停損另外每 20 秒用即時價檢查。伺服器停機期間該出場的，開機後會照 K 線補出場。<br><b>【看結果的方式】</b>趨勢策略勝率通常不高，靠少數大波段賺回來；要看的是平均每筆損益和「最大獲利」欄，不要只看勝率。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
   },
+  volbrk: {
+    title: '波動突破 · 開盤 + 0.5×前日振幅 · 只做多 · 日內', load: loadVolBrk, get: () => volbrk.value,
+    help: '<b>一句話：每天先算好「今天開盤 + 半個昨天振幅」這條線，價格衝過去就買，當天收盤（台北早上 8:00）一定賣掉。只做多。</b><br><b>【每天兩條線】</b>以 UTC 日為準（台北早上 8:00 換日）。前一日振幅 = 昨天最高 − 最低。<b>上緣</b> = 今天開盤 + 0.5 × 前一日振幅；<b>下緣</b> = 今天開盤 − 0.5 × 前一日振幅。<br><b>【趨勢過濾】</b>昨天收盤要在 20 日均線之上，今天才可以做多；否則今天不做。<br><b>【進場】</b>價格碰到上緣就以上緣買進（等於掛在上緣的突破買單；那一小時開盤就跳空在上緣之上，就用開盤價成交）。<b>每天最多一筆。</b>以下兩種情況當天不再交易：同一根 1 小時 K 同時碰到上緣和下緣（方向不明）、或先碰到下緣。<br><b>【出場】</b>UTC 換日那一刻（台北早上 8:00）用當天收盤價平倉，不留倉過夜。<b>沒有停損、也沒有止盈</b>，單筆最大虧損就是當天剩下時間的跌幅。<br><b>【頁面上的「待觸發」】</b>今天趨勢過關、還沒碰到任何一條線的幣，「進場/觸發」欄就是今天的上緣（可以直接拿去掛條件單）；碰到下緣或同一根碰兩條線的就會從列表消失。「換日平倉」欄是離收盤還有多久。<br><b>【跟實盤的差別】</b>系統跟回測一樣，用已收的 1 小時 K 判斷有沒有碰到上緣，所以成交紀錄會晚一點出現（那一小時收盤後約 1 分鐘），成交價記上緣、時間記那一小時的開始。實盤建議直接在上緣掛<b>條件單（觸價市價單）</b>，比回測更即時，但也可能遇到插針觸價後馬上回落；台北早上 8:00 前要平倉並撤掉沒成交的單。<br><b>【幣池】</b>成交額前 200 的加密幣（排除代幣化股票）。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+  },
+
   orderblock: {
     title: '訂單塊 · SMC 斐波 · 1h / 4h', load: loadOrderBlock, get: () => orderblock.value,
     help: '<b>SMC 訂單塊 + 斐波回撤策略 · 多空都做</b>。用「Smart Money Concepts」的<b>訂單塊</b>(內部 5 根 + swing 50 根)當供需區,從波段極值拉斐波,埋伏回撤到訂單塊的低吸/高空。<br><b>兩個週期同頁</b>:<b>1H / 4H</b>各自獨立掃描持倉,列表以「<b>週期</b>」欄分類。<br><br><b>【斐波幾何】</b>做多:<b>fib0 = 訂單塊下緣</b>、<b>fib1 = 訂單塊之後的最高高點</b>(自動 re-anchor:出新高就把 fib1 移過去,fib0 不動)。做空對稱(fib0 = 訂單塊上緣、fib1 = 之後最低低點)。<br><b>【進場】</b>價格回撤進 <b>0.142–0.382</b> 區間(靠近訂單塊)+ 收出<b>頭槌</b>(多)/<b>射擊之星</b>(空)→ 收盤進場。<b>暫無逾時</b>。<br><b>【距離過濾】</b>若<b>斐波 0→1 距離超過 10%</b> → 波段過大,<b>不進場</b>。<br><b>【止損】</b>fib <b>−0.13</b>(訂單塊外側緩衝)。<br><b>【止盈:三段沿路套保】</b><b>TP1 = fib0.618</b>(平 40%→止損移保本)、<b>TP2 = fib1.13</b>(平 30%→移 TP1)、<b>最終 = fib1.618</b>(平剩 30%)。冷卻 4 根。<br><br>⚠️ 觀察用書,預設靜默、不接實盤。管理員專屬模擬單,非投資建議。',
@@ -879,7 +871,7 @@ async function manualExit(t) {
 // admin-only: download the current strategy book's full trade history as CSV
 async function exportCSV() {
   const map = { paper: 'main', gamble: 'gamble', emaonly: 'emaonly' }
-  const bookName = map[mainTab.value] || (mainTab.value.startsWith('pulsar') || mainTab.value === 'dumprev' ? mainTab.value : '') // 脈衝星家族、流星:分頁名 = book 名
+  const bookName = map[mainTab.value] || (mainTab.value.startsWith('pulsar') || mainTab.value === 'donchian' || mainTab.value === 'volbrk' ? mainTab.value : '') // 脈衝星家族、唐奇安、波動突破:分頁名 = book 名
   if (!bookName) return
   try {
     const res = await authFetch('/api/admin/export?book=' + bookName)
@@ -1444,9 +1436,8 @@ function loadAll() {
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv12')) loadPulsarV12()
-  if (canTab('pulsarv17')) loadPulsarV17()
-  if (canTab('dumprev')) loadDumpRev()
-  if (canTab('smchf')) loadSMCHF()
+  if (canTab('donchian')) loadDonchian()
+  if (canTab('volbrk')) loadVolBrk()
   if (canTab('orderblock')) loadOrderBlock()
   if (canTab('orderblockv2')) loadOrderBlockV2()
   if (canTab('surge')) loadSurge()
@@ -1540,7 +1531,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv17', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'donchian', 'volbrk', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1689,7 +1680,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv17: 'admin', dumprev: 'admin', smchf: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', donchian: 'admin', volbrk: 'admin', orderblock: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1753,7 +1744,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
-  pulsarv12: '脈衝星v12', pulsarv17: '脈衝星v17', dumprev: '流星', smchf: '獵戶座', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
+  pulsarv12: '脈衝星v12', donchian: '唐奇安', volbrk: '波動突破', orderblock: '訂單塊', orderblockv2: '訂單塊v2', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1773,7 +1764,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', pulsarv17: 'signal', dumprev: 'signal', smchf: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', donchian: 'signal', volbrk: 'signal', orderblock: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1781,7 +1772,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv17', 'dumprev', 'smchf', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'donchian', 'volbrk', 'orderblock', 'orderblockv2', 'srmtf', 'newsalpha',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2335,14 +2326,11 @@ watch([role, tabPerms, authReady], () => {
           <button v-if="inGroup('pulsarv12', grp[0])" :class="{ active: mainTab === 'pulsarv12', lk: !canTab('pulsarv12') }" @click="navTo('pulsarv12', loadPulsarV12)">
             脈衝星v12<em v-if="pulsarv12 && pulsarv12.open.length" class="navbadge">{{ pulsarv12.open.length }}</em><i v-if="!canTab('pulsarv12')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('pulsarv17', grp[0])" :class="{ active: mainTab === 'pulsarv17', lk: !canTab('pulsarv17') }" @click="navTo('pulsarv17', loadPulsarV17)">
-            脈衝星v17<em v-if="pulsarv17 && pulsarv17.open.length" class="navbadge">{{ pulsarv17.open.length }}</em><i v-if="!canTab('pulsarv17')" class="navlk">🔒</i>
+          <button v-if="inGroup('donchian', grp[0])" :class="{ active: mainTab === 'donchian', lk: !canTab('donchian') }" @click="navTo('donchian', loadDonchian)">
+            唐奇安<em v-if="donchian && donchian.open.length" class="navbadge">{{ donchian.open.length }}</em><i v-if="!canTab('donchian')" class="navlk">🔒</i>
           </button>
-          <button v-if="inGroup('dumprev', grp[0])" :class="{ active: mainTab === 'dumprev', lk: !canTab('dumprev') }" @click="navTo('dumprev', loadDumpRev)">
-            流星<em v-if="dumprev && dumprev.open.length" class="navbadge">{{ dumprev.open.length }}</em><i v-if="!canTab('dumprev')" class="navlk">🔒</i>
-          </button>
-          <button v-if="inGroup('smchf', grp[0])" :class="{ active: mainTab === 'smchf', lk: !canTab('smchf') }" @click="navTo('smchf', loadSMCHF)">
-            獵戶座<em v-if="smchf && smchf.open.length" class="navbadge">{{ smchf.open.length }}</em><i v-if="!canTab('smchf')" class="navlk">🔒</i>
+          <button v-if="inGroup('volbrk', grp[0])" :class="{ active: mainTab === 'volbrk', lk: !canTab('volbrk') }" @click="navTo('volbrk', loadVolBrk)">
+            波動突破<em v-if="volbrkHeld" class="navbadge">{{ volbrkHeld }}</em><i v-if="!canTab('volbrk')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('orderblock', grp[0])" :class="{ active: mainTab === 'orderblock', lk: !canTab('orderblock') }" @click="navTo('orderblock', loadOrderBlock)">
             訂單塊<em v-if="orderblock && orderblock.open.length" class="navbadge">{{ orderblock.open.length }}</em><i v-if="!canTab('orderblock')" class="navlk">🔒</i>
@@ -2742,7 +2730,7 @@ watch([role, tabPerms, authReady], () => {
     <section v-else-if="micro && canTab(mainTab)">
       <div class="mk-head">
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
-        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && (mainTab.startsWith('pulsar') || mainTab === 'dumprev')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
+        <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && (mainTab.startsWith('pulsar') || mainTab === 'donchian' || mainTab === 'volbrk')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
       <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
 

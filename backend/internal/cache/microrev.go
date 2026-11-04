@@ -69,11 +69,8 @@ type microBook struct {
 	// recover the fib grid. nil = not a 4-stage book.
 	tpLevels4 func(entry, sl, finalTP float64) (tp1, tp2, tp3 float64)
 	// wideMark: 持倉幣不在 WS 即時價裡時(幣池超出 top-80),用爆量脈搏的全市場快照價補,
-	// 現價 / 未實現 / 最大獲利才會即時更新。流星(幣池 top-200)用。
+	// 現價 / 未實現 / 最大獲利才會即時更新。幣池用 top-200 的書(唐奇安 / 波動突破)用。
 	wideMark bool
-	// barMaxGain: 每根收盤(和開機時)用進場後的 K 線高低點重算最大獲利,只會往上調。
-	// 重啟、WS 沒涵蓋到的幣都不會漏掉進場後的高點。流星用。
-	barMaxGain bool
 
 	// A "family" is a multi-leg strategy shown as ONE tab (e.g. 布乖v2 = 1h 乖離腿 +
 	// 4h 布林腿). Legs are separate books so each keeps its own tf/expiry/signal, but
@@ -606,9 +603,6 @@ func (s *Store) microIntraOpen(b *microBook, coin string, cs []exchange.Candle, 
 		s.db.upsertTrade(b.name, tr)
 	}
 	s.notifyOpenBook(b.name, tr)
-	if b == s.pulsarV12Book {
-		s.pulsarV17Follow(tr) // 脈衝星v17:濾網全過就跟一筆一樣的
-	}
 	return true
 }
 
@@ -621,9 +615,6 @@ func (s *Store) microTick(b *microBook) {
 	b.bucket = bkt
 	if !b.seeded { // boot: just set the baseline; only bars that close from now on can open trades
 		b.seeded = true
-		if b.barMaxGain {
-			s.microRefreshMaxGain(b) // 補回停機期間 / 上次存檔後的最大獲利
-		}
 		return
 	}
 	now := time.Now().UTC()
@@ -702,9 +693,6 @@ func (s *Store) microRun(b *microBook, coin string, cs []exchange.Candle, now ti
 	reason := "" // 給 log 的結果碼(見函式說明)
 	if open != nil {
 		reason = "持倉中"
-		if b.barMaxGain {
-			barMaxGain(open, cs, barMs)
-		}
 		// bar-close backstop for when the WS feed is down (partial TP1/TP2 are booked
 		// on the live stepTP tick). Full-close only: final target / current stop / expiry.
 		exit, outcome, px := false, "", 0.0
@@ -1034,13 +1022,6 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		tpStats(tr, &st.Stats.Tp1, &st.Stats.Tp2, &st.Stats.Tp3, &grossWin, &grossLoss)
 	}
 	markLiveOpen(st.Open, px)
-	if realPnLBooks[bs[0].name] { // 獵戶座:真實分批加權(markLiveOpen 用的是階梯口徑)
-		for _, tr := range st.Open {
-			if tr.Status == "open" && tr.Cur > 0 {
-				tr.PnLPct = realPnL(tr, tr.Cur)
-			}
-		}
-	}
 	if len(bs) == 1 {
 		annotateHealth(bs[0].name, st.Open) // 脈衝星v12:進場健康度燈號
 	}
@@ -1084,40 +1065,6 @@ func barMaxGain(tr *PaperTrade, cs []exchange.Candle, barMs int64) {
 	}
 }
 
-// microRefreshMaxGain 開機時對每筆持倉抓 K 線(含還在走的那根)重算最大獲利,有變就存回 DB。
-func (s *Store) microRefreshMaxGain(b *microBook) {
-	b.mu.Lock()
-	var coins []string
-	for _, tr := range b.trades {
-		if tr.Status == "open" {
-			coins = append(coins, tr.Coin)
-		}
-	}
-	b.mu.Unlock()
-	for _, coin := range coins {
-		cs, err := s.ex.BinanceKlines(coin+"USDT", b.tf, b.klimit)
-		if err != nil || len(cs) == 0 {
-			continue
-		}
-		var dirty *PaperTrade
-		b.mu.Lock()
-		for _, tr := range b.trades {
-			if tr.Coin == coin && tr.Status == "open" {
-				before := tr.MaxGain
-				barMaxGain(tr, cs, b.barSec*1000)
-				if tr.MaxGain != before {
-					dirty = tr
-				}
-			}
-		}
-		b.mu.Unlock()
-		if dirty != nil && s.db != nil {
-			s.db.upsertTrade(b.name, dirty)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
 // fillOpenPx 把這幾本書持倉幣裡、WS 即時價沒有的,用爆量脈搏的全市場快照價補上(px 可為 nil)。
 func (s *Store) fillOpenPx(px map[string]float64, bs ...*microBook) map[string]float64 {
 	var miss []string
@@ -1151,10 +1098,6 @@ func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
-func (s *Store) PulsarV17Tick()     { s.microTick(s.pulsarV17Book) }
-func (s *Store) PulsarV17MarkTick() { s.microMarkTick(s.pulsarV17Book) }
-func (s *Store) DumpRevTick()       { s.microTick(s.dumpRevBook) }
-func (s *Store) DumpRevMarkTick()   { s.microMarkTick(s.dumpRevBook) }
 
 // PulsarIntraTick:脈衝星v12 盤中進場(見 microIntraTick)。
 func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book) }
@@ -1230,18 +1173,14 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
-	case "pulsarv17":
-		s.pulsarV17Book.mu.Lock()
-		s.pulsarV17Book.trades = keepIf(s.pulsarV17Book.trades, closedOnly)
-		s.pulsarV17Book.mu.Unlock()
-	case "dumprev":
-		s.dumpRevBook.mu.Lock()
-		s.dumpRevBook.trades = keepIf(s.dumpRevBook.trades, closedOnly)
-		s.dumpRevBook.mu.Unlock()
-	case "smchf":
-		s.smcHFBook.mu.Lock()
-		s.smcHFBook.trades = keepIf(s.smcHFBook.trades, closedOnly)
-		s.smcHFBook.mu.Unlock()
+	case "donchian":
+		s.donchianBook.mu.Lock()
+		s.donchianBook.trades = keepIf(s.donchianBook.trades, closedOnly)
+		s.donchianBook.mu.Unlock()
+	case "volbrk":
+		s.volBrkBook.mu.Lock()
+		s.volBrkBook.trades = keepIf(s.volBrkBook.trades, closedOnly)
+		s.volBrkBook.mu.Unlock()
 	case "newsalpha":
 		s.newsBook.mu.Lock()
 		s.newsBook.trades = keepIf(s.newsBook.trades, closedOnly)
@@ -1312,8 +1251,7 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
-func (s *Store) PulsarV17State() PaperState { return s.microState(s.pulsarV17Book) }
-func (s *Store) DumpRevState() PaperState   { return s.microState(s.dumpRevBook) }
-func (s *Store) SMCHFState() PaperState     { return s.microState(s.smcHFBook) }
+func (s *Store) DonchianState() PaperState  { return s.microState(s.donchianBook) }
+func (s *Store) VolBrkState() PaperState    { return s.microState(s.volBrkBook) }
 func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

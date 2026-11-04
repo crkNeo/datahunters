@@ -150,10 +150,9 @@ type Store struct {
 	ema200        *ema200Engine // EMA200 穿越監控(4H,爆量脈搏面板的幣)(ema200.go)
 	pulsarV3Book  *microBook    // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV12Book *microBook    // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
-	pulsarV17Book *microBook    // 脈衝星v17:v12 的影子,進場因子過濾網才跟(pulsarv17.go)
-	smcHFBook     *microBook    // 獵戶座:SMC 共振高頻(市價觸發版),BOS→OB 中點掛計畫、觸價市價進 (smchf.go)
-	smcHF         *smcHFEngine  // 獵戶座的掃描狀態(每幣處理過的 1h 棒)
-	dumpRevBook   *microBook    // 流星:爆量崩盤反轉,1h 巨量長黑買入、48h 計時出場、無止損 (dumprev.go)
+	donchianBook  *microBook    // 唐奇安長通道突破:1h 收盤破 168 根通道進、12 根通道 / 3×ATR 停損出 (donchian.go)
+	volBrkBook    *microBook    // 波動突破:UTC 日開盤 + 0.5×前日振幅觸價做多、換日平倉 (volbrk.go)
+	dcEng, vbEng  *hourEngine   // 上面兩本的每小時排程狀態
 	smcBooks      []*microBook  // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
 	smcV2Books    []*microBook  // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
 
@@ -300,10 +299,9 @@ func NewStore(coins []string) *Store {
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, signalWhy: surgeV3Why, tagEntry: true}
 	// 脈衝星v12:盤中書。進場由 microIntraTick 每分鐘用形成中的 K 評估;signal 保留 v3 只給收盤管理流程佔位(不會用來進場)。
 	s.pulsarV12Book = &microBook{name: "pulsarv12", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, intraSignal: surgeV12Signal, tagEntry: true}
-	s.pulsarV17Book = s.newPulsarV17Book()
-	s.dumpRevBook = s.newDumpRevBook()
-	s.smcHFBook = newSMCHFBook()
-	s.smcHF = &smcHFEngine{lastBar: map[string]int64{}}
+	s.donchianBook = s.newDonchianBook()
+	s.volBrkBook = s.newVolBrkBook()
+	s.dcEng, s.vbEng = &hourEngine{}, &hourEngine{}
 	s.newsBook = newNewsAlphaBook()
 	s.initNewsAlpha()
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
@@ -337,9 +335,8 @@ func NewStore(coins []string) *Store {
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV12Book.trades = db.loadTrades("pulsarv12")
-		s.pulsarV17Book.trades = db.loadTrades("pulsarv17")
-		s.dumpRevBook.trades = db.loadTrades("dumprev")
-		s.smcHFBook.trades = db.loadTrades("smchf")
+		s.donchianBook.trades = db.loadTrades("donchian")
+		s.volBrkBook.trades = db.loadTrades("volbrk")
 		s.newsBook.trades = db.loadTrades("newsalpha")
 		s.news.events = db.loadRecentNews(naKeepEvents)
 		for _, ev := range s.news.events { // 重啟前的事件不再花 AI 額度

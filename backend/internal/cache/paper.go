@@ -498,12 +498,10 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
-	case "pulsarv17":
-		return "脈衝星v17"
-	case "dumprev":
-		return "流星"
-	case "smchf":
-		return "獵戶座"
+	case "donchian":
+		return "唐奇安"
+	case "volbrk":
+		return "波動突破"
 	case "newsalpha":
 		return "消息雷達"
 	case "orderblock", "orderblock_4h":
@@ -561,7 +559,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv17", "orderblock", "orderblockv2", "newsalpha", "dumprev", "smchf":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "volbrk", "orderblock", "orderblockv2", "newsalpha":
 		return name
 	case "orderblock_4h": // 週期共用一個分頁
 		return "orderblock"
@@ -855,13 +853,16 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 		}
 		return out
 	}
-	if book == "dumprev" { // 流星:沒 DB 時退回記憶體
-		if mb := s.dumpRevBook; mb != nil {
-			mb.mu.Lock()
-			defer mb.mu.Unlock()
-			return append([]*PaperTrade(nil), mb.trades...)
+	if mb := map[string]*microBook{"donchian": s.donchianBook, "volbrk": s.volBrkBook}[book]; mb != nil {
+		mb.mu.Lock() // 唐奇安 / 波動突破:沒 DB 時退回記憶體(待觸發計畫不算交易,不匯出)
+		defer mb.mu.Unlock()
+		var out []*PaperTrade
+		for _, tr := range mb.trades {
+			if tr.Status != "pending" {
+				out = append(out, tr)
+			}
 		}
-		return nil
+		return out
 	}
 	s.paperMu.Lock()
 	defer s.paperMu.Unlock()
@@ -885,7 +886,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12", "pulsarv17":
+	case "pulsarv3", "pulsarv12":
 		return true
 	}
 	return false
@@ -906,8 +907,6 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV3Book
 	case "pulsarv12":
 		return s.pulsarV12Book
-	case "pulsarv17":
-		return s.pulsarV17Book
 	}
 	return nil
 }

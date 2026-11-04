@@ -313,35 +313,10 @@ func main() {
 			store.BollEMAMarkTick()
 			store.PulsarV3MarkTick()
 			store.PulsarV12MarkTick()
-			store.PulsarV17MarkTick()
-			store.DumpRevMarkTick()
+			store.DonchianMarkTick()
+			store.VolBrkMarkTick()
 			store.SMCMarkTick()
 			store.SMCV2MarkTick()
-		}
-	}()
-
-	// 獵戶座(SMC 共振高頻,市價觸發):每分鐘掃新收盤的 1h 棒建計畫(開機第一輪只建基準),
-	// 每 10 秒用全市場即時價觸發計畫、管理 TP1 / TP2 / SL。
-	go func() {
-		store.SMCHFScanTick()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			store.SMCHFScanTick()
-		}
-	}()
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		for range ticker.C {
-			store.SMCHFTriggerTick()
-		}
-	}()
-
-	// 流星(爆量崩盤反轉):1h 收盤檢查巨量長黑,買入後 48h 計時出場(無價格止損)。
-	go func() {
-		store.DumpRevTick()
-		ticker := time.NewTicker(1 * time.Minute)
-		for range ticker.C {
-			store.DumpRevTick()
 		}
 	}()
 
@@ -353,16 +328,22 @@ func main() {
 			store.BollEMATick()
 		}
 	}()
+	// 唐奇安 / 波動突破:每分鐘看一次,整點收盤後處理(兩本同一小時共用 1h K 快取,依序跑)。
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		for range ticker.C {
+			store.DonchianTick()
+			store.VolBrkTick()
+		}
+	}()
 	// 脈衝星家族:爆量熱名單上的觀察策略(15m 動能確認進場)。
 	go func() {
 		store.PulsarV3Tick()
 		store.PulsarV12Tick()
-		store.PulsarV17Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.PulsarV3Tick()
 			store.PulsarV12Tick()
-			store.PulsarV17Tick()
 		}
 	}()
 	// 脈衝星v12 盤中進場:每 20 秒用「形成中的那根」評估,條件成立就進(持倉管理仍走上面的收盤/即時流程);兩本共用每個幣的一次抓取。

@@ -159,9 +159,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
-	mux.HandleFunc("/api/pulsarv17", s.gateTab("pulsarv17", s.handlePulsarV17))          // 脈衝星v17 (v12 + 進場濾網)
-	mux.HandleFunc("/api/dumprev", s.gateTab("dumprev", s.handleDumpRev))                // 流星 (爆量崩盤反轉)
-	mux.HandleFunc("/api/smchf", s.gateTab("smchf", s.handleSMCHF))                      // 獵戶座 (SMC 共振高頻,市價觸發)
+	mux.HandleFunc("/api/donchian", s.gateTab("donchian", s.handleDonchian))             // 唐奇安長通道突破
+	mux.HandleFunc("/api/volbrk", s.gateTab("volbrk", s.handleVolBrk))                   // 波動突破
 	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
@@ -579,7 +578,7 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch {
-	case book == "main", book == "gamble", book == "emaonly", book == "dumprev", cache.IsPulsarBook(book):
+	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "volbrk", cache.IsPulsarBook(book):
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -793,24 +792,19 @@ func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV3State())
 }
 
-// handlePulsarV17 serves the 脈衝星v17 (v12 + 進場濾網,影子並跑) tracker.
-func (s *Server) handlePulsarV17(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.PulsarV17State())
+// handleDonchian serves the 唐奇安長通道突破 (1h,168 根通道進、12 根通道 / 3×ATR 停損出) tracker.
+func (s *Server) handleDonchian(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.DonchianState())
+}
+
+// handleVolBrk serves the 波動突破 (UTC 日內,觸上緣做多、換日平倉) tracker:今天待觸發的計畫 + 持倉 + 已結束。
+func (s *Server) handleVolBrk(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.VolBrkState())
 }
 
 // handlePulsarV12 serves the 脈衝星v12 (v3 條件盤中成立即進) tracker.
 func (s *Server) handlePulsarV12(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV12State())
-}
-
-// handleSMCHF serves the 獵戶座 (SMC 共振高頻,市價觸發版) tracker:待觸發計畫 + 持倉 + 已結束。
-func (s *Server) handleSMCHF(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.SMCHFState())
-}
-
-// handleDumpRev serves the 流星 (爆量崩盤反轉:1h 巨量長黑買入、48h 計時出場) tracker.
-func (s *Server) handleDumpRev(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.DumpRevState())
 }
 
 // handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.
