@@ -19,6 +19,10 @@ import (
 //	         盤中觸價就出場,跳空越過停損價以開盤價成交
 //	      沒有固定止盈。平倉的同一根如果剛好反向突破,可以馬上反手。
 //
+// 另外記給「之後調整止盈止損」用的資料:最大獲利 + 它出現的時間、最大回撤(進場後最不利的位置)
+// —— 用 K 線從進場那根算到出場那根,盤中再用即時價補;頁面換算成 R(= 進場到停損的距離)。
+// 持倉另外顯示目前的 ATR(24) 和通道出場價(只放記憶體,每小時更新)。
+//
 // 實作:每小時收盤後處理一次(交易所新棒還沒生成的幣,下一分鐘再補)。持倉用 K 線從進場那根「重播」
 // 停損 / 通道出場 —— 結果只由 K 線決定,重複跑也一樣,停機期間該出場的開機後照樣補出場;
 // 新進場只看最新一根已收的 K,開機第一輪只管持倉、不進場。盤中另由 DonchianMarkTick 每 20 秒
@@ -149,14 +153,15 @@ func (s *Store) DonchianTick() {
 		}
 		if open != nil {
 			open.ATR = roundPx(dcATR(closed)) // 目前的 ATR(24),頁面顯示用
-			before := open.MaxGain
+			open.ChanExit = dcChanLevel(closed, open.Dir)
+			gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
 			px, outcome, at, upto, hit := dcExitScan(open, closed, forming)
-			barMaxGain(open, closed[:upto], dcBarMs) // 最大獲利只算到出場那根
+			dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
 			if hit {
 				closeTrade(open, px, outcome, at)
 				exits = append(exits, open)
 				open = nil
-			} else if open.MaxGain != before {
+			} else if open.MaxGain != gain || open.MaxDD != dd || open.PeakMs != peak {
 				dirty = append(dirty, open)
 			}
 		}
@@ -165,7 +170,7 @@ func (s *Store) DonchianTick() {
 				sig := closed[len(closed)-1]
 				tr := &PaperTrade{ID: fmt.Sprintf("donchian|%s|%d", coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
 					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
-					ATR: roundPx(dcATR(closed))}
+					ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevel(closed, dir)}
 				b.trades = append(b.trades, tr)
 				entries = append(entries, tr)
 			}
@@ -281,6 +286,44 @@ func dcExitScan(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Cand
 	return 0, "", time.Time{}, len(closed), false
 }
 
+// dcExcursion 用持倉期間的 K(含進場那根:進場在那根開盤)更新最大獲利 + 出現時間、最大回撤。
+// 只會往更極端的方向調(重複跑、盤中即時價先更新過都沒關係)。
+func dcExcursion(tr *PaperTrade, bars []exchange.Candle) {
+	from := tr.OpenTime.UnixMilli()
+	for _, c := range bars {
+		if c.Ts < from {
+			continue
+		}
+		fav, adv := c.High, c.Low
+		if tr.Dir == "short" {
+			fav, adv = c.Low, c.High
+		}
+		if g := r2(pnl(tr.Dir, tr.Entry, fav)); g > tr.MaxGain {
+			tr.MaxGain, tr.PeakMs = g, c.Ts
+		}
+		if d := r2(pnl(tr.Dir, tr.Entry, adv)); d < tr.MaxDD {
+			tr.MaxDD = d
+		}
+	}
+}
+
+// dcChanLevel 目前的通道出場價:多單 = 最近 12 根已收 K 的最低價、空單 = 最高價
+// (下一根收盤破它 → 再下一根開盤平倉)。
+func dcChanLevel(closed []exchange.Candle, dir string) float64 {
+	n := len(closed)
+	if n < dcExitN {
+		return 0
+	}
+	lo, hi := closed[n-dcExitN].Low, closed[n-dcExitN].High
+	for _, c := range closed[n-dcExitN:] {
+		lo, hi = min(lo, c.Low), max(hi, c.High)
+	}
+	if dir == "short" {
+		return roundPx(hi)
+	}
+	return roundPx(lo)
+}
+
 // DonchianMarkTick 每 20 秒:用即時價更新現價 / 最大獲利,碰到停損就出場(掛停損單的效果)。
 func (s *Store) DonchianMarkTick() {
 	b := s.donchianBook
@@ -304,8 +347,12 @@ func (s *Store) dcMark(px map[string]float64, now time.Time) {
 			continue
 		}
 		tr.Cur = roundPx(p)
-		if g := pnl(tr.Dir, tr.Entry, p); g > tr.MaxGain {
-			tr.MaxGain = round2(g)
+		g := pnl(tr.Dir, tr.Entry, p)
+		if r2(g) > tr.MaxGain {
+			tr.MaxGain, tr.PeakMs = r2(g), now.UnixMilli()
+		}
+		if r2(g) < tr.MaxDD {
+			tr.MaxDD = r2(g)
 		}
 		if tr.SL > 0 && ((tr.Dir == "long" && p <= tr.SL) || (tr.Dir == "short" && p >= tr.SL)) {
 			closeTrade(tr, tr.SL, "sl", now)

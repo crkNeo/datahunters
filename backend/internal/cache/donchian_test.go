@@ -186,3 +186,67 @@ func TestDonchianMarkStop(t *testing.T) {
 		t.Fatalf("live stop should fill at the stop price: %+v", tr)
 	}
 }
+
+func TestDonchianExcursion(t *testing.T) {
+	cs := flatBars(0, 10)
+	tr := &PaperTrade{Dir: "long", Entry: 10, SL: 9, OpenTime: time.UnixMilli(cs[3].Ts)}
+	cs[2].High, cs[2].Low = 20, 1 // 進場前:不算
+	cs[3].Low = 9.5               // 進場那根(在開盤進場):算 → −5%
+	cs[6].High = 11.2             // 高點在第 7 根 → +12%
+	cs[8].High = 11.2             // 一樣高:時間不改成較晚那根
+	dcExcursion(tr, cs)
+	if tr.MaxGain != 12 || tr.PeakMs != cs[6].Ts || tr.MaxDD != -5 {
+		t.Fatalf("long excursion: gain %v at %v, dd %v", tr.MaxGain, tr.PeakMs, tr.MaxDD)
+	}
+	sh := &PaperTrade{Dir: "short", Entry: 10, SL: 11, OpenTime: time.UnixMilli(cs[3].Ts)}
+	cs2 := flatBars(0, 10)
+	cs2[5].Low, cs2[7].High = 9, 10.4 // 空單:低點有利 +10%、高點不利 −4%
+	dcExcursion(sh, cs2)
+	if sh.MaxGain != 10 || sh.PeakMs != cs2[5].Ts || sh.MaxDD != -4 {
+		t.Fatalf("short excursion: gain %v at %v, dd %v", sh.MaxGain, sh.PeakMs, sh.MaxDD)
+	}
+}
+
+func TestDonchianChanLevel(t *testing.T) {
+	cs := flatBars(0, 30)
+	cs[20].Low, cs[25].High = 9.2, 10.9
+	cs[10].Low = 5 // 超過 12 根前:不算
+	if lv := dcChanLevel(cs, "long"); lv != 9.2 {
+		t.Fatalf("long channel exit = %v, want 9.2", lv)
+	}
+	if lv := dcChanLevel(cs, "short"); lv != 10.9 {
+		t.Fatalf("short channel exit = %v, want 10.9", lv)
+	}
+	// 跟出場規則一致:下一根收盤 < 這個價 → dcExitScan 判通道出場
+	tr := &PaperTrade{Dir: "long", Entry: 10, SL: 8, Status: "open", OpenTime: time.UnixMilli(cs[15].Ts)}
+	next := append(append([]exchange.Candle{}, cs...), exchange.Candle{Ts: cs[29].Ts + dcBarMs, Open: 9.5, High: 9.5, Low: 9.1, Close: 9.15})
+	if _, outcome, _, _, hit := dcExitScan(tr, next, nil); !hit || outcome != "channel" {
+		t.Fatal("closing below the shown channel level must trigger the channel exit")
+	}
+}
+
+func TestDonchianTickRecordsExcursion(t *testing.T) {
+	s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		n := len(cs)
+		cs[n-5].Low = 9.6   // 進場後跌到 −4%
+		cs[n-3].High = 10.8 // 進場後最高 +8%
+	})
+	b := s.donchianBook
+	tr := &PaperTrade{ID: "x", Coin: "AAA", Dir: "long", Entry: 10, SL: 9, Status: "open", OpenTime: time.UnixMilli(cs[len(cs)-8].Ts)}
+	b.trades = []*PaperTrade{tr}
+	s.dcEng.seeded = true
+	s.DonchianTick()
+	if tr.Status != "open" || tr.MaxDD != -4 || tr.MaxGain != 8 || tr.PeakMs != cs[len(cs)-3].Ts || tr.ChanExit != 9.6 || tr.ATR == 0 {
+		t.Fatalf("tick should record excursion / channel exit: %+v", tr)
+	}
+	// 盤中即時價創新高 → 時間記現在;跌更深 → 回撤更新
+	now := time.Now()
+	s.dcMark(map[string]float64{"AAA": 11}, now)
+	if tr.MaxGain != 10 || tr.PeakMs != now.UnixMilli() {
+		t.Fatalf("live new high: %+v", tr)
+	}
+	s.dcMark(map[string]float64{"AAA": 9.5}, now)
+	if tr.MaxDD != -5 || tr.Status != "open" {
+		t.Fatalf("live drawdown: %+v", tr)
+	}
+}

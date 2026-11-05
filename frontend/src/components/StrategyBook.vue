@@ -90,7 +90,30 @@ const healthTip = (t) => !t.health ? '這筆沒有進場因子資料' : HEALTH[t
 const AFTER_ALL = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4H', 4], ['after_8h', '8H', 8], ['after_16h', '16H', 16], ['after_24h', '24H', 24]]
 const AFTER = computed(() => AFTER_ALL.slice(0, props.book === 'volbrk' ? 5 : 4))
 // 波動突破:沒有停損,記「最大回撤」(進場後到平倉前最不利的位置,≤ 0)
-const hasDD = computed(() => props.book === 'volbrk')
+const hasDD = computed(() => props.book === 'volbrk' || props.book === 'donchian')
+// 唐奇安:給「之後調整止盈止損」用的資料,用 R(= 進場到停損的距離,也就是 3 × 進場時 ATR)表示,
+// 不同波動的幣才能放在一起比。高點時間 = 最大獲利出現在進場後第幾小時;回吐 = 最大獲利 − 目前 / 最後損益。
+const hasR = computed(() => props.book === 'donchian')
+const rPct = (t) => (t.entry > 0 && t.sl ? Math.abs(t.entry - t.sl) / t.entry * 100 : 0)
+const inR = (t, v) => {
+  const r = rPct(t)
+  return r && v ? (v > 0 ? '+' : '') + (v / r).toFixed(1) + 'R' : ''
+}
+const peakAt = (t) => (t.peak_ms && t.max_gain > 0 ? `第 ${Math.floor((t.peak_ms - Date.parse(t.open_time)) / 3600e3) + 1} 小時` : '—')
+const giveback = (t) => {
+  const r = rPct(t)
+  return r && t.max_gain > 0 ? ((t.max_gain - (t.pnl_pct || 0)) / r).toFixed(1) + 'R' : '—'
+}
+// 通道出場價:離現價幾個 ATR、如果現在被它觸發大約是多少損益(實際在下一根開盤成交)
+const chanDist = (t) => (t.chan_exit && t.atr && t.cur > 0 ? (Math.abs(t.cur - t.chan_exit) / t.atr).toFixed(1) + ' ATR' : '')
+function chanTip(t) {
+  const lines = ['目前的通道出場價:' + (t.dir === 'short' ? '最近 12 根 1h 的最高價' : '最近 12 根 1h 的最低價') + ',下一根收盤破它 → 再下一根開盤平倉(每小時更新)']
+  if (t.chan_exit) {
+    const g = (t.dir === 'short' ? (t.entry - t.chan_exit) : (t.chan_exit - t.entry)) / t.entry * 100
+    lines.push(`在這個價出場約 ${fmtPct(g)}(${inR(t, g) || '0R'})` + (g > 0 ? ',等於已經鎖住的獲利' : ''))
+  }
+  return lines.join('\n')
+}
 // 還沒到時間(或剛到、下一分鐘才補)→「待」;到了卻沒有值 → 「—」
 const afterWait = (t, h) => Date.now() < Date.parse(t.open_time) + h * 3600e3 + 3 * 60e3
 // 波動突破:沒有止損 / 止盈,UTC 換日(台北 08:00)收盤平倉 → 進行中顯示「還剩多久換日」
@@ -182,7 +205,7 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(沒有停損,用來看設停損會砍掉哪些單)">最大回撤</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else-if="!noTP"><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(用來看停損該設多寬)">最大回撤</th><th v-if="hasR" class="r" title="最大獲利出現在進場後第幾小時">高點時間</th><th v-if="hasR" class="r" title="最大獲利 − 目前 / 最後損益,用 R 表示:從最高點吐回去多少">回吐</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">止損</th><th v-if="hasR" class="r" title="目前的移動出場線(最近 12 根 1h 低點 / 空單高點),每小時更新">通道出場</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else-if="!noTP"><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -208,12 +231,15 @@ function tpStatusCls(t) {
           <td class="r" :class="t.status === 'pending' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
             <b v-if="t.status !== 'pending'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
-          <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-          <td v-if="hasDD" class="r short"><b v-if="t.status !== 'pending' && t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">{{ t.status === 'pending' ? '—' : '0%' }}</span></td>
+          <td class="r long"><b v-if="t.status !== 'pending' && t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span><small v-if="hasR && t.max_gain" class="tppct">{{ inR(t, t.max_gain) }}</small></td>
+          <td v-if="hasDD" class="r short"><b v-if="t.status !== 'pending' && t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">{{ t.status === 'pending' ? '—' : '0%' }}</span><small v-if="hasR && t.max_dd" class="tppct">{{ inR(t, t.max_dd) }}</small></td>
+          <td v-if="hasR" class="r tsmall nowrap">{{ peakAt(t) }}</td>
+          <td v-if="hasR" class="r tsmall nowrap">{{ giveback(t) }}</td>
           <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ t.status !== 'pending' && afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small></template><span v-else class="tsmall">無</span></td>
+          <td v-if="hasR" class="r tp-cell nowrap" :title="chanTip(t)"><template v-if="t.chan_exit">{{ fmtPrice(t.chan_exit) }}<small class="tppct">{{ chanDist(t) }}</small></template><span v-else class="tsmall">待</span></td>
           <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft() }}</td>
           <td v-if="hasATR" class="r tp-cell nowrap" :title="atrTip(t)"><template v-if="t.atr">{{ fmtPrice(t.atr) }}<small class="tppct">{{ atrPct(t) }}</small></template><span v-else class="tsmall">待</span></td>
           <template v-else-if="!noTP">
@@ -231,7 +257,7 @@ function tpStatusCls(t) {
 
     <h3 class="psub" v-if="hist.total">近三個月已結束 <small class="tsmall">{{ histSince() }} 起</small> ({{ hist.total }})</h3>
     <div class="tblwrap" v-if="hist.rows.length"><table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(沒有停損,用來看設停損會砍掉哪些單)">最大回撤</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th class="r">進場</th><th class="r">出場</th><th>結果</th><th class="r">損益%</th><th class="r">最大漲幅</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(用來看停損該設多寬)">最大回撤</th><th v-if="hasR" class="r" title="最大獲利出現在進場後第幾小時">高點時間</th><th v-if="hasR" class="r" title="最大獲利 − 目前 / 最後損益,用 R 表示:從最高點吐回去多少">回吐</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r">出場時間</th></tr></thead>
       <tbody>
         <tr v-for="(t, i) in hist.rows" :key="i" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -251,8 +277,10 @@ function tpStatusCls(t) {
           <td class="r" :class="t.outcome === 'cancel' ? '' : (t.pnl_pct >= 0 ? 'long' : 'short')">
             <b v-if="t.outcome !== 'cancel'">{{ fmtPct(t.pnl_pct) }}</b><span v-else class="tsmall">—</span>
           </td>
-          <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span></td>
-          <td v-if="hasDD" class="r short"><b v-if="t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">0%</span></td>
+          <td class="r long"><b v-if="t.max_gain">{{ fmtPct(t.max_gain) }}</b><span v-else class="tsmall">—</span><small v-if="hasR && t.max_gain" class="tppct">{{ inR(t, t.max_gain) }}</small></td>
+          <td v-if="hasDD" class="r short"><b v-if="t.max_dd">{{ fmtPct(t.max_dd) }}</b><span v-else class="tsmall">0%</span><small v-if="hasR && t.max_dd" class="tppct">{{ inR(t, t.max_dd) }}</small></td>
+          <td v-if="hasR" class="r tsmall nowrap">{{ peakAt(t) }}</td>
+          <td v-if="hasR" class="r tsmall nowrap">{{ giveback(t) }}</td>
           <td v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :class="t[a[0]] == null ? '' : (t[a[0]] >= 0 ? 'long' : 'short')">
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
