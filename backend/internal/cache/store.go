@@ -153,8 +153,7 @@ type Store struct {
 	donchianBook  *microBook    // 唐奇安長通道突破:1h 收盤破 168 根通道進、12 根通道 / 3×ATR 停損出 (donchian.go)
 	volBrkBook    *microBook    // 波動突破:UTC 日開盤 + 0.5×前日振幅觸價做多、換日平倉 (volbrk.go)
 	dcEng, vbEng  *hourEngine   // 上面兩本的每小時排程狀態
-	ptStore       *patternStore // 型態掃描結果(patterns.go)
-	ptEng         *hourEngine   // 型態掃描的每小時排程
+	ptStore       *patternStore // 型態掃描結果 + 排程(patterns.go,1H / 4H / 1D)
 	smcV2Books    []*microBook  // 太陽(原訂單塊v2):SMC 訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星,三段止盈;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
@@ -303,8 +302,7 @@ func NewStore(coins []string) *Store {
 	s.donchianBook = s.newDonchianBook()
 	s.volBrkBook = s.newVolBrkBook()
 	s.dcEng, s.vbEng = &hourEngine{}, &hourEngine{}
-	s.ptStore = &patternStore{hits: map[string]map[string]*PatternHit{}, seen: map[string]int64{}}
-	s.ptEng = &hourEngine{}
+	s.ptStore = newPatternStore()
 	s.newsBook = newNewsAlphaBook()
 	s.initNewsAlpha()
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。

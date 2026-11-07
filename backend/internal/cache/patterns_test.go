@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"testing"
+	"time"
 
 	"datahunter/internal/exchange"
 )
@@ -184,15 +185,65 @@ func TestPatternsMirrorPrices(t *testing.T) {
 }
 
 func TestPatternsAPI(t *testing.T) {
-	s := &Store{ptStore: &patternStore{hits: map[string]map[string]*PatternHit{
+	s := &Store{ptStore: newPatternStore()}
+	s.ptStore.frames["1h"].hits = map[string]map[string]*PatternHit{
 		"AAA": {"dbl_bottom": {Coin: "AAA", Score: 72, State: "forming"}},
 		"BBB": {"dbl_bottom": {Coin: "BBB", Score: 88, State: "breakout"}, "bull_flag": {Coin: "BBB", Score: 61}},
-	}, seen: map[string]int64{}}}
-	r := s.Patterns("dbl_bottom")
-	if len(r.Patterns) != 16 || len(r.Rows) != 2 || r.Rows[0].Coin != "BBB" || r.Scanned != 2 {
+	}
+	s.ptStore.frames["4h"].hits = map[string]map[string]*PatternHit{"CCC": {"hs_top": {Coin: "CCC", Score: 77}}}
+	r := s.Patterns("dbl_bottom", "")
+	if r.TF != "1h" || len(r.Patterns) != 16 || len(r.Rows) != 2 || r.Rows[0].Coin != "BBB" || r.Scanned != 2 {
 		t.Fatalf("api: %+v", r)
 	}
 	if len(r.Summary["dbl_bottom"]) != 2 || len(r.Summary["bull_flag"]) != 1 || len(r.Summary["hs_top"]) != 0 {
 		t.Fatalf("summary: %+v", r.Summary)
+	}
+	// 各週期分開
+	r4 := s.Patterns("hs_top", "4h")
+	if r4.TF != "4h" || r4.Scanned != 1 || len(r4.Rows) != 1 || len(r4.Summary["dbl_bottom"]) != 0 {
+		t.Fatalf("4h: %+v", r4)
+	}
+	if r := s.Patterns("hs_top", "1d"); r.TF != "1d" || r.Scanned != 0 || len(r.Rows) != 0 {
+		t.Fatalf("1d: %+v", r)
+	}
+	if r := s.Patterns("hs_top", "bogus"); r.TF != "1h" {
+		t.Fatalf("unknown tf falls back to 1h: %v", r.TF)
+	}
+}
+
+func TestPatternFrameDue(t *testing.T) {
+	coins := func() []string {
+		var out []string
+		for i := 0; i < 120; i++ {
+			out = append(out, string(rune('A'+i/26))+string(rune('A'+i%26)))
+		}
+		return out
+	}
+	f := newPatternStore().frames["4h"]
+	bar := int64(1000) * f.barMs
+	at := func(ms int64) time.Time { return time.UnixMilli(bar + ms) }
+	if got := f.due(at(4*60_000), coins); len(got) != 0 {
+		t.Fatalf("4h 收盤後 5 分鐘內不抓: %d", len(got))
+	}
+	got := f.due(at(5*60_000), coins)
+	if len(got) != 50 || len(f.pend) != 120 {
+		t.Fatalf("第一批 50 個(共 120 個排隊): %d / %d", len(got), len(f.pend))
+	}
+	for _, c := range got {
+		delete(f.pend, c)
+	}
+	if got := f.due(at(6*60_000), coins); len(got) != 50 || got[0] == "AA" {
+		t.Fatalf("下一分鐘接著下一批: %v", got[:1])
+	}
+	if got := f.due(at(61*60_000), coins); len(got) != 0 {
+		t.Fatalf("過了 60 分鐘放棄這一輪: %d", len(got))
+	}
+	if got := f.due(time.UnixMilli(bar+f.barMs+5*60_000), coins); len(got) != 50 || len(f.pend) != 120 {
+		t.Fatalf("下一根 4H 重新排入: %d", len(got))
+	}
+	// 1H:不延後、不分批
+	h := newPatternStore().frames["1h"]
+	if got := h.due(time.UnixMilli(int64(5000)*dcBarMs+30_000), coins); len(got) != 120 {
+		t.Fatalf("1h 整點就全部排入: %d", len(got))
 	}
 }

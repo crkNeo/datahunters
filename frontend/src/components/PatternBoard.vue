@@ -1,6 +1,6 @@
 <!--
-  型態掃描:選一種型態 → 列出成交額前 200 幣裡,目前 1H 走勢跟它最像的幣(相似度降冪)。後端 patterns.go。
-  資料:GET /api/patterns?key=<型態> → { scanned, updated, summary: {型態: [[相似度, 剛突破?1:0], ...]}, rows: [...] }
+  型態掃描:選一種型態 + 週期(1H / 4H / 1D)→ 列出成交額前 200 幣裡,目前走勢跟它最像的幣(相似度降冪)。後端 patterns.go。
+  資料:GET /api/patterns?key=<型態>&tf=<1h|4h|1d> → { tf, scanned, updated, summary: {型態: [[相似度, 剛突破?1:0], ...]}, rows: [...] }
   每列:coin, score, state('forming'|'breakout'), bars, breakout, dist_pct, target, parts[{name,score,note}],
         chart{ candles:[[開,高,低,收]], pivots:[{i,p,hi}], lines:[{i1,p1,i2,p2}], level }
 -->
@@ -33,6 +33,9 @@ const iconPath = (pts) => pts.reduce((s, v, i) => s + (i % 2 ? `,${v}` : `${i ? 
 const data = ref(null)
 const loading = ref(false)
 const sel = ref('sym_tri_bull')
+const TFS = [['1h', '1H'], ['4h', '4H'], ['1d', '1D']]
+const tf = ref('1h')
+const tfName = computed(() => TFS.find((t) => t[0] === tf.value)[1])
 const stateF = ref('all') // all | forming | breakout
 const minScore = ref(60)
 const open = ref(null) // 展開的那一列(幣)
@@ -40,8 +43,9 @@ const open = ref(null) // 展開的那一列(幣)
 async function load() {
   loading.value = true
   try {
-    const r = await authFetch('/api/patterns?key=' + sel.value)
-    if (r.ok) data.value = await r.json()
+    const want = [sel.value, tf.value]
+    const r = await authFetch(`/api/patterns?key=${want[0]}&tf=${want[1]}`)
+    if (r.ok && sel.value === want[0] && tf.value === want[1]) data.value = await r.json() // 切太快時丟掉舊回應
   } catch (e) {
     /* 下次再試 */
   } finally {
@@ -51,10 +55,10 @@ async function load() {
 let timer = null
 onMounted(() => {
   load()
-  timer = setInterval(load, 5 * 60e3) // 後端每小時收盤後重算;5 分鐘拉一次就夠
+  timer = setInterval(load, 5 * 60e3) // 後端每根收盤後重算;5 分鐘拉一次就夠
 })
 onUnmounted(() => clearInterval(timer))
-watch(sel, () => {
+watch([sel, tf], () => {
   open.value = null
   load()
 })
@@ -63,7 +67,7 @@ const keep = (score, brk) => score >= minScore.value && (stateF.value === 'all' 
 // 每張型態卡右上角:目前有幾檔符合門檻 / 狀態篩選
 const countOf = (key) => (data.value?.summary?.[key] || []).filter((x) => keep(x[0], x[1])).length
 const cur = computed(() => PATTERNS.find((p) => p.key === sel.value))
-const rows = computed(() => (data.value?.key === sel.value ? data.value.rows || [] : [])
+const rows = computed(() => (data.value?.key === sel.value && data.value?.tf === tf.value ? data.value.rows || [] : [])
   .filter((r) => keep(r.score, r.state === 'breakout')))
 // 轉折點標籤:高點 H1、H2…,低點 L1、L2…
 const pivLabels = (ps) => {
@@ -89,8 +93,8 @@ function chartGeo(c, w, h) {
 <template>
   <section class="pb">
     <div class="mk-head">
-      <h2>型態掃描<span class="help" tabindex="0">?<span class="help-pop">每小時收盤後，對成交額前 200 的幣把 16 種型態全部算一次。<b>相似度</b> = 走勢跟教科書型態有多像（轉折點、趨勢線、前段趨勢、貼合度各項加權），<b>不是勝率</b>。點一列可以看小圖和各項分數。</span></span></h2>
-      <span class="mk-count" v-if="data">掃描 {{ data.scanned }} 檔 · 1H · {{ data.updated ? '更新 ' + fmtClock(data.updated) : '第一次掃描中…' }}</span>
+      <h2>型態掃描<span class="help" tabindex="0">?<span class="help-pop">每根 K 收盤後，對成交額前 200 的幣把 16 種型態全部算一次。<b>1H</b> 整點收盤後馬上算；<b>4H</b> 收盤後約 5～9 分鐘、<b>1D</b>（台北早上 8 點換日）約 10～14 分鐘陸續更新完（錯開時間、慢慢抓，避免撞到交易所頻率限制）。1D 要至少 80 根日 K，上市太新的幣不會出現。<b>相似度</b> = 走勢跟教科書型態有多像（轉折點、趨勢線、前段趨勢、貼合度各項加權），<b>不是勝率</b>。點一列可以看小圖和各項分數。</span></span></h2>
+      <span class="mk-count" v-if="data">掃描 {{ data.scanned }} 檔 · {{ tfName }} · {{ data.updated ? '更新 ' + fmtClock(data.updated) : '第一次掃描中…' }}</span>
     </div>
 
     <!-- 型態選擇:16 張小卡,示意圖 + 名稱 + 目前有幾檔超過門檻 -->
@@ -103,7 +107,9 @@ function chartGeo(c, w, h) {
     </div>
 
     <div class="timefilter">
-      <span class="tf-label">狀態</span>
+      <span class="tf-label">週期</span>
+      <button v-for="t in TFS" :key="t[0]" :class="{ on: tf === t[0] }" @click="tf = t[0]">{{ t[1] }}</button>
+      <span class="tf-label" style="margin-left:14px">狀態</span>
       <button v-for="s in [['all', '全部'], ['forming', '形成中'], ['breakout', '剛突破']]" :key="s[0]" :class="{ on: stateF === s[0] }" @click="stateF = s[0]">{{ s[1] }}</button>
       <span class="tf-label" style="margin-left:14px">相似度</span>
       <button v-for="m in [50, 60, 70, 80]" :key="m" :class="{ on: minScore === m }" @click="minScore = m">≥ {{ m }}%</button>
@@ -171,7 +177,7 @@ function chartGeo(c, w, h) {
         </tbody>
       </table>
     </div>
-    <p v-if="data && !rows.length && !loading" class="empty">{{ data.updated ? `目前沒有相似度 ≥ ${minScore}% 的幣。` : '剛開機,第一次掃描約需 1~2 分鐘…' }}</p>
+    <p v-if="data && !rows.length && !loading" class="empty">{{ data.updated ? `目前沒有相似度 ≥ ${minScore}% 的幣。` : (tf === '1h' ? '剛開機,第一次掃描約需 1~2 分鐘…' : '剛開機,第一次掃描約需 5 分鐘左右(收盤後的前幾分鐘會先等一下)…') }}</p>
     <p v-else-if="!data" class="loading">載入中…</p>
     <p class="loginhint" style="margin-top:12px">相似度只代表「長得多像教科書型態」，不是勝率。之後會記錄每次掃到的型態後續漲跌，再看哪些型態真的有用。</p>
   </section>

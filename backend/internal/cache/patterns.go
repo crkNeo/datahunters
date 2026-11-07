@@ -9,7 +9,7 @@ import (
 	"datahunter/internal/exchange"
 )
 
-// patterns.go — 型態掃描:每小時收盤後,對成交額前 200 幣的 1H K,把 16 種經典型態全部評分一次。
+// patterns.go — 型態掃描:每個週期(1H / 4H / 1D)收盤後,對成交額前 200 幣把 16 種經典型態全部評分一次。
 //
 // 做法:先用 ZigZag 找波段轉折點(四種尺度,小型態 / 大型態都抓得到),再依每種型態該有的條件
 // (前段趨勢、高低點排列、趨勢線收斂 / 平行、貼合度、量縮…)各項打 0~100 分,加權成「相似度」。
@@ -388,47 +388,126 @@ func toHit(coin string, cs []exchange.Candle, c *pcand, bear bool) *PatternHit {
 
 // ---- 排程與 API ----
 
-type patternStore struct {
-	mu      sync.Mutex
+// ptFrame 是一個週期的掃描結果 + 排程。hits / seen / updated 由 patternStore.mu 保護;
+// bucket / pend 只在 ticker goroutine 用。
+type ptFrame struct {
+	tf      string
+	barMs   int64
+	delay   int64                             // 收盤後過多久才開始抓(ms):錯開整點各策略同時抓 K 的尖峰,避免撞到 Binance 頻率限制
+	giveUp  int64                             // 收盤後過多久還沒處理到的幣就放棄這一輪(ms)
+	batch   int                               // 每分鐘最多處理幾個幣(0 = 全部)
 	hits    map[string]map[string]*PatternHit // 幣 → 型態 → 結果
-	seen    map[string]int64                  // 幣 → 這次結果是哪一根 K 算的(收盤時間)
+	seen    map[string]int64                  // 幣 → 這次結果是哪一根 K 算的
 	updated int64
+	bucket  int64
+	pend    map[string]bool
 }
 
-// PatternTick 每分鐘由 main 呼叫:整點收盤後把宇宙裡每個幣的 16 種型態重算一次。
+type patternStore struct {
+	mu     sync.Mutex
+	frames map[string]*ptFrame
+}
+
+// ptTFs:1H 直接用唐奇安同一小時的 1h K 快取(不多打請求);4H / 1D 另外抓,
+// 收盤後 5 / 10 分鐘才開始,每分鐘 50 個幣(≈ 每分鐘 100 權重)慢慢抓完。
+var ptTFs = []string{"1h", "4h", "1d"}
+
+const ptKlines = 200 // 4H / 1D 每次抓幾根(最後一根是還在走的)
+
+func newPatternStore() *patternStore {
+	mk := func(tf string, barMs, delay, giveUp int64, batch int) *ptFrame {
+		return &ptFrame{tf: tf, barMs: barMs, delay: delay, giveUp: giveUp, batch: batch,
+			hits: map[string]map[string]*PatternHit{}, seen: map[string]int64{}}
+	}
+	const minute = 60_000
+	return &patternStore{frames: map[string]*ptFrame{
+		"1h": mk("1h", dcBarMs, 0, 10*minute, 0),
+		"4h": mk("4h", 4*dcBarMs, 5*minute, 60*minute, 50),
+		"1d": mk("1d", vbDayMs, 10*minute, 120*minute, 50),
+	}}
+}
+
+// due 回傳這一分鐘要處理的幣:新的一根收盤、過了 delay 之後排入整個宇宙;過了 giveUp 還沒處理到的放棄。
+func (f *ptFrame) due(now time.Time, coins func() []string) []string {
+	ms := now.UnixMilli()
+	bkt := ms / f.barMs
+	into := ms - bkt*f.barMs
+	if bkt != f.bucket {
+		if into < f.delay {
+			return nil
+		}
+		f.bucket = bkt
+		f.pend = map[string]bool{}
+		for _, c := range coins() {
+			f.pend[c] = true
+		}
+	} else if into > f.giveUp {
+		f.pend = nil
+	}
+	out := make([]string, 0, len(f.pend))
+	for c := range f.pend {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	if f.batch > 0 && len(out) > f.batch {
+		out = out[:f.batch]
+	}
+	return out
+}
+
+// ptBars 回這個週期已收的 K;ok=false:抓不到,或交易所還沒生成新的一根 → 下一分鐘再試。
+func (s *Store) ptBars(f *ptFrame, coin string, now time.Time) ([]exchange.Candle, bool) {
+	if f.tf == "1h" {
+		closed, _, ok := s.hourBars(coin, now)
+		return closed, ok
+	}
+	cs, err := s.ex.BinanceKlines(coin+"USDT", f.tf, ptKlines)
+	if err != nil || len(cs) < 2 || cs[len(cs)-1].Ts != now.UnixMilli()/f.barMs*f.barMs {
+		return nil, false
+	}
+	return cs[:len(cs)-1], true
+}
+
+// PatternTick 每分鐘由 main 呼叫:每個週期收盤後把宇宙裡每個幣的 16 種型態重算一次。
 func (s *Store) PatternTick() {
 	if s.ptStore == nil {
 		return
 	}
 	now := time.Now().UTC()
-	coins := s.ptEng.due(now, s.wideUniverse)
-	done := 0
-	for _, coin := range coins {
-		closed, _, ok := s.hourBars(coin, now)
-		if !ok {
-			continue
-		}
-		delete(s.ptEng.pend, coin)
-		hits := scanPatterns(coin, closed)
-		st := s.ptStore
-		st.mu.Lock()
-		st.hits[coin] = hits
-		st.seen[coin] = closed[len(closed)-1].Ts
-		st.updated = now.UnixMilli()
-		st.mu.Unlock()
-		done++
-		time.Sleep(20 * time.Millisecond)
-	}
-	if done > 0 { // 兩小時沒更新的幣(掉出宇宙 / 下架)清掉
-		cut := now.UnixMilli() - 3*dcBarMs
-		s.ptStore.mu.Lock()
-		for c, ts := range s.ptStore.seen {
-			if ts < cut {
-				delete(s.ptStore.hits, c)
-				delete(s.ptStore.seen, c)
+	for _, tf := range ptTFs {
+		f := s.ptStore.frames[tf]
+		coins := f.due(now, s.wideUniverse)
+		done := 0
+		for _, coin := range coins {
+			closed, ok := s.ptBars(f, coin, now)
+			if !ok {
+				continue
+			}
+			delete(f.pend, coin)
+			hits := scanPatterns(coin, closed)
+			s.ptStore.mu.Lock()
+			f.hits[coin] = hits
+			f.seen[coin] = closed[len(closed)-1].Ts
+			f.updated = now.UnixMilli()
+			s.ptStore.mu.Unlock()
+			done++
+			if tf == "1h" {
+				time.Sleep(20 * time.Millisecond) // 1h 大多是快取命中
+			} else {
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
-		s.ptStore.mu.Unlock()
+		if done > 0 { // 三根 K 沒更新的幣(掉出宇宙 / 下架)清掉
+			cut := now.UnixMilli() - 3*f.barMs
+			s.ptStore.mu.Lock()
+			for c, ts := range f.seen {
+				if ts < cut {
+					delete(f.hits, c)
+					delete(f.seen, c)
+				}
+			}
+			s.ptStore.mu.Unlock()
+		}
 	}
 }
 
@@ -451,8 +530,11 @@ type PatternResult struct {
 }
 
 // Patterns 回選中型態 key 的列表(相似度降冪,最多 ptMaxRows 檔)和每種型態的分數摘要。
-func (s *Store) Patterns(key string) PatternResult {
-	res := PatternResult{TF: "1h", Summary: map[string][][2]int{}, Rows: []*PatternHit{}, Key: key}
+func (s *Store) Patterns(key, tf string) PatternResult {
+	if tf != "4h" && tf != "1d" {
+		tf = "1h"
+	}
+	res := PatternResult{TF: tf, Summary: map[string][][2]int{}, Rows: []*PatternHit{}, Key: key}
 	for _, d := range patDefs {
 		res.Patterns = append(res.Patterns, PatternMeta{Key: d.Key, Name: d.Name, Bear: d.Bear})
 		res.Summary[d.Key] = [][2]int{}
@@ -463,8 +545,9 @@ func (s *Store) Patterns(key string) PatternResult {
 	st := s.ptStore
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	res.Scanned, res.Updated = len(st.hits), st.updated
-	for _, hs := range st.hits {
+	f := st.frames[tf]
+	res.Scanned, res.Updated = len(f.hits), f.updated
+	for _, hs := range f.hits {
 		for k, h := range hs {
 			b := 0
 			if h.State == "breakout" {

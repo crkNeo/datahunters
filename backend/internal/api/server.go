@@ -1071,7 +1071,7 @@ func (s *Server) handleEMA200History(w http.ResponseWriter, r *http.Request) {
 // handleNewsAlpha serves the 消息雷達 overview (source health, Korean premium, Polymarket movers).
 // handlePatterns serves 型態掃描:?key=<型態> 回那個型態的列表(相似度降冪)+ 16 種型態的分數摘要。
 func (s *Server) handlePatterns(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.Patterns(r.URL.Query().Get("key")))
+	writeJSON(w, s.store.Patterns(r.URL.Query().Get("key"), r.URL.Query().Get("tf")))
 }
 
 func (s *Server) handleNewsAlpha(w http.ResponseWriter, r *http.Request) {
