@@ -130,7 +130,7 @@ type PaperTrade struct {
 
 	// 最大回撤%:進場後到平倉前,價格最不利的位置相對進場價(≤ 0,例如 −3.2)。波動突破、唐奇安會記。
 	MaxDD float64 `json:"max_dd,omitempty"`
-	// 最大獲利(MaxGain)出現的時間(epoch ms;K 線算的記那根的開盤時間)。目前只有唐奇安會記。
+	// 最大獲利(MaxGain)出現的時間(epoch ms;K 線算的記那根的開盤時間)。唐奇安、波動突破會記。
 	PeakMs int64 `json:"peak_ms,omitempty"`
 	// 唐奇安持倉:目前的通道出場價(多單 = 最近 12 根已收 1h 的最低價,空單 = 最高價),
 	// 下一根收盤破這個價就在再下一根開盤平倉。每小時收盤後更新,只放記憶體。

@@ -17,7 +17,7 @@ import (
 //	         同一根 1h 同時碰到上緣和下緣(方向不明)、或先碰到下緣 → 今天不再交易
 //	出場     UTC 換日那一刻(當日收盤價)平倉,不留倉過夜;沒有停損、沒有止盈
 //
-// 另外記「最大回撤」(進場後到平倉前最不利的位置):進場那一小時用 1m K 只看碰到上緣之後的部分
+// 另外記「最大獲利」和它出現的時間(高點時間),以及「最大回撤」(進場後到平倉前最不利的位置):進場那一小時用 1m K 只看碰到上緣之後的部分
 // (那根 1h 的低點可能發生在買進之前),之後用每根 1h 的低點,盤中再用即時價補。
 //
 // 實作:每小時收盤後,拿今天已收的 1h K 從頭重播一次,決定今天是「還在等 / 已成交 / 不做了」——
@@ -107,6 +107,21 @@ func vbDayClose(daily, hours []exchange.Candle, day int64) (float64, bool) {
 type vbFill struct {
 	tr    *PaperTrade
 	upper float64
+}
+
+// vbMaxGain 用進場那一小時(含)到換日前的 1h 高點更新最大獲利和它出現的時間(那根的開盤時間),只會往上調。
+// 進場那一小時也算:那根的高點一定在碰到上緣之後(碰到之前價格都在上緣之下)。
+func vbMaxGain(tr *PaperTrade, bars []exchange.Candle) {
+	open := tr.OpenTime.UnixMilli()
+	end := open/vbDayMs*vbDayMs + vbDayMs
+	for _, c := range bars {
+		if c.Ts < open || c.Ts >= end {
+			continue
+		}
+		if g := r2(pnl(tr.Dir, tr.Entry, c.High)); g > tr.MaxGain {
+			tr.MaxGain, tr.PeakMs = g, c.Ts
+		}
+	}
 }
 
 // vbMaxDD 用進場那一小時「之後」的 1h 低點更新最大回撤(只會往下調)。進場那一小時的低點可能發生在
@@ -214,7 +229,7 @@ func (s *Store) VolBrkTick() {
 						dayBars = append(dayBars, c)
 					}
 				}
-				barMaxGain(tr, dayBars, dcBarMs)
+				vbMaxGain(tr, dayBars)
 				vbMaxDD(tr, dayBars)
 				if d < day { // 換日了 → 用那天的收盤價平倉
 					if px, ok := vbDayClose(daily, hours, d); ok {
@@ -243,7 +258,7 @@ func (s *Store) VolBrkTick() {
 				case vbFilled:
 					tr := &PaperTrade{ID: id, Coin: coin, Dir: "long", Entry: roundPx(px), Cur: roundPx(px),
 						Status: "open", OpenTime: time.UnixMilli(at).UTC()}
-					barMaxGain(tr, hours, dcBarMs)
+					vbMaxGain(tr, hours)
 					vbMaxDD(tr, hours)
 					b.trades = append(b.trades, tr)
 					entries = append(entries, tr)
@@ -315,8 +330,8 @@ func (s *Store) VolBrkMarkTick() {
 		tr.Cur = roundPx(p)
 		if tr.Status == "open" {
 			g := pnl(tr.Dir, tr.Entry, p)
-			if g > tr.MaxGain {
-				tr.MaxGain = round2(g)
+			if r2(g) > tr.MaxGain {
+				tr.MaxGain, tr.PeakMs = r2(g), time.Now().UnixMilli()
 			}
 			if g < tr.MaxDD {
 				tr.MaxDD = r2(g)

@@ -164,3 +164,24 @@ func TestVolBrkMaxDD(t *testing.T) {
 		t.Fatal("drawdown only goes deeper")
 	}
 }
+
+func TestVolBrkMaxGainPeak(t *testing.T) {
+	day := int64(200) * vbDayMs
+	tr := &PaperTrade{Dir: "long", Entry: 100, OpenTime: time.UnixMilli(day + 3*dcBarMs)}
+	bars := []exchange.Candle{
+		{Ts: day + 2*dcBarMs, High: 150},         // 進場前:不算
+		{Ts: day + 3*dcBarMs, High: 101.2},       // 進場那一小時:算(高點一定在碰上緣之後)
+		{Ts: day + 6*dcBarMs, High: 104.4},       // 最高 +4.4%(四捨五入,不會變 4.39)
+		{Ts: day + 9*dcBarMs, High: 104.4},       // 一樣高:時間維持較早那根
+		{Ts: day + vbDayMs + dcBarMs, High: 130}, // 隔天(已換日平倉):不算
+	}
+	vbMaxGain(tr, bars)
+	if tr.MaxGain != 4.4 || tr.PeakMs != day+6*dcBarMs {
+		t.Fatalf("max gain %v at %v, want 4.4 at bar 6", tr.MaxGain, tr.PeakMs)
+	}
+	tr2 := &PaperTrade{Dir: "long", Entry: 100, OpenTime: time.UnixMilli(day + 3*dcBarMs)}
+	vbMaxGain(tr2, bars[:2])
+	if tr2.MaxGain != 1.2 || tr2.PeakMs != day+3*dcBarMs {
+		t.Fatalf("peak in the fill hour: %v at %v", tr2.MaxGain, tr2.PeakMs)
+	}
+}

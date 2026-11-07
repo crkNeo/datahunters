@@ -1047,24 +1047,6 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 	return st
 }
 
-// barMaxGain 用進場後的 K 線高點(做多)/ 低點(做空)更新最大獲利,只會往上調。
-// cs 的每根都要「收在進場之後」才算:結束時間 ≤ 進場時間的(含觸發那根)不算。
-func barMaxGain(tr *PaperTrade, cs []exchange.Candle, barMs int64) {
-	from := tr.OpenTime.UnixMilli()
-	for _, c := range cs {
-		if c.Ts+barMs <= from {
-			continue
-		}
-		px := c.High
-		if tr.Dir == "short" {
-			px = c.Low
-		}
-		if g := pnl(tr.Dir, tr.Entry, px); g > tr.MaxGain {
-			tr.MaxGain = round2(g)
-		}
-	}
-}
-
 // fillOpenPx 把這幾本書持倉幣裡、WS 即時價沒有的,用爆量脈搏的全市場快照價補上(px 可為 nil)。
 func (s *Store) fillOpenPx(px map[string]float64, bs ...*microBook) map[string]float64 {
 	var miss []string
