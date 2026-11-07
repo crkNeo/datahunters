@@ -76,7 +76,7 @@ var stratDefaults = map[string]StratCfg{
 	// 順勢組:tpMomentum(位置 40/70、分批 40/30/30)
 	"main":   {Tags: []string{"保守", "低頻"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"gamble": {Tags: []string{"激進", "高頻", "短線"}, MaxSLPct: 12, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
-	// 超新星v2:與 gamble 相同設定,差別只在引擎層的逾時 6h(store.go)。admin 觀察書。
+	// 銀河:分批 40/30/30;引擎層用 tpEMAHoldBE(TP2 後止損留在保本,store.go)。
 	"emaonly": {Tags: []string{"高頻", "短線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	"conv":    {Tags: []string{"保守", "低頻", "長線"}, ExitMode: "split", SplitA: 40, SplitB: 70, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 	// 布林EMA:單段 1:3 RR,並有「走到 30% 發保本位提示」的純通知機制(不動止損)
@@ -89,11 +89,9 @@ var stratDefaults = map[string]StratCfg{
 	// 唐奇安 / 波動突破:出場邏輯各自在 donchian.go / volbrk.go(通道 / 停損、換日平倉),不吃分批設定。
 	"donchian": {Tags: []string{"趨勢", "通道突破", "多空", "1h"}, ExitMode: "single"},
 	"volbrk":   {Tags: []string{"日內", "波動突破", "多單", "換日平倉"}, ExitMode: "single"},
-	// 流星:無價格止損 / 止盈,48h 計時出場(single、沒有分批)。
 	// 消息雷達模擬單:單段止盈 / 止損(依消息分類固定 %),最多持有 1 小時。
 	"newsalpha": {Tags: []string{"消息面", "資訊落差", "多空"}, ExitMode: "single"},
-	// 訂單塊 SMC:四段斐波止盈(1.0/1.382/1.618/2.0),TP1/TP2/TP3 各平 25%,最終段剩 25%。
-	// SplitA/B 對它無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);沿路套保 TP1→保本、TP2→TP1、TP3→TP2。
+	// SplitA/B 對太陽無效(TP 位由 smcFibTPLevels 依斐波格覆蓋);TP1→保本、TP2→止損移到 TP1。
 	// 太陽(原訂單塊v2):三段斐波止盈 0.618/1.13/1.618,分批 40/30/30,止損 fib−0.13;進場區 0-0.236;1h/4h。
 	"orderblockv2": {Tags: []string{"SMC", "訂單塊", "斐波", "多空", "深回撤"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 40, SplitW2: 30, SplitW3: 30, BeBufPct: 0.05, NotifyOpen: true, NotifyClose: true, NotifyTP: true},
 }
