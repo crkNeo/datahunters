@@ -161,8 +161,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
 	mux.HandleFunc("/api/donchian", s.gateTab("donchian", s.handleDonchian))             // 唐奇安長通道突破
 	mux.HandleFunc("/api/volbrk", s.gateTab("volbrk", s.handleVolBrk))                   // 波動突破
-	mux.HandleFunc("/api/orderblock", s.gateTab("orderblock", s.handleOrderBlock))       // 訂單塊 SMC (三段止盈, 1h/4h)
-	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 訂單塊v2 (進場區 0-0.236)
+	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 太陽(原訂單塊v2,SMC 訂單塊 + 斐波 0-0.236,1h/4h)
 	mux.HandleFunc("/api/strat-history", s.handleStratHistory)                           // 策略「已結束」DB 分頁(依 book 動態鑑權)
 	mux.HandleFunc("/api/scorelog-history", s.gate(M, s.handleScoreLogHistory))          // 訊號紀錄 DB 分頁
 	mux.HandleFunc("/api/admin/bollema", s.gateTab("bollema", s.handleBollEMA))
@@ -806,11 +805,6 @@ func (s *Server) handleVolBrk(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV12 serves the 脈衝星v12 (v3 條件盤中成立即進) tracker.
 func (s *Server) handlePulsarV12(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV12State())
-}
-
-// handleOrderBlock serves the 訂單塊 SMC (斐波四段套保, 15m/1h/4h 三週期) tracker.
-func (s *Server) handleOrderBlock(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.store.SMCState())
 }
 
 func (s *Server) handleOrderBlockV2(w http.ResponseWriter, r *http.Request) {

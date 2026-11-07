@@ -315,7 +315,6 @@ func main() {
 			store.PulsarV12MarkTick()
 			store.DonchianMarkTick()
 			store.VolBrkMarkTick()
-			store.SMCMarkTick()
 			store.SMCV2MarkTick()
 		}
 	}()
@@ -363,13 +362,11 @@ func main() {
 			store.SignalAlertTick()
 		}
 	}()
-	// 訂單塊 SMC:訂單塊拉斐波,頭槌/射擊星進場,三段止盈套保;1h/4h。v1 進場區 0.142-0.382、v2 進場區 0-0.236。
+	// 太陽(原訂單塊v2):訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星進場,三段止盈套保;1h/4h。
 	go func() {
-		store.SMCTick()
 		store.SMCV2Tick()
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
-			store.SMCTick()
 			store.SMCV2Tick()
 		}
 	}()

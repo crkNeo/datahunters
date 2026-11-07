@@ -66,7 +66,7 @@ const openRows = computed(() => {
 const openFilled = computed(() => openRows.value.filter((t) => t.status !== 'pending').length)
 const openPending = computed(() => openRows.value.filter((t) => t.status === 'pending').length)
 
-// 多週期策略(如 訂單塊:1h/4h 同頁)才帶 tf 欄位;有才顯示「週期」欄與週期篩選,其餘維持原樣。
+// 多週期策略(如 太陽:1h/4h 同頁)才帶 tf 欄位;有才顯示「週期」欄與週期篩選,其餘維持原樣。
 const hasTf = computed(() =>
   [...(props.state?.open || []), ...(hist.value.rows || [])].some((t) => t.tf)
 )
@@ -200,7 +200,7 @@ function tpStatusCls(t) {
       </div>
     </div>
 
-    <!-- 多週期策略(訂單塊)可篩週期:進行中即時過濾、已結束重查 -->
+    <!-- 多週期策略(太陽)可篩週期:進行中即時過濾、已結束重查 -->
     <div v-if="hasTf" class="tffilter">
       <button v-for="f in [['all', '全部'], ['1h', '1H'], ['4h', '4H']]" :key="f[0]" :class="{ on: tfFilter === f[0] }" @click="tfFilter = f[0]">{{ f[1] }}</button>
     </div>
@@ -339,7 +339,7 @@ function tpStatusCls(t) {
 .ai-pop b { color: var(--c-txt); font-size: 12px; }
 .ai-pop ul { margin: 6px 0 4px; padding-left: 16px; color: var(--c-mut); font-size: 11.5px; line-height: 1.5; }
 .ai-pop em { display: block; margin-top: 4px; color: var(--c-mut2); font-size: 10.5px; font-style: normal; }
-/* 週期篩選(多週期策略:訂單塊) */
+/* 週期篩選(多週期策略:太陽) */
 .tffilter { display: flex; gap: 6px; margin: 4px 0 12px; }
 .tffilter button { font-size: 12px; color: var(--c-mut); background: var(--c-bg2); border: 1px solid var(--c-line2); border-radius: 8px; padding: 5px 15px; cursor: pointer; transition: color .12s, border-color .12s; }
 .tffilter button.on { color: var(--c-gold-b); border-color: var(--c-gold-d); background: var(--c-gold-soft); }

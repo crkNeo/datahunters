@@ -250,8 +250,8 @@ func TestManualExitAlwaysNotifies(t *testing.T) {
 	if !s.notifyCloseBook("pulsarv12", tr, time.Now(), true) {
 		t.Error("手動出場沒有發通知")
 	}
-	// 多週期分腿(orderblock_4h)要能解析回主 key,不能因為查不到設定而漏發
-	if !s.notifyCloseBook("orderblock_4h", tr, time.Now(), true) {
-		t.Error("訂單塊 分週期的手動出場沒有發通知")
+	// 多週期分腿(orderblockv2_4h)要能解析回主 key,不能因為查不到設定而漏發
+	if !s.notifyCloseBook("orderblockv2_4h", tr, time.Now(), true) {
+		t.Error("太陽 分週期的手動出場沒有發通知")
 	}
 }

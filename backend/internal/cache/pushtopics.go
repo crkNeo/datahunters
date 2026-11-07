@@ -24,7 +24,7 @@ type pushTopicDef struct {
 	key, label, group, tab string
 }
 
-// 只列「真的會發使用者推播」的策略與消息。訂單塊(含 v2)兩個週期各自成一個 topic。
+// 只列「真的會發使用者推播」的策略與消息。太陽(訂單塊)兩個週期各自成一個 topic。
 // 順序 = UI 顯示順序。
 var pushTopicDefs = []pushTopicDef{
 	// 策略類(一個開關管該策略/週期的開倉/平倉/止盈/保本)
@@ -38,10 +38,8 @@ var pushTopicDefs = []pushTopicDef{
 	{"strat:donchian", "唐奇安", "strategy", "donchian"},
 	{"strat:volbrk", "波動突破", "strategy", "volbrk"},
 	{"strat:newsalpha", "消息雷達模擬單", "strategy", "newsalpha"},
-	{"strat:orderblock", "訂單塊 1H", "strategy", "orderblock"},
-	{"strat:orderblock_4h", "訂單塊 4H", "strategy", "orderblock"},
-	{"strat:orderblockv2", "訂單塊v2 1H", "strategy", "orderblockv2"},
-	{"strat:orderblockv2_4h", "訂單塊v2 4H", "strategy", "orderblockv2"},
+	{"strat:orderblockv2", "太陽 1H", "strategy", "orderblockv2"},
+	{"strat:orderblockv2_4h", "太陽 4H", "strategy", "orderblockv2"},
 	{"strat:srmtf", "反轉訊號", "strategy", "srmtf"},
 	// 消息類(逐項)
 	{"msg:macro", "整點大盤分析", "message", ""},

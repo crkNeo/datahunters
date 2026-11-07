@@ -27,8 +27,7 @@ func TestStratTopic(t *testing.T) {
 	for book, want := range map[string]string{
 		"main":            "strat:paper",
 		"conv":            "strat:conv",
-		"orderblock":      "strat:orderblock",
-		"orderblock_4h":   "strat:orderblock_4h",
+		"orderblockv2":    "strat:orderblockv2",
 		"orderblockv2_4h": "strat:orderblockv2_4h",
 	} {
 		if got := stratTopic(book); got != want {
@@ -60,8 +59,8 @@ func TestPushTopicVisibilityByRole(t *testing.T) {
 		t.Error("member must NOT see admin topic msg:polyscout")
 	}
 	admin := s.PushTopicsFor("admin", "")
-	if !has(admin, "strat:orderblock") || !has(admin, "strat:orderblock_4h") {
-		t.Error("admin should see both orderblock timeframes as separate topics")
+	if !has(admin, "strat:orderblockv2") || !has(admin, "strat:orderblockv2_4h") {
+		t.Error("admin should see both 太陽 (orderblockv2) timeframes as separate topics")
 	}
 	if s.topicMinRole("msg:does-not-exist") != "admin" {
 		t.Error("unknown topic must fail closed to admin")
@@ -70,11 +69,11 @@ func TestPushTopicVisibilityByRole(t *testing.T) {
 
 // booksForTF narrows a multi-timeframe strategy to the requested timeframe.
 func TestBooksForTF(t *testing.T) {
-	if got := booksForTF("orderblock", "4h"); len(got) != 1 || got[0] != "orderblock_4h" {
-		t.Errorf("booksForTF(orderblock,4h)=%v want [orderblock_4h]", got)
+	if got := booksForTF("orderblockv2", "4h"); len(got) != 1 || got[0] != "orderblockv2_4h" {
+		t.Errorf("booksForTF(orderblockv2,4h)=%v want [orderblockv2_4h]", got)
 	}
-	if got := booksForTF("orderblock", ""); len(got) != 2 {
-		t.Errorf("booksForTF(orderblock,\"\")=%v want both", got)
+	if got := booksForTF("orderblockv2", ""); len(got) != 2 {
+		t.Errorf("booksForTF(orderblockv2,\"\")=%v want both", got)
 	}
 	if got := booksForTF("conv", "1h"); len(got) != 1 || got[0] != "conv" {
 		t.Errorf("booksForTF(conv,1h)=%v want [conv] (single-tf ignores filter)", got)

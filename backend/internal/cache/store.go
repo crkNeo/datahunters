@@ -155,8 +155,7 @@ type Store struct {
 	dcEng, vbEng  *hourEngine   // 上面兩本的每小時排程狀態
 	ptStore       *patternStore // 型態掃描結果(patterns.go)
 	ptEng         *hourEngine   // 型態掃描的每小時排程
-	smcBooks      []*microBook  // 訂單塊:SMC 訂單塊拉斐波,回撤 0.142-0.382 + 頭槌/射擊星,三段止盈 0.618/1.13/1.618;1h/4h (orderblock.go)
-	smcV2Books    []*microBook  // 訂單塊v2:進場區改 0-0.236(更深),其餘同上;1h/4h (orderblock.go)
+	smcV2Books    []*microBook  // 太陽(原訂單塊v2):SMC 訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星,三段止盈;1h/4h (orderblock.go)
 
 	rlMu    sync.Mutex      // guards external-API health tracking (apihealth.go)
 	rlFails map[string]int  // source → consecutive failure count
@@ -311,13 +310,8 @@ func NewStore(coins []string) *Store {
 	// 布林EMA:4H 突破蓄勢。單段止盈(1:3 RR)、無分批;beAt=0.3 只發「已達保本位」通知,不動止損。
 	s.bollEMABook = &microBook{name: "bollema", tf: "4h", barSec: 14400, klimit: 300, minBars: 120, expiry: 180, cooldown: 3, keep: 500, beAt: 0.3, signal: bollEMASignal}
 
-	// 訂單塊 SMC:15m/1h/4h 三週期同頁。無逾時(expiry:0)—— 掛單型,位置到 + 型態成立才進場。
-	// 訂單塊(v1):進場區 0.142-0.382,1h/4h 兩週期(已去掉 15m)。
-	s.smcBooks = []*microBook{
-		{name: "orderblock", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
-		{name: "orderblock_4h", tf: "4h", barSec: 14400, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblock", tfTag: true, signal: smcFibSignal, tpLevels4: smcFibTPLevels},
-	}
-	// 訂單塊v2:進場區 0-0.236(更深),其餘同 v1;1h/4h。
+	// 太陽(原訂單塊v2,book 名沿用 orderblockv2):SMC 訂單塊拉斐波,進場區 0-0.236;1h/4h 兩週期同頁。
+	// 無逾時(expiry:0)—— 掛單型,位置到 + 型態成立才進場。
 	s.smcV2Books = []*microBook{
 		{name: "orderblockv2", tf: "1h", barSec: 3600, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblockv2", tfTag: true, signal: smcFibSignalV2, tpLevels4: smcFibTPLevels},
 		{name: "orderblockv2_4h", tf: "4h", barSec: 14400, klimit: 500, minBars: obSwingSize + 5, expiry: 0, cooldown: 4, keep: 500, plan: tpSMCFib, stratKey: "orderblockv2", tfTag: true, signal: smcFibSignalV2, tpLevels4: smcFibTPLevels},
@@ -345,9 +339,6 @@ func NewStore(coins []string) *Store {
 		s.news.events = db.loadRecentNews(naKeepEvents)
 		for _, ev := range s.news.events { // 重啟前的事件不再花 AI 額度
 			s.news.aiTried[ev.ID] = true
-		}
-		for _, b := range s.smcBooks {
-			b.trades = db.loadTrades(b.name)
 		}
 		for _, b := range s.smcV2Books {
 			b.trades = db.loadTrades(b.name)

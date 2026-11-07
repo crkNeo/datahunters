@@ -226,21 +226,15 @@ func extractOB(cs []exchange.Candle, parsedHigh, parsedLow []float64, from, to, 
 // 這是無狀態訊號:每根收盤都從 K 線重算 fib(含 re-anchor),接 microrev 掛單框架 —— 位置到 +
 // 型態成立就進場。分批四段止盈交給 smcFibTPLevels + stepTP。
 const (
-	smcFibEntryLo     = 0.142 // 訂單塊(v1)進場區下界(靠訂單塊那側)
-	smcFibEntryHi     = 0.382 // 訂單塊(v1)進場區上界
-	smcFibV2EntryLo   = 0.0   // 訂單塊v2 進場區下界(更深,貼近訂單塊邊緣)
-	smcFibV2EntryHi   = 0.236 // 訂單塊v2 進場區上界
+	smcFibV2EntryLo   = 0.0   // 太陽(訂單塊v2)進場區下界(貼近訂單塊邊緣)
+	smcFibV2EntryHi   = 0.236 // 太陽進場區上界
 	smcFibSL          = 0.13  // 止損:fib-0.13
 	smcFibFinalTP     = 1.618 // 最終目標:fib1.618(三段止盈 0.618 / 1.13 / 1.618)
 	smcFibMaxRangePct = 10.0  // 斐波 0→1 距離(r/fib0)上限%;超過代表波段過大、目標過度延伸 → 不進場
 )
 
-// smcFibSignal(v1)進場區 0.142–0.382;smcFibSignalV2 進場區 0–0.236(更深),其餘完全相同
-// (同樣要影線落在區間 + 頭槌/射擊之星反轉型態、同 TP/SL)。
-func smcFibSignal(cs []exchange.Candle) (string, float64, float64, float64, bool) {
-	return smcFibSignalZone(cs, smcFibEntryLo, smcFibEntryHi)
-}
-
+// smcFibSignalV2 是太陽(原訂單塊v2)的進場:進場區 0–0.236(影線落在區間 + 頭槌/射擊之星反轉型態)。
+// 原本的訂單塊 v1(進場區 0.142–0.382)已移除。
 func smcFibSignalV2(cs []exchange.Candle) (string, float64, float64, float64, bool) {
 	return smcFibSignalZone(cs, smcFibV2EntryLo, smcFibV2EntryHi)
 }

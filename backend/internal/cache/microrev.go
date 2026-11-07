@@ -1083,16 +1083,6 @@ func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
 
 // PulsarIntraTick:脈衝星v12 盤中進場(見 microIntraTick)。
 func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book) }
-func (s *Store) SMCTick() {
-	for _, b := range s.smcBooks {
-		s.microTick(b)
-	}
-}
-func (s *Store) SMCMarkTick() {
-	for _, b := range s.smcBooks {
-		s.microMarkTick(b)
-	}
-}
 func (s *Store) SMCV2Tick() {
 	for _, b := range s.smcV2Books {
 		s.microTick(b)
@@ -1129,11 +1119,8 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.bollEMABook.mu.Lock()
 		s.bollEMABook.trades = keepIf(s.bollEMABook.trades, closedOnly)
 		s.bollEMABook.mu.Unlock()
-	case "orderblock", "orderblockv2": // 一個開關清多本(訂單塊 1h/4h)
-		books := s.smcBooks
-		if book == "orderblockv2" {
-			books = s.smcV2Books
-		}
+	case "orderblockv2": // 一個開關清兩本(太陽 1h/4h)
+		books := s.smcV2Books
 		for _, b := range books {
 			b.mu.Lock()
 			b.trades = keepIf(b.trades, closedOnly)
@@ -1235,5 +1222,4 @@ func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book
 func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
 func (s *Store) DonchianState() PaperState  { return s.microState(s.donchianBook) }
 func (s *Store) VolBrkState() PaperState    { return s.microState(s.volBrkBook) }
-func (s *Store) SMCState() PaperState       { return s.microState(s.smcBooks...) }
 func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }

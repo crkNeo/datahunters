@@ -18,8 +18,6 @@ var stratHistCache = newTTLCache(15 * time.Second)
 // stratBooks 把「策略 key」對應到 paper_trades 裡的 book 名(多週期策略會有多個)。
 func stratBooks(key string) []string {
 	switch key {
-	case "orderblock":
-		return []string{"orderblock", "orderblock_4h"}
 	case "orderblockv2":
 		return []string{"orderblockv2", "orderblockv2_4h"}
 	}
@@ -29,9 +27,9 @@ func stratBooks(key string) []string {
 // bookTF 由 book 名推週期標籤(多週期策略的「週期」欄用);單週期回空字串。
 func bookTF(book string) string {
 	switch book {
-	case "orderblock", "orderblockv2":
+	case "orderblockv2":
 		return "1h"
-	case "orderblock_4h", "orderblockv2_4h":
+	case "orderblockv2_4h":
 		return "4h"
 	}
 	return ""

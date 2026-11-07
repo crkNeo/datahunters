@@ -68,8 +68,7 @@ var tabMeta = []struct {
 	{"volbrk", "波動突破", "admin", false},  // 日內波動率突破(只做多,換日平倉)
 	{"newsalpha", "消息雷達", "admin", false}, // 消息面 / 資訊落差:事件流 + 價格反應統計 + 模擬單
 	{"patterns", "型態掃描", "admin", false},  // 成交額前 200 幣的 1H 經典型態相似度
-	{"orderblock", "訂單塊", "admin", false},
-	{"orderblockv2", "訂單塊v2", "admin", false},
+	{"orderblockv2", "太陽", "admin", false}, // 原訂單塊v2(SMC 訂單塊 + 斐波深回撤)
 	{"polyscout", "聰明錢共識", "admin", false}, // Polymarket CRYPTO 一致性篩選(管理員)
 	// 管理功能:永遠鎖在 admin,不開放調整
 	{"admin", "管理後台", "admin", true},
@@ -88,7 +87,7 @@ var tabDefaultKind = map[string]string{
 	"srmtf":   "signal",
 	"surge": "signal", "pulsarv3": "signal", "pulsarv12": "signal", "donchian": "signal", "volbrk": "signal",
 	"newsalpha": "signal",
-	"orderblock": "signal", "orderblockv2": "signal",
+	"orderblockv2": "signal",
 }
 
 // validKinds is the allowed set for a tab's type.
@@ -259,7 +258,7 @@ var tabOfRoute = map[string]string{
 	"/api/srmtf":         "srmtf",
 	"/api/admin/surge": "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/patterns": "patterns", "/api/donchian": "donchian", "/api/volbrk": "volbrk",
 	"/api/newsalpha": "newsalpha", "/api/newsalpha-events": "newsalpha", "/api/newsalpha-stats": "newsalpha", "/api/newsalpha-book": "newsalpha",
-	"/api/orderblock": "orderblock", "/api/orderblockv2": "orderblockv2",
+	"/api/orderblockv2": "orderblockv2",
 }
 
 // RouteTabs lists the (route → tab) pairs, sorted, for diagnostics.

@@ -49,7 +49,7 @@ func smcLongFixture(obLow float64) []exchange.Candle {
 // obLow=100 → r=fib1-fib0≈6.5、fib0=100 → 6.5% < 10%,應進場。驗證 fib 幾何、四段 TP。
 func TestSMCFibLongSetup(t *testing.T) {
 	cs := smcLongFixture(100)
-	dir, entry, sl, tp, ok := smcFibSignal(cs)
+	dir, entry, sl, tp, ok := smcFibSignalV2(cs)
 	if !ok {
 		t.Fatalf("smcFibSignal 沒進場(預期做多)")
 	}
@@ -132,7 +132,7 @@ func TestSMCFibRangeFilterRejects(t *testing.T) {
 	if len(obs) == 0 || obs[len(obs)-1].Bias != BULLISH || pinKind(cs) != "hammer" {
 		t.Fatalf("前置條件不成立:obs=%d pin=%q", len(obs), pinKind(cs))
 	}
-	if _, _, _, _, ok := smcFibSignal(cs); ok {
+	if _, _, _, _, ok := smcFibSignalV2(cs); ok {
 		t.Fatalf("斐波 0→1 距離 25%% > 10%% 時應不進場,但卻進場了")
 	}
 }
