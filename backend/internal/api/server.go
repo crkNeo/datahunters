@@ -190,6 +190,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/ema200-history", s.gateTab("ema200", s.handleEMA200History)) // EMA200 穿越紀錄(DB 分頁)
 	// 消息雷達(資訊落差):總覽 / 事件分頁 / 價格反應統計 / 模擬單
 	mux.HandleFunc("/api/newsalpha", s.gateTab("newsalpha", s.handleNewsAlpha))
+	mux.HandleFunc("/api/patterns", s.gateTab("patterns", s.handlePatterns)) // 型態掃描(?key=型態)
 	mux.HandleFunc("/api/newsalpha-events", s.gateTab("newsalpha", s.handleNewsAlphaEvents))
 	mux.HandleFunc("/api/newsalpha-stats", s.gateTab("newsalpha", s.handleNewsAlphaStats))
 	mux.HandleFunc("/api/newsalpha-book", s.gateTab("newsalpha", s.handleNewsAlphaBook))
@@ -1074,6 +1075,11 @@ func (s *Server) handleEMA200History(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNewsAlpha serves the 消息雷達 overview (source health, Korean premium, Polymarket movers).
+// handlePatterns serves 型態掃描:?key=<型態> 回那個型態的列表(相似度降冪)+ 16 種型態的分數摘要。
+func (s *Server) handlePatterns(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.Patterns(r.URL.Query().Get("key")))
+}
+
 func (s *Server) handleNewsAlpha(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.NewsAlpha())
 }

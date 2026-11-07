@@ -328,12 +328,13 @@ func main() {
 			store.BollEMATick()
 		}
 	}()
-	// 唐奇安 / 波動突破:每分鐘看一次,整點收盤後處理(兩本同一小時共用 1h K 快取,依序跑)。
+	// 唐奇安 / 波動突破 / 型態掃描:每分鐘看一次,整點收盤後處理(同一小時共用 1h K 快取,依序跑)。
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
 			store.DonchianTick()
 			store.VolBrkTick()
+			store.PatternTick()
 		}
 	}()
 	// 脈衝星家族:爆量熱名單上的觀察策略(15m 動能確認進場)。
