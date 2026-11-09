@@ -23,6 +23,13 @@ import (
 // —— 用 K 線從進場那根算到出場那根,盤中再用即時價補;頁面換算成 R(= 進場到停損的距離)。
 // 持倉另外顯示目前的 ATR(24) 和通道出場價(只放記憶體,每小時更新)。
 //
+// 唐奇安v2(donchianv2)= 同一套進場 / 初始停損 / 12 根通道出場,再多一條「吊燈停利 3 × ATR」,先到先出:
+//
+//	每根 1H 收盤:多單收盤 < 進場後最高收盤 − 3 × ATR(24) → 下一根開盤平倉(記 chandelier)
+//	              空單收盤 > 進場後最低收盤 + 3 × ATR(24) → 下一根開盤平倉
+//	只看收盤(不看盤中高低點);ATR(24) 每根重算、用那根收盤時的最新值;同一根也碰到通道出場就記 channel。
+//	持倉超過 1h K 快取的範圍時(約 7 天),另外從進場前 25 根開始抓整段 1h K,進場後的最高 / 最低收盤才不會漏。
+//
 // 實作:每小時收盤後處理一次(交易所新棒還沒生成的幣,下一分鐘再補)。持倉用 K 線從進場那根「重播」
 // 停損 / 通道出場 —— 結果只由 K 線決定,重複跑也一樣,停機期間該出場的開機後照樣補出場;
 // 新進場只看最新一根已收的 K,開機第一輪只管持倉、不進場。盤中另由 DonchianMarkTick 每 20 秒
@@ -40,6 +47,30 @@ func (s *Store) newDonchianBook() *microBook {
 	b := &microBook{name: "donchian", tf: "1h", barSec: 3600, klimit: dcKlines, keep: 500, wideMark: true}
 	b.universe = s.wideUniverse
 	return b
+}
+
+func (s *Store) newDonchianV2Book() *microBook {
+	b := s.newDonchianBook()
+	b.name = "donchianv2"
+	return b
+}
+
+// dcRunner 是一本唐奇安書 + 它的每小時排程;chand = 有沒有吊燈停利(v2)。
+type dcRunner struct {
+	b     *microBook
+	eng   *hourEngine
+	chand bool
+}
+
+func (s *Store) dcRunners() []dcRunner {
+	var out []dcRunner
+	if s.donchianBook != nil && s.dcEng != nil {
+		out = append(out, dcRunner{s.donchianBook, s.dcEng, false})
+	}
+	if s.donchianV2Book != nil && s.dcEng2 != nil {
+		out = append(out, dcRunner{s.donchianV2Book, s.dcEng2, true})
+	}
+	return out
 }
 
 // wideUniverse = 成交額前 200(與 EMA200 監控 / 爆發雷達同一批,已排除穩定幣)扣掉代幣化股票 / 商品。
@@ -108,8 +139,7 @@ func (s *Store) hourBars(coin string, now time.Time) (closed []exchange.Candle, 
 	return cs[:len(cs)-1], &last, true
 }
 
-func (s *Store) donchianCoins() []string {
-	b := s.donchianBook
+func donchianCoins(b *microBook) []string {
 	coins := b.universe()
 	seen := map[string]bool{}
 	for _, c := range coins {
@@ -126,22 +156,65 @@ func (s *Store) donchianCoins() []string {
 	return coins
 }
 
-// DonchianTick 每分鐘由 main 呼叫:整點收盤後處理出場、新進場。
+// DonchianTick 每分鐘由 main 呼叫:整點收盤後處理出場、新進場(唐奇安、唐奇安v2 依序跑,共用 1h K 快取)。
 func (s *Store) DonchianTick() {
-	b := s.donchianBook
-	if b == nil {
-		return
+	for _, r := range s.dcRunners() {
+		s.dcTick(r)
 	}
+}
+
+// dcOpenTrade 回這本書在 coin 上的持倉(沒有就 nil)。
+func dcOpenTrade(b *microBook, coin string) *PaperTrade {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, tr := range b.trades {
+		if tr.Coin == coin && tr.Status == "open" {
+			return tr
+		}
+	}
+	return nil
+}
+
+// dcBarsFor 抓 coin 的 1h K。v2 的持倉如果進場那根往前不到 25 根(持倉超過快取範圍),
+// 改抓「進場前 25 根 → 現在」整段,吊燈停利的最高 / 最低收盤和 ATR 才完整。抓不到就退回一般範圍。
+func (s *Store) dcBarsFor(r dcRunner, coin string, now time.Time) ([]exchange.Candle, *exchange.Candle, bool) {
+	closed, forming, ok := s.hourBars(coin, now)
+	if !ok || !r.chand || len(closed) == 0 {
+		return closed, forming, ok
+	}
+	open := dcOpenTrade(r.b, coin)
+	need := int64(dcATRN+1) * dcBarMs
+	if open == nil || open.OpenTime.UnixMilli()-closed[0].Ts >= need || s.ex == nil {
+		return closed, forming, ok
+	}
+	start := open.OpenTime.UnixMilli() - need
+	cur := now.UnixMilli() / dcBarMs * dcBarMs
+	v, err := s.candleCache.get(fmt.Sprintf("%s|1h|from%d|%d", coin, start, cur), func() (any, error) {
+		return s.ex.BinanceKlinesRange(coin+"USDT", "1h", start, 0, 1500)
+	})
+	if err != nil {
+		return closed, forming, ok
+	}
+	cs := v.([]exchange.Candle)
+	if n := len(cs); n < 2 || cs[n-1].Ts != cur {
+		return closed, forming, ok
+	}
+	last := cs[len(cs)-1]
+	return cs[:len(cs)-1], &last, true
+}
+
+func (s *Store) dcTick(r dcRunner) {
+	b := r.b
 	now := time.Now().UTC()
-	coins := s.dcEng.due(now, s.donchianCoins)
+	coins := r.eng.due(now, func() []string { return donchianCoins(b) })
 	enabled := s.StrategyEnabled(b.strat())
 	opened, closedN := 0, 0
 	for _, coin := range coins {
-		closed, forming, ok := s.hourBars(coin, now)
+		closed, forming, ok := s.dcBarsFor(r, coin, now)
 		if !ok {
 			continue
 		}
-		delete(s.dcEng.pend, coin)
+		delete(r.eng.pend, coin)
 		var exits, entries, dirty []*PaperTrade
 		b.mu.Lock()
 		var open *PaperTrade
@@ -154,8 +227,11 @@ func (s *Store) DonchianTick() {
 		if open != nil {
 			open.ATR = roundPx(dcATR(closed)) // 目前的 ATR(24),頁面顯示用
 			open.ChanExit = dcChanLevel(closed, open.Dir)
+			if r.chand {
+				open.ChandExit = dcChandLevel(open, closed)
+			}
 			gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
-			px, outcome, at, upto, hit := dcExitScan(open, closed, forming)
+			px, outcome, at, upto, hit := dcExitScanV(open, closed, forming, r.chand)
 			dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
 			if hit {
 				closeTrade(open, px, outcome, at)
@@ -165,12 +241,15 @@ func (s *Store) DonchianTick() {
 				dirty = append(dirty, open)
 			}
 		}
-		if open == nil && enabled && !s.dcEng.boot {
+		if open == nil && enabled && !r.eng.boot {
 			if dir, entry, sl, ok := dcSignal(closed, forming); ok {
 				sig := closed[len(closed)-1]
-				tr := &PaperTrade{ID: fmt.Sprintf("donchian|%s|%d", coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
+				tr := &PaperTrade{ID: fmt.Sprintf("%s|%s|%d", b.name, coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
 					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
 					ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevel(closed, dir)}
+				if r.chand {
+					tr.ChandExit = dcChandLevel(tr, closed) // 還沒有進場後的收盤 → 0,下一小時才有
+				}
 				b.trades = append(b.trades, tr)
 				entries = append(entries, tr)
 			}
@@ -195,7 +274,7 @@ func (s *Store) DonchianTick() {
 		time.Sleep(25 * time.Millisecond)
 	}
 	if opened+closedN > 0 {
-		log.Printf("策略[donchian] 進場 %d 筆、出場 %d 筆", opened, closedN)
+		log.Printf("策略[%s] 進場 %d 筆、出場 %d 筆", b.name, opened, closedN)
 	}
 }
 
@@ -251,8 +330,23 @@ func dcATR(closed []exchange.Candle) float64 {
 // 再看這根收盤有沒有跌破 / 突破 12 根出場通道(→ 下一根開盤平倉)。回傳第一個出場事件。
 // 出場時間記那根收盤的時刻(= 下一根開盤)。upto = 持倉期間的 K 到第幾根為止(closed[:upto])。
 func dcExitScan(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Candle) (px float64, outcome string, at time.Time, upto int, hit bool) {
+	return dcExitScanV(tr, closed, forming, false)
+}
+
+// dcExitScanV:chand = true 時(唐奇安v2)每根收盤另外檢查吊燈停利(進場後最高 / 最低收盤 ∓ 3 × 那根的 ATR(24))。
+func dcExitScanV(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Candle, chand bool) (px float64, outcome string, at time.Time, upto int, hit bool) {
 	from := tr.OpenTime.UnixMilli()
 	long := tr.Dir == "long"
+	ext := 0.0 // 進場後(含這根)的最高收盤(多)/ 最低收盤(空)
+	seen := false
+	nextOpen := func(i int, c exchange.Candle) float64 {
+		if i+1 < len(closed) {
+			return closed[i+1].Open
+		} else if forming != nil && forming.Ts == c.Ts+dcBarMs && forming.Open > 0 {
+			return forming.Open
+		}
+		return c.Close
+	}
 	for i, c := range closed {
 		if c.Ts < from {
 			continue
@@ -266,21 +360,22 @@ func dcExitScan(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Cand
 				return max(tr.SL, c.Open), "sl", end, i + 1, true
 			}
 		}
-		if i < dcExitN {
-			continue
+		if !seen || (long && c.Close > ext) || (!long && c.Close < ext) {
+			ext, seen = c.Close, true
 		}
-		lo, hi := closed[i-dcExitN].Low, closed[i-dcExitN].High
-		for _, p := range closed[i-dcExitN : i] {
-			lo, hi = min(lo, p.Low), max(hi, p.High)
-		}
-		if (long && c.Close < lo) || (!long && c.Close > hi) {
-			next := c.Close
-			if i+1 < len(closed) {
-				next = closed[i+1].Open
-			} else if forming != nil && forming.Ts == c.Ts+dcBarMs && forming.Open > 0 {
-				next = forming.Open
+		if i >= dcExitN {
+			lo, hi := closed[i-dcExitN].Low, closed[i-dcExitN].High
+			for _, p := range closed[i-dcExitN : i] {
+				lo, hi = min(lo, p.Low), max(hi, p.High)
 			}
-			return next, "channel", end, i + 1, true
+			if (long && c.Close < lo) || (!long && c.Close > hi) {
+				return nextOpen(i, c), "channel", end, i + 1, true
+			}
+		}
+		if chand {
+			if atr := dcATR(closed[:i+1]); atr > 0 && ((long && c.Close < ext-dcATRK*atr) || (!long && c.Close > ext+dcATRK*atr)) {
+				return nextOpen(i, c), "chandelier", end, i + 1, true
+			}
 		}
 	}
 	return 0, "", time.Time{}, len(closed), false
@@ -324,18 +419,47 @@ func dcChanLevel(closed []exchange.Candle, dir string) float64 {
 	return roundPx(lo)
 }
 
-// DonchianMarkTick 每 20 秒:用即時價更新現價 / 最大獲利,碰到停損就出場(掛停損單的效果)。
-func (s *Store) DonchianMarkTick() {
-	b := s.donchianBook
-	if b == nil {
-		return
+// dcChandLevel 目前的吊燈停利價:多單 = 進場後最高收盤 − 3 × 最新 ATR(24),空單 = 最低收盤 + 3 × ATR
+// (下一根收盤破它 → 再下一根開盤平倉)。進場那根還沒收(沒有進場後的收盤)→ 0。
+func dcChandLevel(tr *PaperTrade, closed []exchange.Candle) float64 {
+	from := tr.OpenTime.UnixMilli()
+	ext, seen := 0.0, false
+	for _, c := range closed {
+		if c.Ts < from {
+			continue
+		}
+		if !seen || (tr.Dir == "long" && c.Close > ext) || (tr.Dir != "long" && c.Close < ext) {
+			ext, seen = c.Close, true
+		}
 	}
-	s.dcMark(s.fillOpenPx(s.livePrices(), b), time.Now().UTC())
+	atr := dcATR(closed)
+	if !seen || atr <= 0 {
+		return 0
+	}
+	if tr.Dir == "long" {
+		return roundPx(ext - dcATRK*atr)
+	}
+	return roundPx(ext + dcATRK*atr)
 }
 
-// dcMark 用這組即時價(幣 → 價)更新持倉、出停損。
+// DonchianMarkTick 每 20 秒:用即時價更新現價 / 最大獲利,碰到停損就出場(掛停損單的效果)。
+func (s *Store) DonchianMarkTick() {
+	now := time.Now().UTC()
+	var px map[string]float64
+	for _, r := range s.dcRunners() {
+		if px == nil {
+			px = s.livePrices()
+		}
+		s.dcMarkBook(r.b, s.fillOpenPx(px, r.b), now)
+	}
+}
+
+// dcMark 用這組即時價(幣 → 價)更新唐奇安(v1)的持倉、出停損。
 func (s *Store) dcMark(px map[string]float64, now time.Time) {
-	b := s.donchianBook
+	s.dcMarkBook(s.donchianBook, px, now)
+}
+
+func (s *Store) dcMarkBook(b *microBook, px map[string]float64, now time.Time) {
 	if len(px) == 0 {
 		return
 	}

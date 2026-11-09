@@ -159,6 +159,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
+	mux.HandleFunc("/api/donchianv2", s.gateTab("donchianv2", s.handleDonchianV2))       // 唐奇安v2(+ 吊燈停利)
 	mux.HandleFunc("/api/donchian", s.gateTab("donchian", s.handleDonchian))             // 唐奇安長通道突破
 	mux.HandleFunc("/api/volbrk", s.gateTab("volbrk", s.handleVolBrk))                   // 波動突破
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 太陽(原訂單塊v2,SMC 訂單塊 + 斐波 0-0.236,1h/4h)
@@ -578,7 +579,7 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch {
-	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "volbrk", cache.IsPulsarBook(book):
+	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "donchianv2", book == "volbrk", cache.IsPulsarBook(book):
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -795,6 +796,11 @@ func (s *Server) handlePulsarV3(w http.ResponseWriter, r *http.Request) {
 // handleDonchian serves the 唐奇安長通道突破 (1h,168 根通道進、12 根通道 / 3×ATR 停損出) tracker.
 func (s *Server) handleDonchian(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.DonchianState())
+}
+
+// handleDonchianV2 serves 唐奇安v2(v1 + 吊燈停利 3×ATR).
+func (s *Server) handleDonchianV2(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.DonchianV2State())
 }
 
 // handleVolBrk serves the 波動突破 (UTC 日內,觸上緣做多、換日平倉) tracker:今天待觸發的計畫 + 持倉 + 已結束。

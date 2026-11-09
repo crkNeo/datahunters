@@ -250,3 +250,108 @@ func TestDonchianTickRecordsExcursion(t *testing.T) {
 		t.Fatalf("live drawdown: %+v", tr)
 	}
 }
+
+// trendBars:前 20 根平盤在 10,第 20~30 根收盤每根 +0.3 漲到 13,之後平盤在 13(K 線全距 ±0.1、開盤 = 前一根收盤)。
+func trendBars(n int) []exchange.Candle {
+	cs := make([]exchange.Candle, n)
+	px := 10.0
+	for i := range cs {
+		o := px
+		if i >= 20 && i <= 30 {
+			px = 10 + float64(i-20)*0.3
+		}
+		cs[i] = exchange.Candle{Ts: int64(i) * dcBarMs, Open: o, High: math.Max(o, px) + 0.1, Low: math.Min(o, px) - 0.1, Close: px, Volume: 100}
+	}
+	return cs
+}
+
+func TestDonchianChandelier(t *testing.T) {
+	tr := &PaperTrade{Dir: "long", Entry: 10, SL: 8, Status: "open", OpenTime: time.UnixMilli(20 * dcBarMs)}
+	cs := trendBars(40)
+	if _, _, _, _, hit := dcExitScanV(tr, cs, nil, true); hit {
+		t.Fatal("holding near the high: no chandelier exit")
+	}
+	lv := dcChandLevel(tr, cs)
+	if want := roundPx(13 - dcATRK*dcATR(cs)); lv != want || lv <= 10 {
+		t.Fatalf("chandelier level %v, want %v (above entry = locked profit)", lv, want)
+	}
+	// 第 36 根收盤跌到最高收盤 − 3 ATR 之下(但還在 12 根通道內)→ 第 37 根開盤出場,記 chandelier
+	cs[36].Close, cs[36].Low = 11.5, 11.4
+	cs[37].Open = 11.45
+	px, outcome, at, upto, hit := dcExitScanV(tr, cs, nil, true)
+	if !hit || outcome != "chandelier" || px != 11.45 || at.UnixMilli() != cs[37].Ts || upto != 37 {
+		t.Fatalf("chandelier exit: %v %v %v %v %v", px, outcome, at, upto, hit)
+	}
+	if lo := dcChanLevel(cs[:36], "long"); cs[36].Close < lo {
+		t.Fatalf("test setup: should still be inside the 12-bar channel (%v vs %v)", cs[36].Close, lo)
+	}
+	// v1(沒有吊燈停利)同一段走勢不出場
+	if _, _, _, _, hit := dcExitScanV(tr, cs, nil, false); hit {
+		t.Fatal("v1 has no chandelier exit")
+	}
+	// 只看收盤:盤中低點跌破、收盤收回 → 不出場
+	cs2 := trendBars(40)
+	cs2[36].Low = 11
+	if _, _, _, _, hit := dcExitScanV(tr, cs2, nil, true); hit {
+		t.Fatal("intrabar wick below the line must not trigger (close-based)")
+	}
+	// 同一根也跌破 12 根通道 → 記 channel
+	cs3 := trendBars(40)
+	cs3[34].Close, cs3[34].Low = 9.5, 9.4
+	if _, outcome, _, _, hit := dcExitScanV(tr, cs3, nil, true); !hit || outcome != "channel" {
+		t.Fatalf("both on the same bar → channel, got %v", outcome)
+	}
+	// 初始停損照樣優先(盤中觸價)
+	cs4 := trendBars(40)
+	cs4[25].Low = 7.9
+	if _, outcome, _, _, hit := dcExitScanV(tr, cs4, nil, true); !hit || outcome != "sl" {
+		t.Fatalf("initial stop still first, got %v", outcome)
+	}
+}
+
+func TestDonchianChandelierShort(t *testing.T) {
+	// 鏡像:價格上下翻轉(20 − 價)
+	cs := trendBars(40)
+	for i := range cs {
+		c := &cs[i]
+		c.Open, c.Close, c.High, c.Low = 20-c.Open, 20-c.Close, 20-c.Low, 20-c.High
+	}
+	tr := &PaperTrade{Dir: "short", Entry: 10, SL: 12, Status: "open", OpenTime: time.UnixMilli(20 * dcBarMs)}
+	if lv := dcChandLevel(tr, cs); lv != roundPx(7+dcATRK*dcATR(cs)) {
+		t.Fatalf("short level = %v", lv)
+	}
+	cs[36].Close, cs[36].High = 8.5, 8.6
+	if _, outcome, _, _, hit := dcExitScanV(tr, cs, nil, true); !hit || outcome != "chandelier" {
+		t.Fatalf("short chandelier exit, got %v", outcome)
+	}
+}
+
+func TestDonchianV2Tick(t *testing.T) {
+	s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		sig := &cs[len(cs)-2]
+		sig.High, sig.Close = 11, 11
+		cs[len(cs)-1].Open = 11.1
+	})
+	s.donchianV2Book = s.newDonchianV2Book()
+	s.dcEng2 = &hourEngine{seeded: true}
+	s.dcEng.seeded = true
+	s.DonchianTick()
+	v1, v2 := s.donchianBook.trades, s.donchianV2Book.trades
+	if len(v1) != 1 || len(v2) != 1 {
+		t.Fatalf("both books enter on the same breakout: v1 %d v2 %d", len(v1), len(v2))
+	}
+	if want := fmt.Sprintf("donchianv2|AAA|%d", cs[len(cs)-1].Ts); v2[0].ID != want || v2[0].Entry != 11.1 || v2[0].ChanExit == 0 {
+		t.Fatalf("v2 trade: %+v", v2[0])
+	}
+	if v1[0].ChandExit != 0 {
+		t.Fatal("v1 has no chandelier level")
+	}
+	// 持倉中:吊燈停利價 = 進場後最高收盤 − 3 × 最新 ATR
+	tr := v2[0]
+	tr.OpenTime, tr.SL = time.UnixMilli(cs[len(cs)-3].Ts), 5 // 往前挪:進場後收盤 10 → 11
+	s.dcEng2.bucket = 0
+	s.DonchianTick()
+	if tr.Status != "open" || tr.ChandExit != roundPx(11-dcATRK*dcATR(cs[:len(cs)-1])) {
+		t.Fatalf("v2 chandelier level: %+v", tr)
+	}
+}

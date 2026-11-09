@@ -135,6 +135,9 @@ type PaperTrade struct {
 	// 唐奇安持倉:目前的通道出場價(多單 = 最近 12 根已收 1h 的最低價,空單 = 最高價),
 	// 下一根收盤破這個價就在再下一根開盤平倉。每小時收盤後更新,只放記憶體。
 	ChanExit float64 `json:"chan_exit,omitempty"`
+	// 唐奇安v2 持倉:目前的吊燈停利價(多單 = 進場後最高收盤 − 3 × ATR(24),空單 = 最低收盤 + 3 × ATR),
+	// 下一根收盤破這個價就在再下一根開盤平倉。每小時收盤後更新,只放記憶體。
+	ChandExit float64 `json:"chand_exit,omitempty"`
 }
 
 // PaperStats summarises closed trades.
@@ -512,6 +515,8 @@ func bookLabel(name string) string {
 		return "脈衝星v12"
 	case "donchian":
 		return "唐奇安"
+	case "donchianv2":
+		return "唐奇安v2"
 	case "volbrk":
 		return "波動突破"
 	case "newsalpha":
@@ -569,7 +574,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "volbrk", "orderblockv2", "newsalpha":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "volbrk", "orderblockv2", "newsalpha":
 		return name
 	case "orderblockv2_4h": // 週期共用一個分頁
 		return "orderblockv2"
@@ -606,6 +611,12 @@ func outcomeCN(o string) string {
 		return "逾時平倉"
 	case "hedge":
 		return "套保出場"
+	case "channel":
+		return "通道出場"
+	case "chandelier":
+		return "吊燈停利"
+	case "eod":
+		return "換日平倉"
 	// 手動平倉對外一律顯示成「逾時平倉」(用戶要求:客戶端不揭露人工介入)。
 	// 內部代碼仍是 manual/momdead,DB 紀錄照實留著,後台仍分得出手動與真逾時。
 	case "manual", "momdead":
@@ -861,7 +872,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 		}
 		return out
 	}
-	if mb := map[string]*microBook{"donchian": s.donchianBook, "volbrk": s.volBrkBook}[book]; mb != nil {
+	if mb := map[string]*microBook{"donchian": s.donchianBook, "donchianv2": s.donchianV2Book, "volbrk": s.volBrkBook}[book]; mb != nil {
 		mb.mu.Lock() // 唐奇安 / 波動突破:沒 DB 時退回記憶體(待觸發計畫不算交易,不匯出)
 		defer mb.mu.Unlock()
 		var out []*PaperTrade

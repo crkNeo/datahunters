@@ -1146,6 +1146,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.donchianBook.mu.Lock()
 		s.donchianBook.trades = keepIf(s.donchianBook.trades, closedOnly)
 		s.donchianBook.mu.Unlock()
+	case "donchianv2":
+		s.donchianV2Book.mu.Lock()
+		s.donchianV2Book.trades = keepIf(s.donchianV2Book.trades, closedOnly)
+		s.donchianV2Book.mu.Unlock()
 	case "volbrk":
 		s.volBrkBook.mu.Lock()
 		s.volBrkBook.trades = keepIf(s.volBrkBook.trades, closedOnly)
@@ -1217,9 +1221,10 @@ func (s *Store) retrofitMultiTP() {
 	}
 }
 
-func (s *Store) BollEMAState() PaperState   { return s.microState(s.bollEMABook) }
-func (s *Store) PulsarV3State() PaperState  { return s.microState(s.pulsarV3Book) }
-func (s *Store) PulsarV12State() PaperState { return s.microState(s.pulsarV12Book) }
-func (s *Store) DonchianState() PaperState  { return s.microState(s.donchianBook) }
-func (s *Store) VolBrkState() PaperState    { return s.microState(s.volBrkBook) }
-func (s *Store) SMCV2State() PaperState     { return s.microState(s.smcV2Books...) }
+func (s *Store) BollEMAState() PaperState    { return s.microState(s.bollEMABook) }
+func (s *Store) PulsarV3State() PaperState   { return s.microState(s.pulsarV3Book) }
+func (s *Store) PulsarV12State() PaperState  { return s.microState(s.pulsarV12Book) }
+func (s *Store) DonchianState() PaperState   { return s.microState(s.donchianBook) }
+func (s *Store) DonchianV2State() PaperState { return s.microState(s.donchianV2Book) }
+func (s *Store) VolBrkState() PaperState     { return s.microState(s.volBrkBook) }
+func (s *Store) SMCV2State() PaperState      { return s.microState(s.smcV2Books...) }

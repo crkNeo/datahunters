@@ -62,6 +62,7 @@ export function outcomeCN(o, pnl) {
         : o === 'reversed' ? '反向出場' : o === 'hedge' ? '套保出場'
           : o === 'cancel' ? '未成交撤銷' // SMC_V2 觸發器逾時/滿倉未成交,非交易結果
           : o === 'channel' ? '通道出場' : o === 'eod' ? '換日平倉' // 唐奇安 12 根通道 / 波動突破 UTC 收盤
+          : o === 'chandelier' ? '吊燈停利' // 唐奇安v2:進場後最高 / 最低收盤 ∓ 3×ATR
             // 手動平倉對外一律顯示成「逾時」(用戶要求:不揭露人工介入;momdead 是舊代碼)
             : (o === 'manual' || o === 'momdead' || o === 'expired') ? '逾時' : o
 }
@@ -72,7 +73,7 @@ export function outcomeCls(o, pnl) {
   if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
   if (o === 'tp1sl') return 'reversed'
   if (o === 'sl') return 'sl'
-  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'channel') return 'reversed'
+  if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'channel' || o === 'chandelier') return 'reversed'
   // manual/momdead 對外當逾時 → 落到 expired 樣式(灰色),與文字一致
   return 'expired'
 }
