@@ -91,8 +91,11 @@ const AFTER_ALL = [['after_1h', '1H', 1], ['after_2h', '2H', 2], ['after_4h', '4
 const AFTER = computed(() => AFTER_ALL.slice(0, props.book === 'volbrk' ? 5 : 4))
 // 波動突破:沒有停損,記「最大回撤」(進場後到平倉前最不利的位置,≤ 0)
 // 唐奇安 / 唐奇安v2(v2 = 多一條吊燈停利:進場後最高 / 最低收盤 ∓ 3 × ATR(24))
-const isDC = computed(() => props.book === 'donchian' || props.book === 'donchianv2')
-const isDC2 = computed(() => props.book === 'donchianv2')
+// v3 = 成交額前 30、336 根突破 + 通道寬度;出場 24 根通道 + 吊燈 4 × ATR。頁面規格跟 v2 一樣。
+const isDC = computed(() => ['donchian', 'donchianv2', 'donchianv3'].includes(props.book))
+const isDC2 = computed(() => props.book === 'donchianv2' || props.book === 'donchianv3')
+const dcExitN = computed(() => (props.book === 'donchianv3' ? 24 : 12))
+const dcChandK = computed(() => (props.book === 'donchianv3' ? 4 : 3))
 const hasDD = computed(() => props.book === 'volbrk' || isDC.value)
 // 唐奇安:給「之後調整止盈止損」用的資料,用 R(= 進場到停損的距離,也就是 3 × 進場時 ATR)表示,
 // 不同波動的幣才能放在一起比。高點時間 = 最大獲利出現在進場後第幾小時;回吐 = 最大獲利 − 目前 / 最後損益。
@@ -130,8 +133,8 @@ const exitLine = (t) => {
 function exitTip(t) {
   const L = exitLine(t)
   const lines = ['止盈線 = 下面兩條裡比較緊的那條,每根 1h 收盤破它 → 下一根開盤出場(每小時更新)']
-  lines.push(`吊燈停利:${t.chand_exit ? fmtPrice(t.chand_exit) + '(' + lvlPct(t, t.chand_exit) + ')' : '進場那根收盤後才有'}` + '——進場後' + (t.dir === 'short' ? '最低收盤 + 3 × ATR(24)' : '最高收盤 − 3 × ATR(24)'))
-  lines.push(`通道出場:${t.chan_exit ? fmtPrice(t.chan_exit) + '(' + lvlPct(t, t.chan_exit) + ')' : '—'}` + '——最近 12 根 1h 的' + (t.dir === 'short' ? '最高價' : '最低價'))
+  lines.push(`吊燈停利:${t.chand_exit ? fmtPrice(t.chand_exit) + '(' + lvlPct(t, t.chand_exit) + ')' : '進場那根收盤後才有'}` + '——進場後' + (t.dir === 'short' ? '最低收盤 + ' : '最高收盤 − ') + dcChandK.value + ' × ATR(24)')
+  lines.push(`通道出場:${t.chan_exit ? fmtPrice(t.chan_exit) + '(' + lvlPct(t, t.chan_exit) + ')' : '—'}` + '——最近 ' + dcExitN.value + ' 根 1h 的' + (t.dir === 'short' ? '最高價' : '最低價'))
   if (L) {
     const g = (t.dir === 'short' ? (t.entry - L) : (L - t.entry)) / t.entry * 100
     lines.push(g > 0 ? `在止盈線出場約 ${fmtPct(g)}(${inR(t, g)}),等於已經鎖住的獲利` : `目前止盈線還在進場價${t.dir === 'short' ? '之上' : '之下'}(${fmtPct(g)}),還沒鎖到獲利`)

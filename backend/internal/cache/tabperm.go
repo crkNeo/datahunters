@@ -66,6 +66,7 @@ var tabMeta = []struct {
 	{"pulsarv12", "脈衝星v12", "admin", false},
 	{"donchian", "唐奇安", "admin", false},     // 長通道突破(1h,多空)
 	{"donchianv2", "唐奇安v2", "admin", false}, // 唐奇安 + 吊燈停利 3×ATR
+	{"donchianv3", "唐奇安v3", "admin", false}, // 前 30、336 根 + 通道寬度;24 根通道 + 吊燈 4×ATR
 	{"volbrk", "波動突破", "admin", false},      // 日內波動率突破(只做多,換日平倉)
 	{"newsalpha", "消息雷達", "admin", false},   // 消息面 / 資訊落差:事件流 + 價格反應統計 + 模擬單
 	{"patterns", "型態掃描", "admin", false},    // 成交額前 200 幣的 1H 經典型態相似度
@@ -86,7 +87,7 @@ var tabDefaultKind = map[string]string{
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollema": "signal",
 	"srmtf":   "signal",
-	"surge":   "signal", "pulsarv3": "signal", "pulsarv12": "signal", "donchian": "signal", "donchianv2": "signal", "volbrk": "signal",
+	"surge":   "signal", "pulsarv3": "signal", "pulsarv12": "signal", "donchian": "signal", "donchianv2": "signal", "donchianv3": "signal", "volbrk": "signal",
 	"newsalpha":    "signal",
 	"orderblockv2": "signal",
 }
@@ -257,7 +258,7 @@ var tabOfRoute = map[string]string{
 	"/api/conv": "conv", "/api/sr": "sr", "/api/ema200": "ema200", "/api/ema200-history": "ema200", "/api/whales": "whales",
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
-	"/api/admin/surge":   "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/patterns": "patterns", "/api/donchian": "donchian", "/api/donchianv2": "donchianv2", "/api/volbrk": "volbrk",
+	"/api/admin/surge":   "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/patterns": "patterns", "/api/donchian": "donchian", "/api/donchianv2": "donchianv2", "/api/donchianv3": "donchianv3", "/api/volbrk": "volbrk",
 	"/api/newsalpha": "newsalpha", "/api/newsalpha-events": "newsalpha", "/api/newsalpha-stats": "newsalpha", "/api/newsalpha-book": "newsalpha",
 	"/api/orderblockv2": "orderblockv2",
 }

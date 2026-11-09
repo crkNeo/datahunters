@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "volbrk", "orderblockv2", "newsalpha"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "donchianv3", "volbrk", "orderblockv2", "newsalpha"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -90,6 +90,8 @@ var stratDefaults = map[string]StratCfg{
 	"donchian": {Tags: []string{"趨勢", "通道突破", "多空", "1h"}, ExitMode: "single"},
 	// 唐奇安v2:v1 + 吊燈停利 3×ATR(donchian.go)。
 	"donchianv2": {Tags: []string{"趨勢", "通道突破", "吊燈停利", "多空", "1h"}, ExitMode: "single"},
+	// 唐奇安v3:成交額前 30,336 根突破 + 通道寬度 + 48h 停損冷卻;24 根通道 + 吊燈 4×ATR(donchian.go)。
+	"donchianv3": {Tags: []string{"趨勢", "通道突破", "吊燈停利", "多空", "1h", "前30"}, ExitMode: "single"},
 	"volbrk":     {Tags: []string{"日內", "波動突破", "多單", "換日平倉"}, ExitMode: "single"},
 	// 消息雷達模擬單:單段止盈 / 止損(依消息分類固定 %),最多持有 1 小時。
 	"newsalpha": {Tags: []string{"消息面", "資訊落差", "多空"}, ExitMode: "single"},
@@ -474,6 +476,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.donchianV2Book.mu.Lock()
 		done = closeIn(s.donchianV2Book.trades)
 		s.donchianV2Book.mu.Unlock()
+	case "donchianv3":
+		s.donchianV3Book.mu.Lock()
+		done = closeIn(s.donchianV3Book.trades)
+		s.donchianV3Book.mu.Unlock()
 	case "volbrk":
 		s.volBrkBook.mu.Lock()
 		done = closeIn(s.volBrkBook.trades)

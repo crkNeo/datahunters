@@ -355,3 +355,141 @@ func TestDonchianV2Tick(t *testing.T) {
 		t.Fatalf("v2 chandelier level: %+v", tr)
 	}
 }
+
+// v3Series:共 total 根(最後一根 = 還在走的那根),前面振幅 ±wide、最後 narrowN 根(含)振幅 ±0.5,
+// 最新一根已收的 K 收盤 brk(突破)。Ts 從 start 開始。
+func v3Series(start int64, total, narrowN int, wide, brk float64) []exchange.Candle {
+	cs := make([]exchange.Candle, total)
+	for i := range cs {
+		a := wide
+		if i >= total-1-narrowN {
+			a = 0.5
+		}
+		cs[i] = exchange.Candle{Ts: start + int64(i)*dcBarMs, Open: 100, High: 100 + a, Low: 100 - a, Close: 100, Volume: 100}
+	}
+	sig := &cs[total-2]
+	sig.Close, sig.High = brk, brk+0.1
+	cs[total-1].Open = brk
+	return cs
+}
+
+func TestDonchianV3Width(t *testing.T) {
+	cs := v3Series(0, 2400, 400, 5, 102)
+	closed := cs[:len(cs)-1]
+	w, med, ok := dcV3Width(closed)
+	if !ok || math.Abs(w-0.01) > 1e-9 || math.Abs(med-0.10) > 1e-9 {
+		t.Fatalf("narrow channel before breakout: w=%v med=%v ok=%v", w, med, ok)
+	}
+	if dir, entry, sl, ok := dcSignalV3(closed, &cs[len(cs)-1]); !ok || dir != "long" || entry != 102 || sl >= entry {
+		t.Fatalf("narrow + breakout → long: %v %v %v %v", dir, entry, sl, ok)
+	}
+	// 通道沒有比平常窄(全部 ±5)→ 突破也不進
+	cs2 := v3Series(0, 2400, 0, 5, 106)
+	if _, _, _, ok := dcSignalV3(cs2[:len(cs2)-1], &cs2[len(cs2)-1]); ok {
+		t.Fatal("channel not narrower than the 2000-bar median → no entry")
+	}
+	if _, _, _, ok := dcSignal(cs2[:len(cs2)-1], &cs2[len(cs2)-1]); !ok {
+		t.Fatal("test setup: it is a 168-bar breakout")
+	}
+	// 歷史不夠 2000 根寬度 → 不進
+	if _, _, ok := dcV3Width(closed[len(closed)-2000:]); ok {
+		t.Fatal("needs 336 + 2000 bars")
+	}
+	// 突破的是 336 根:只破 168 根、沒破 336 根 → 不進
+	cs3 := v3Series(0, 2400, 400, 5, 102)
+	cs3[len(cs3)-300].High = 103
+	if _, _, _, ok := dcSignalV3(cs3[:len(cs3)-1], &cs3[len(cs3)-1]); ok {
+		t.Fatal("must break the 336-bar high")
+	}
+}
+
+func TestDonchianV3StopCooldown(t *testing.T) {
+	at := int64(1000) * dcBarMs
+	mk := func(dir, outcome string, hoursAgo int64) *PaperTrade {
+		return &PaperTrade{Coin: "AAA", Dir: dir, Status: "closed", Outcome: outcome, CloseTime: tptr(time.UnixMilli(at - hoursAgo*dcBarMs))}
+	}
+	cases := []struct {
+		name string
+		tr   *PaperTrade
+		want bool
+	}{
+		{"同方向 10h 前停損", mk("long", "sl", 10), true},
+		{"同方向 47h 前停損", mk("long", "sl", 47), true},
+		{"同方向 49h 前停損", mk("long", "sl", 49), false},
+		{"反方向停損", mk("short", "sl", 10), false},
+		{"吊燈停利出場不算", mk("long", "chandelier", 10), false},
+		{"通道出場不算", mk("long", "channel", 10), false},
+		{"沒有平倉時間", &PaperTrade{Coin: "AAA", Dir: "long", Status: "closed", Outcome: "sl"}, false},
+	}
+	for _, c := range cases {
+		if got := dcStoppedRecently([]*PaperTrade{c.tr}, "AAA", "long", at); got != c.want {
+			t.Fatalf("%s: got %v", c.name, got)
+		}
+	}
+}
+
+func TestDonchianV3Exit(t *testing.T) {
+	// 跌到 3 ATR 以下、但還在 4 ATR 以內 → v2 會出、v3 不出
+	tr := &PaperTrade{Dir: "long", Entry: 10, SL: 8, Status: "open", OpenTime: time.UnixMilli(20 * dcBarMs)}
+	cs := trendBars(40)
+	cs[36].Close, cs[36].Low = 11.7, 11.6
+	atr := dcATR(cs[:37])
+	if !(11.7 < 13-3*atr && 11.7 > 13-4*atr) {
+		t.Fatalf("test setup: atr %v", atr)
+	}
+	if _, outcome, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK); !hit || outcome != "chandelier" {
+		t.Fatal("3×ATR should exit")
+	}
+	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcV3ExitN, dcV3ChandK); hit {
+		t.Fatal("4×ATR should hold")
+	}
+	// 24 根通道:跌破 12 根低點但沒破 24 根低點 → v3 不出
+	cs2 := trendBars(60)
+	cs2[50].Close, cs2[50].Low = 12.9, 12.85
+	for i := 40; i < 50; i++ {
+		cs2[i].Low = 12.95
+	}
+	if lv12, lv24 := dcChanLevelN(cs2[:50], "long", 12), dcChanLevelN(cs2[:50], "long", 24); lv24 >= lv12 {
+		t.Fatalf("24-bar channel is wider: %v vs %v", lv24, lv12)
+	}
+}
+
+func TestDonchianV3Tick(t *testing.T) {
+	cur := time.Now().UnixMilli() / dcBarMs * dcBarMs
+	all := v3Series(cur-2399*dcBarMs, 2400, 400, 5, 102)
+	s, _ := dcStore(t, "AAA", func(cs []exchange.Candle) { copy(cs, all[2400-dcKlines:]) })
+	s.donchianV3Book = s.newDonchianV3Book()
+	s.dcEng3 = &hourEngine{seeded: true}
+	s.dcEng.seeded = true
+	s.dcV3Hist = map[string][]exchange.Candle{"AAA": append([]exchange.Candle(nil), all[:2300]...)}
+	b := s.donchianV3Book
+	// 同方向 10 小時前剛被停損 → 不進
+	b.trades = []*PaperTrade{{ID: "old", Coin: "AAA", Dir: "long", Status: "closed", Outcome: "sl", CloseTime: tptr(time.UnixMilli(cur - 10*dcBarMs))}}
+	s.DonchianTick()
+	if len(b.trades) != 1 {
+		t.Fatalf("48h stop cooldown should block, got %d trades", len(b.trades))
+	}
+	if h := s.dcV3Hist["AAA"]; len(h) != 2399 || h[len(h)-1].Ts != cur-dcBarMs {
+		t.Fatalf("history should be stitched up to the last closed bar: %d", len(h))
+	}
+	b.trades = nil
+	s.dcEng3.bucket = 0
+	s.DonchianTick()
+	if len(b.trades) != 1 {
+		t.Fatalf("v3 should enter, got %d", len(b.trades))
+	}
+	tr := b.trades[0]
+	if tr.ID != fmt.Sprintf("donchianv3|AAA|%d", cur) || tr.Dir != "long" || tr.Entry != 102 || tr.ChanExit != dcChanLevelN(all[:2399], "long", 24) {
+		t.Fatalf("v3 trade: %+v", tr)
+	}
+	// 歷史接不上又抓不到(沒有交易所)、也沒持倉 → 這一輪跳過
+	s.dcV3Hist = map[string][]exchange.Candle{}
+	b.trades = nil
+	s.dcEng3.bucket = 0
+	s.DonchianTick()
+	if len(b.trades) != 0 || !s.dcEng3.pend["AAA"] {
+		t.Fatal("no history → retry next minute, no entry")
+	}
+}
+
+func tptr(t time.Time) *time.Time { return &t }

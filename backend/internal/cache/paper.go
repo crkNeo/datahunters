@@ -517,6 +517,8 @@ func bookLabel(name string) string {
 		return "唐奇安"
 	case "donchianv2":
 		return "唐奇安v2"
+	case "donchianv3":
+		return "唐奇安v3"
 	case "volbrk":
 		return "波動突破"
 	case "newsalpha":
@@ -574,7 +576,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "volbrk", "orderblockv2", "newsalpha":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "donchianv3", "volbrk", "orderblockv2", "newsalpha":
 		return name
 	case "orderblockv2_4h": // 週期共用一個分頁
 		return "orderblockv2"
@@ -872,7 +874,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 		}
 		return out
 	}
-	if mb := map[string]*microBook{"donchian": s.donchianBook, "donchianv2": s.donchianV2Book, "volbrk": s.volBrkBook}[book]; mb != nil {
+	if mb := map[string]*microBook{"donchian": s.donchianBook, "donchianv2": s.donchianV2Book, "donchianv3": s.donchianV3Book, "volbrk": s.volBrkBook}[book]; mb != nil {
 		mb.mu.Lock() // 唐奇安 / 波動突破:沒 DB 時退回記憶體(待觸發計畫不算交易,不匯出)
 		defer mb.mu.Unlock()
 		var out []*PaperTrade
