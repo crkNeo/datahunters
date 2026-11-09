@@ -130,12 +130,20 @@ const exitLine = (t) => {
   if (!xs.length) return 0
   return t.dir === 'short' ? Math.min(...xs) : Math.max(...xs)
 }
+// 止盈線比初始停損還鬆(剛突破時常見:12 / 24 根低點還在突破前、吊燈要等進場那根收盤)→ 實際會先碰到停損,止盈線還沒作用
+const exitActive = (t) => {
+  const L = exitLine(t)
+  if (!L) return false
+  if (!t.sl) return true
+  return t.dir === 'short' ? L < t.sl : L > t.sl
+}
 function exitTip(t) {
   const L = exitLine(t)
   const lines = ['止盈線 = 下面兩條裡比較緊的那條,每根 1h 收盤破它 → 下一根開盤出場(每小時更新)']
+  if (L && !exitActive(t)) lines.push(`⚠️ 目前兩條線都比初始停損 ${fmtPrice(t.sl)}(${lvlPct(t, t.sl)})還鬆,價格會先碰到停損 → 止盈線還沒作用(未啟動)`)
   lines.push(`吊燈停利:${t.chand_exit ? fmtPrice(t.chand_exit) + '(' + lvlPct(t, t.chand_exit) + ')' : '進場那根收盤後才有'}` + '——進場後' + (t.dir === 'short' ? '最低收盤 + ' : '最高收盤 − ') + dcChandK.value + ' × ATR(24)')
   lines.push(`通道出場:${t.chan_exit ? fmtPrice(t.chan_exit) + '(' + lvlPct(t, t.chan_exit) + ')' : '—'}` + '——最近 ' + dcExitN.value + ' 根 1h 的' + (t.dir === 'short' ? '最高價' : '最低價'))
-  if (L) {
+  if (L && exitActive(t)) {
     const g = (t.dir === 'short' ? (t.entry - L) : (L - t.entry)) / t.entry * 100
     lines.push(g > 0 ? `在止盈線出場約 ${fmtPct(g)}(${inR(t, g)}),等於已經鎖住的獲利` : `目前止盈線還在進場價${t.dir === 'short' ? '之上' : '之下'}(${fmtPct(g)}),還沒鎖到獲利`)
   }
@@ -266,7 +274,7 @@ function tpStatusCls(t) {
             <template v-if="t[a[0]] != null">{{ fmtPct(t[a[0]]) }}</template><span v-else class="tsmall">{{ t.status !== 'pending' && afterWait(t, a[2]) ? '待' : '—' }}</span>
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small><small v-if="isDC2" class="tppct">{{ lvlPct(t, t.sl) }}</small></template><span v-else class="tsmall">無</span></td>
-          <td v-if="isDC2" class="r tp-cell nowrap" :class="{ hit: exitLine(t) && (t.dir === 'short' ? exitLine(t) < t.entry : exitLine(t) > t.entry) }" :title="exitTip(t)"><template v-if="exitLine(t)">{{ fmtPrice(exitLine(t)) }}<small class="tppct">{{ lvlPct(t, exitLine(t)) }}</small></template><span v-else class="tsmall">待</span></td>
+          <td v-if="isDC2" class="r tp-cell nowrap" :class="{ hit: exitActive(t) && (t.dir === 'short' ? exitLine(t) < t.entry : exitLine(t) > t.entry) }" :title="exitTip(t)"><template v-if="exitActive(t)">{{ fmtPrice(exitLine(t)) }}<small class="tppct">{{ lvlPct(t, exitLine(t)) }}</small></template><span v-else-if="exitLine(t)" class="tsmall">未啟動</span><span v-else class="tsmall">待</span></td>
           <td v-else-if="hasR" class="r tp-cell nowrap" :title="chanTip(t)"><template v-if="t.chan_exit">{{ fmtPrice(t.chan_exit) }}<small class="tppct">{{ chanDist(t) }}</small></template><span v-else class="tsmall">待</span></td>
           <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft() }}</td>
           <td v-if="hasATR" class="r tp-cell nowrap" :title="atrTip(t)"><template v-if="t.atr">{{ fmtPrice(t.atr) }}<small class="tppct">{{ atrPct(t) }}</small></template><span v-else class="tsmall">待</span></td>
