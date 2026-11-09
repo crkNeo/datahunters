@@ -163,6 +163,7 @@ type PaperState struct {
 	Closed []*PaperTrade `json:"closed"`
 	Stats  PaperStats    `json:"stats"`
 	Market []MarketBias  `json:"market,omitempty"` // 大盤指標 (BTC/ETH), display-only
+	Est    *DcEst        `json:"est,omitempty"`    // 唐奇安v2 / v3:用初版唐奇安的歷史估「預估止盈」(donchian.go)
 }
 
 // MarketBias is the current 1h-EMA read of a bellwether coin (BTC/ETH), shown on

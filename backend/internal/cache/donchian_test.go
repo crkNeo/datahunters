@@ -493,3 +493,20 @@ func TestDonchianV3Tick(t *testing.T) {
 }
 
 func tptr(t time.Time) *time.Time { return &t }
+
+func TestDonchianEstimate(t *testing.T) {
+	var trs []*PaperTrade
+	// 40 筆:R = 5%(進場 100、停損 95),最大獲利 0%、5%、10% … → 0R、1R、2R …(循環 0~4R)
+	for i := 0; i < 40; i++ {
+		trs = append(trs, &PaperTrade{Status: "closed", Outcome: "channel", Entry: 100, SL: 95, MaxGain: float64(i%5) * 5, OpenTime: time.UnixMilli(int64(i) * dcBarMs)})
+	}
+	trs = append(trs, &PaperTrade{Status: "closed", Outcome: "manual", Entry: 100, SL: 95, MaxGain: 99}) // 手動平倉:不算
+	trs = append(trs, &PaperTrade{Status: "open", Entry: 100, SL: 95, MaxGain: 99})                      // 持倉中:不算
+	e := dcEstimate(trs)
+	if e.N != 40 || e.P50 != 2 || e.P25 != 1 || e.P75 != 3 || e.From != 0 {
+		t.Fatalf("estimate: %+v", e)
+	}
+	if e := dcEstimate(trs[:29]); e.N != 29 || e.P50 != 0 {
+		t.Fatalf("under 30 samples → no percentiles: %+v", e)
+	}
+}

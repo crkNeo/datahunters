@@ -124,6 +124,23 @@ function chanTip(t) {
   }
   return lines.join('\n')
 }
+// 唐奇安v2 / v3 預估止盈:後端用初版唐奇安已平倉單的「最大獲利」(換算成 R)取中位數 P50(state.est),
+// 預估止盈 = 進場 ± P50 × R。只是機率參考(歷史上一半的單碰得到),不是出場規則。
+const est = computed(() => props.state?.est || null)
+const estOK = computed(() => !!(est.value && est.value.p50 > 0))
+const estPx = (t, k) => (t.entry > 0 && t.sl ? (t.dir === 'short' ? t.entry - k * Math.abs(t.entry - t.sl) : t.entry + k * Math.abs(t.entry - t.sl)) : 0)
+const estHit = (t) => estOK.value && rPct(t) > 0 && t.max_gain >= est.value.p50 * rPct(t)
+function estTip(t) {
+  const e = est.value
+  if (!e) return ''
+  if (!estOK.value) return `初版唐奇安目前只有 ${e.n} 筆正常出場的已平倉單,滿 ${e.min} 筆才估(樣本太少,分位數不穩)`
+  return [`用初版唐奇安 ${e.n} 筆已平倉單(停損 / 通道出場,不含手動)的最大獲利估算,R = 進場到初始停損的距離`,
+    `P50 ${e.p50}R → ${fmtPrice(estPx(t, e.p50))}(${lvlPct(t, estPx(t, e.p50))}):歷史上一半的單至少走到這裡`,
+    `P25 ${e.p25}R → ${fmtPrice(estPx(t, e.p25))}(${lvlPct(t, estPx(t, e.p25))}):四分之三的單走得到`,
+    `P75 ${e.p75}R → ${fmtPrice(estPx(t, e.p75))}(${lvlPct(t, estPx(t, e.p75))}):四分之一的單走得到`,
+    '只是機率參考,不是出場規則;' + (props.book === 'donchianv3' ? 'v3 突破更長、出場更鬆,用初版估會偏保守。' : '實際出場照止盈線。'),
+    estHit(t) ? '✅ 這筆的最大獲利已經超過 P50' : ''].filter(Boolean).join('\n')
+}
 // 唐奇安v2:止盈線 = 通道出場和吊燈停利裡比較緊的那條(多單取高、空單取低),收盤破它 → 下一根開盤出場
 const exitLine = (t) => {
   const xs = [t.chan_exit, t.chand_exit].filter((v) => v > 0)
@@ -240,7 +257,7 @@ function tpStatusCls(t) {
     <p v-if="openRows.length" class="tp-legend">綠色 = 已觸及止盈</p>
     <div v-if="openRows.length" class="tblwrap">
     <table class="grid">
-      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(用來看停損該設多寬)">最大回撤</th><th v-if="hasPeak" class="r" title="最大獲利出現在進場後第幾小時">高點時間</th><th v-if="hasPeak" class="r" title="最大獲利 − 目前 / 最後損益:從最高點吐回去多少(唐奇安用 R,波動突破用 %)">回吐</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r" :title="isDC2 ? '初始停損 = 進場 ∓ 3 × 進場時 ATR(24),固定不動;% = 相對進場價' : ''">{{ isDC2 ? '止損%' : '止損' }}</th><th v-if="isDC2" class="r" title="通道出場和吊燈停利裡比較緊的那條;% = 在這條線出場相對進場價(正 = 已鎖住的獲利)。滑鼠移上去看兩條線">止盈%</th><th v-else-if="hasR" class="r" title="目前的移動出場線(最近 12 根 1h 低點 / 空單高點),每小時更新">通道出場</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else-if="!noTP"><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
+      <thead><tr><th>幣種</th><th v-if="hasTf">週期</th><th>方向</th><th v-if="hasHealth">健康</th><th v-if="hasHealth" title="進場當下:幣 / BTC 離 4H EMA200 的 %,全市場站上 EMA200 的比例">EMA200 / 大盤</th><th v-if="hasAI">AI信心</th><th class="r">進場/觸發</th><th class="r">現價</th><th class="r">未實現%</th><th class="r">最大獲利</th><th v-if="hasDD" class="r" title="進場後到平倉前,價格最不利的位置相對進場價(用來看停損該設多寬)">最大回撤</th><th v-if="hasPeak" class="r" title="最大獲利出現在進場後第幾小時">高點時間</th><th v-if="hasPeak" class="r" title="最大獲利 − 目前 / 最後損益:從最高點吐回去多少(唐奇安用 R,波動突破用 %)">回吐</th><th v-for="a in (hasAfter ? AFTER : [])" :key="a[0]" class="r" :title="'進場後 ' + a[1] + ' 的價格相對進場價(不管有沒有出場)'">{{ a[1] }}</th><th class="r" :title="isDC2 ? '初始停損 = 進場 ∓ 3 × 進場時 ATR(24),固定不動;% = 相對進場價' : ''">{{ isDC2 ? '止損%' : '止損' }}</th><th v-if="isDC2" class="r" title="通道出場和吊燈停利裡比較緊的那條;% = 在這條線出場相對進場價(正 = 已鎖住的獲利)。滑鼠移上去看兩條線">止盈%</th><th v-if="isDC2" class="r" title="用初版唐奇安的歷史估:進場 ± 最大獲利中位數(R)× R。歷史上一半的單至少走到這裡;只是參考,不是出場規則">預估止盈</th><th v-else-if="hasR" class="r" title="目前的移動出場線(最近 12 根 1h 低點 / 空單高點),每小時更新">通道出場</th><th v-if="hasTimer" class="r" title="UTC 換日(台北 08:00)收盤平倉;待觸發的計畫也在那時作廢">換日平倉</th><template v-if="hasATR"><th class="r" title="目前的 ATR(24):最新 24 根已收 1h K 的平均真實波幅,每小時收盤後更新。唐奇安沒有止盈,獲利靠 12 根通道出場">ATR(24)</th></template><template v-else-if="!noTP"><th class="r">TP1</th><th class="r">TP2</th><th class="r">最終</th></template><th>狀態</th><th class="r">時間</th><th v-if="canExit" class="r">操作</th></tr></thead>
       <tbody>
         <tr v-for="t in openRows" :key="t.coin + t.open_time" class="clickable" @click="$emit('coin', t.coin)">
           <td class="coin">{{ t.coin }}</td>
@@ -275,6 +292,7 @@ function tpStatusCls(t) {
           </td>
           <td class="r short"><template v-if="t.sl">{{ fmtPrice(t.sl) }}<small v-if="t.status !== 'pending' && t.legs >= 2" class="vtag"> 鎖利</small><small v-else-if="t.status !== 'pending' && t.legs >= 1" class="vtag"> 保本</small><small v-if="isDC2" class="tppct">{{ lvlPct(t, t.sl) }}</small></template><span v-else class="tsmall">無</span></td>
           <td v-if="isDC2" class="r tp-cell nowrap" :class="{ hit: exitActive(t) && (t.dir === 'short' ? exitLine(t) < t.entry : exitLine(t) > t.entry) }" :title="exitTip(t)"><template v-if="exitActive(t)">{{ fmtPrice(exitLine(t)) }}<small class="tppct">{{ lvlPct(t, exitLine(t)) }}</small></template><span v-else-if="exitLine(t)" class="tsmall">未啟動</span><span v-else class="tsmall">待</span></td>
+          <td v-if="isDC2" class="r tp-cell nowrap" :class="{ hit: estHit(t) }" :title="estTip(t)"><template v-if="estOK && estPx(t, est.p50)">{{ fmtPrice(estPx(t, est.p50)) }}<small class="tppct">{{ lvlPct(t, estPx(t, est.p50)) }}</small></template><span v-else-if="est" class="tsmall">樣本不足 {{ est.n }}/{{ est.min }}</span><span v-else class="tsmall">—</span></td>
           <td v-else-if="hasR" class="r tp-cell nowrap" :title="chanTip(t)"><template v-if="t.chan_exit">{{ fmtPrice(t.chan_exit) }}<small class="tppct">{{ chanDist(t) }}</small></template><span v-else class="tsmall">待</span></td>
           <td v-if="hasTimer" class="r tsmall nowrap">{{ timerLeft() }}</td>
           <td v-if="hasATR" class="r tp-cell nowrap" :title="atrTip(t)"><template v-if="t.atr">{{ fmtPrice(t.atr) }}<small class="tppct">{{ atrPct(t) }}</small></template><span v-else class="tsmall">待</span></td>

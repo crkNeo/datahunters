@@ -1229,7 +1229,7 @@ func (s *Store) BollEMAState() PaperState    { return s.microState(s.bollEMABook
 func (s *Store) PulsarV3State() PaperState   { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState  { return s.microState(s.pulsarV12Book) }
 func (s *Store) DonchianState() PaperState   { return s.microState(s.donchianBook) }
-func (s *Store) DonchianV2State() PaperState { return s.microState(s.donchianV2Book) }
-func (s *Store) DonchianV3State() PaperState { return s.microState(s.donchianV3Book) }
+func (s *Store) DonchianV2State() PaperState { return s.dcWithEst(s.microState(s.donchianV2Book)) }
+func (s *Store) DonchianV3State() PaperState { return s.dcWithEst(s.microState(s.donchianV3Book)) }
 func (s *Store) VolBrkState() PaperState     { return s.microState(s.volBrkBook) }
 func (s *Store) SMCV2State() PaperState      { return s.microState(s.smcV2Books...) }

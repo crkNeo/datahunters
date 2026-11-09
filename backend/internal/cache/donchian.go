@@ -681,3 +681,61 @@ func (s *Store) dcMarkBook(b *microBook, px map[string]float64, now time.Time) {
 		s.notifyCloseBook(b.name, tr, now, false)
 	}
 }
+
+// ---- 預估止盈(唐奇安v2 / v3 頁面顯示用,不影響出場)----
+
+// DcEst 用唐奇安(初版)已平倉單的「最大獲利」換算成 R(= 進場到初始停損的距離)後的分位數。
+// P50 = 歷史上一半的單,進場後至少漲(空單:跌)到 P50 × R。N < dcEstMinN 時不給分位數(樣本不足)。
+type DcEst struct {
+	N    int     `json:"n"`
+	Min  int     `json:"min"`
+	P25  float64 `json:"p25,omitempty"`
+	P50  float64 `json:"p50,omitempty"`
+	P75  float64 `json:"p75,omitempty"`
+	From int64   `json:"from,omitempty"` // 樣本裡最早那筆的進場時間(ms)
+}
+
+const dcEstMinN = 30
+
+// dcEstimate:只用正常出場的單(停損 / 通道);手動平倉會把最大獲利截斷,不算。
+func dcEstimate(trades []*PaperTrade) *DcEst {
+	var rs []float64
+	e := &DcEst{Min: dcEstMinN}
+	for _, tr := range trades {
+		if tr.Status != "closed" || tr.Entry <= 0 || tr.SL <= 0 || (tr.Outcome != "sl" && tr.Outcome != "channel") {
+			continue
+		}
+		r := math.Abs(tr.Entry-tr.SL) / tr.Entry * 100
+		if r <= 0 {
+			continue
+		}
+		if ms := tr.OpenTime.UnixMilli(); len(rs) == 0 || ms < e.From {
+			e.From = ms
+		}
+		rs = append(rs, math.Max(tr.MaxGain, 0)/r)
+	}
+	e.N = len(rs)
+	if e.N < dcEstMinN {
+		return e
+	}
+	sort.Float64s(rs)
+	q := func(p float64) float64 { // 線性內插的分位數
+		x := p * float64(len(rs)-1)
+		i := int(x)
+		if i+1 >= len(rs) {
+			return r2(rs[i])
+		}
+		return r2(rs[i] + (rs[i+1]-rs[i])*(x-float64(i)))
+	}
+	e.P25, e.P50, e.P75 = q(0.25), q(0.5), q(0.75)
+	return e
+}
+
+func (s *Store) dcWithEst(st PaperState) PaperState {
+	if b := s.donchianBook; b != nil {
+		b.mu.Lock()
+		st.Est = dcEstimate(b.trades)
+		b.mu.Unlock()
+	}
+	return st
+}
