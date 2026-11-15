@@ -149,6 +149,132 @@ def fetch_vision(coin, start_ms, end_ms, cache_dir, offline=False):
     return [b for b in bars if start_ms <= b[0] < end_ms]
 
 
+# ---------------------------------------------------------------- 指標(每個 bars 算一次)
+
+_IND = {}
+
+
+def _ema(xs, n):
+    out, e = [], None
+    for x in xs:
+        e = x if e is None else e + (x - e) * 2 / (n + 1)
+        out.append(e)
+    return out
+
+
+def indicators(bars):
+    key = id(bars)
+    if key in _IND and _IND[key][0] is bars:  # 同一個 list(留著參照,id 不會被別的 list 重用)
+        return _IND[key][1]
+    c = [b[4] for b in bars]
+    h = [b[2] for b in bars]
+    l = [b[3] for b in bars]
+    o = [b[1] for b in bars]
+    n = len(bars)
+    # RSI(14) Wilder
+    rsi = [50.0] * n
+    ag = al = 0.0
+    for i in range(1, n):
+        d = c[i] - c[i - 1]
+        g, ls = max(d, 0), max(-d, 0)
+        if i <= 14:
+            ag += g / 14
+            al += ls / 14
+        else:
+            ag = (ag * 13 + g) / 14
+            al = (al * 13 + ls) / 14
+        if i >= 14:
+            rsi[i] = 100 if al == 0 else 100 - 100 / (1 + ag / al)
+    e12, e26 = _ema(c, 12), _ema(c, 26)
+    macd = [a - b for a, b in zip(e12, e26)]
+    sig = _ema(macd, 9)
+    hist = [a - b for a, b in zip(macd, sig)]
+    e9, e21 = _ema(c, 9), _ema(c, 21)
+    # 布林 20, 2
+    mid, up, dn = [0.0] * n, [0.0] * n, [0.0] * n
+    for i in range(n):
+        w = c[max(0, i - 19):i + 1]
+        m = sum(w) / len(w)
+        sd = (sum((x - m) ** 2 for x in w) / len(w)) ** 0.5
+        mid[i], up[i], dn[i] = m, m + 2 * sd, m - 2 * sd
+    # SuperTrend(10, 3):dir +1 上升 / -1 下降
+    tr = [h[0] - l[0]] + [max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1])) for i in range(1, n)]
+    atr10, a = [], None
+    for x in tr:
+        a = x if a is None else (a * 9 + x) / 10
+        atr10.append(a)
+    st_dir, fu, fl = [1] * n, 0.0, 0.0
+    for i in range(n):
+        hl2 = (h[i] + l[i]) / 2
+        bu, bl = hl2 + 3 * atr10[i], hl2 - 3 * atr10[i]
+        if i == 0:
+            fu, fl = bu, bl
+            continue
+        fu = bu if (bu < fu or c[i - 1] > fu) else fu
+        fl = bl if (bl > fl or c[i - 1] < fl) else fl
+        d = st_dir[i - 1]
+        if d == 1 and c[i] < fl:
+            d = -1
+        elif d == -1 and c[i] > fu:
+            d = 1
+        st_dir[i] = d
+    # Heikin-Ashi 收 - 開(>0 = 陽)
+    ha, hao, hac = [0.0] * n, None, None
+    for i in range(n):
+        hc = (o[i] + h[i] + l[i] + c[i]) / 4
+        hao = (o[i] + c[i]) / 2 if hao is None else (hao + hac) / 2
+        hac = hc
+        ha[i] = hac - hao
+    r = dict(rsi=rsi, hist=hist, e9=e9, e21=e21, mid=mid, up=up, dn=dn, st=st_dir, ha=ha)
+    _IND[key] = (bars, r)
+    return r
+
+
+def ind_exit(name, bars, i, i0, long, state):
+    """指標出場訊號(只看到第 i 根收盤為止)。state:這筆單的暫存(記超買、上一個高點的 RSI…)。"""
+    I = indicators(bars)
+    sg = 1 if long else -1
+    if name == "rsi":
+        r = I["rsi"][i] if long else 100 - I["rsi"][i]
+        if r >= 75:
+            state["ob"] = True
+        return state.get("ob") and r < 65
+    if name == "rsidiv":  # 新高但 RSI 比上一個高點低 5 以上
+        px = bars[i][2] if long else -bars[i][3]
+        r = I["rsi"][i] if long else 100 - I["rsi"][i]
+        hit = False
+        if state.get("pk") is None or px > state["pk"]:
+            hit = state.get("pk") is not None and r < state["pkr"] - 5
+            state["pk"], state["pkr"] = px, r
+        return hit
+    if name == "macd":
+        return i > i0 and sg * I["hist"][i - 1] > 0 and sg * I["hist"][i] <= 0
+    if name == "ema":
+        return sg * (I["e9"][i] - I["e21"][i]) < 0
+    if name == "st":
+        return I["st"][i] == -sg
+    if name == "boll":
+        c = bars[i][4]
+        if sg * (c - (I["up"][i] if long else I["dn"][i])) > 0:
+            state["out"] = True
+        return state.get("out") and sg * (c - I["mid"][i]) < 0
+    if name == "ha":
+        return sg * I["ha"][i] < 0 and sg * I["ha"][i - 1] < 0
+    if name == "sar":
+        # Parabolic SAR(0.02, 0.2),從進場那根開始跑
+        c, hh, ll = bars[i][4], bars[i][2], bars[i][3]
+        if "sar" not in state:
+            state.update(sar=bars[i0][3] if long else bars[i0][2], ep=hh if long else ll, af=0.02)
+            return False
+        sar, ep, af = state["sar"], state["ep"], state["af"]
+        sar = sar + af * (ep - sar)
+        if (long and hh > ep) or (not long and ll < ep):
+            ep, af = (hh if long else ll), min(af + 0.02, 0.2)
+        state.update(sar=sar, ep=ep, af=af)
+        return (long and c < sar) or (not long and c > sar)
+    return False
+
+
 # ---------------------------------------------------------------- 出場規則
 
 def rule(name, desc, **kw):
@@ -169,11 +295,13 @@ def rule(name, desc, **kw):
     lock_close  [(到幾 %, 保留幾成)]:收盤版鎖利:用「進場後最高收盤」算最大獲利,收盤跌破 → 下一根開盤出(插針洗不掉)
     overext     (k, 保留幾成):收盤離 EMA20 超過 k × ATR(過熱、像在噴出)時,把移動停損拉到最大獲利的這個比例(盤中觸價)
     stall       (到幾 %, 幾根):最大獲利到過這麼多 %、而且已經這麼多根沒創新高(收盤)→ 下一根開盤出
+    ind         (指標, 獲利到過幾 %):最大獲利到過這麼多 % 之後,指標出場訊號出現 → 下一根開盤出。
+                指標:rsi / rsidiv / macd / ema / st(SuperTrend)/ boll / ha(Heikin-Ashi)/ sar
     floor       [(到幾 %, 底線幾 %)]:獲利到過這麼多 % 之後,移動停損移到固定的獲利底線(不跟著最高點跑),
                 盤中碰到就出;可以多段,例如 [(40, 25), (80, 50)]
     """
     d = dict(name=name, desc=desc, chan=12, chand_k=0.0, atr_cap=False, use_high=False,
-             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[], lock_close=[], overext=None, stall=None, lock_peak_close=False)
+             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[], lock_close=[], overext=None, stall=None, lock_peak_close=False, ind=None)
     d.update(kw)
     return d
 
@@ -237,6 +365,7 @@ def replay(t, bars, rl):
 
     lock_stop = None  # 鎖利移動停損(上一根收盤後算好,這一根盤中生效)
     ema20 = None
+    ind_state = {}
     ext_c_i = i0  # 最高收盤出現在第幾根
     for i in range(i0, len(bars)):
         ts, o, h, l, c, v = bars[i]
@@ -330,6 +459,11 @@ def replay(t, bars, rl):
                     keep = k
             if keep is not None and gain(c) < keep * gain(ext_c):
                 exit_reason = "lock_close"
+        # 指標出場(SAR 要從進場就開始跑,所以每根都算,但只有獲利到過門檻才採用)
+        if rl["ind"]:
+            sig = ind_exit(rl["ind"][0], bars, i, i0, long, ind_state)
+            if not exit_reason and sig and mfe * R / entry * 100 >= rl["ind"][1]:
+                exit_reason = "ind_" + rl["ind"][0]
         # 停滯出場
         if not exit_reason and rl["stall"] and mfe * R / entry * 100 >= rl["stall"][0] and i - ext_c_i >= rl["stall"][1]:
             exit_reason = "stall"
