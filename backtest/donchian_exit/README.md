@@ -42,5 +42,6 @@ py dc_exit_bt.py --csv donchian.csv donchianv2.csv --out detail.csv   # 另存�
 | LockP20 / LockP30 | 同上,門檻用獲利 %(例如獲利到過 30% 就鎖 60%) |
 
 另外 `rule()` 支援 `floor=[(到幾 %, 底線幾 %)]`:獲利到過門檻後,停損移到固定的獲利底線(不跟著最高點跑),例如階梯底線 `floor=[(40, 25), (80, 50), (120, 80)]`。
+其他移動止盈參數:`lock_peak_close`(鎖利的最大獲利改用最高收盤)、`lock_close`(收盤版鎖利)、`overext`(離 EMA20 太遠才收緊)、`stall`(太久沒創新高就出),說明見 `rule()` 註解。
 
 要加新規則:在 `RULES` 加一行 `rule(...)`,參數說明在 `rule()` 的註解。

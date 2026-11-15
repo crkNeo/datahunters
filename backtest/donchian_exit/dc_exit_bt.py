@@ -165,11 +165,15 @@ def rule(name, desc, **kw):
     lock        [(到幾 R, 保留幾成)]:最大有利到過這麼多 R 之後,移動停損 = 進場 + 保留比例 × 最大有利(盤中價),
                 盤中碰到就出(像掛停損單);每根收盤後更新,下一根開始生效
     lock_pct    [(到幾 %, 保留幾成)]:同上,門檻用獲利 %(不是 R)
+    lock_peak_close  True = 鎖利(lock / lock_pct)的「最大獲利」改用進場後最高收盤(插針不會把停損拉太高)
+    lock_close  [(到幾 %, 保留幾成)]:收盤版鎖利:用「進場後最高收盤」算最大獲利,收盤跌破 → 下一根開盤出(插針洗不掉)
+    overext     (k, 保留幾成):收盤離 EMA20 超過 k × ATR(過熱、像在噴出)時,把移動停損拉到最大獲利的這個比例(盤中觸價)
+    stall       (到幾 %, 幾根):最大獲利到過這麼多 %、而且已經這麼多根沒創新高(收盤)→ 下一根開盤出
     floor       [(到幾 %, 底線幾 %)]:獲利到過這麼多 % 之後,移動停損移到固定的獲利底線(不跟著最高點跑),
                 盤中碰到就出;可以多段,例如 [(40, 25), (80, 50)]
     """
     d = dict(name=name, desc=desc, chan=12, chand_k=0.0, atr_cap=False, use_high=False,
-             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[])
+             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[], lock_close=[], overext=None, stall=None, lock_peak_close=False)
     d.update(kw)
     return d
 
@@ -232,6 +236,8 @@ def replay(t, bars, rl):
         return dict(r=r, mfe=mfe, outcome=outcome, bars=i - i0 + 1, open=still_open)
 
     lock_stop = None  # 鎖利移動停損(上一根收盤後算好,這一根盤中生效)
+    ema20 = None
+    ext_c_i = i0  # 最高收盤出現在第幾根
     for i in range(i0, len(bars)):
         ts, o, h, l, c, v = bars[i]
         fav, adv = (h, l) if long else (l, h)
@@ -256,7 +262,14 @@ def replay(t, bars, rl):
         # 3) 收盤後:更新進場後最有利收盤 / 盤中價
         newhigh = ext_h is None or (long and h > ext_h) or (not long and l < ext_h)
         if ext_c is None or (long and c > ext_c) or (not long and c < ext_c):
-            ext_c = c
+            ext_c, ext_c_i = c, i
+        # EMA20(從進場前 40 根開始暖身)
+        if ema20 is None:
+            ema20 = st.mean(b[4] for b in bars[max(0, i - 40):i + 1])
+            for b in bars[max(0, i - 40):i + 1]:
+                ema20 = ema20 + (b[4] - ema20) * 2 / 21
+        else:
+            ema20 = ema20 + (c - ema20) * 2 / 21
         if newhigh:
             ext_h = fav
         if rl["floor"]:
@@ -276,10 +289,15 @@ def replay(t, bars, rl):
                 if mfe_pct >= lv:
                     keep = k if keep is None else max(keep, k)
             if keep is not None:
-                ls = entry + sgn * keep * mfe * R
+                pk = gain(ext_c) if rl["lock_peak_close"] else mfe
+                ls = entry + sgn * keep * max(pk, 0) * R
                 if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
                     lock_stop = ls
         atr = atr_at(bars, i)
+        if rl["overext"] and atr > 0 and sgn * (c - ema20) / atr >= rl["overext"][0] and mfe > 0:
+            ls = entry + sgn * rl["overext"][1] * mfe * R
+            if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
+                lock_stop = ls
         avgv = st.mean(b[5] for b in bars[max(0, i - 24):i]) if i > 0 else 0
         if avgv > 0 and v >= 3 * avgv and (vol_bar is None or v > vol_bar[5]) and i > i0:
             vol_bar = bars[i]
@@ -303,6 +321,18 @@ def replay(t, bars, rl):
             line = ref - sgn * k * a
             if (long and c < line) or (not long and c > line):
                 exit_reason = "chandelier"
+        # 收盤版鎖利
+        if not exit_reason and rl["lock_close"]:
+            peak_pct = gain(ext_c) * R / entry * 100
+            keep = None
+            for lv, k in rl["lock_close"]:
+                if peak_pct >= lv:
+                    keep = k
+            if keep is not None and gain(c) < keep * gain(ext_c):
+                exit_reason = "lock_close"
+        # 停滯出場
+        if not exit_reason and rl["stall"] and mfe * R / entry * 100 >= rl["stall"][0] and i - ext_c_i >= rl["stall"][1]:
+            exit_reason = "stall"
         rng = h - l
         # 爆量反轉 K
         if not exit_reason and rl["climax"] and mfe >= rl["climax"] and avgv > 0 and v >= 3 * avgv and rng > 0:
