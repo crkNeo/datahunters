@@ -140,7 +140,8 @@ def fetch_vision(coin, start_ms, end_ms, cache_dir, offline=False):
                     time.sleep(2 * (attempt + 1))
                 except Exception:
                     time.sleep(2 * (attempt + 1))
-            if d + DAY <= int(time.time() * 1000) - DAY:  # 確定已經發布的日子才存快取
+            today = int(time.time() * 1000) // DAY * DAY
+            if d + DAY <= today and (rows or d + 3 * DAY <= today):  # 過去的日子才存;空的(404)放 3 天再存,怕檔案晚發布
                 with open(fn, "w") as fh:
                     json.dump(rows, fh)
         bars.extend(rows or [])
@@ -161,9 +162,12 @@ def rule(name, desc, **kw):
     climax      爆量反轉 K:賺過這麼多 R 之後,量 ≥ 3 × 前 24 根均量、收在不利的 40% → 下一根開盤出
     wick        創新高的長上影:創進場後新高、上影 ≥ 60% 全距、全距 ≥ 1 ATR → 下一根開盤出
     vol_low     跌破爆量 K:進場後最大量那根(≥ 3 × 均量)的低點(空單高點)被收盤破 → 下一根開盤出
+    lock        [(到幾 R, 保留幾成)]:最大有利到過這麼多 R 之後,移動停損 = 進場 + 保留比例 × 最大有利(盤中價),
+                盤中碰到就出(像掛停損單);每根收盤後更新,下一根開始生效
+    lock_pct    [(到幾 %, 保留幾成)]:同上,門檻用獲利 %(不是 R)
     """
     d = dict(name=name, desc=desc, chan=12, chand_k=0.0, atr_cap=False, use_high=False,
-             tight=[], partial=[], climax=0.0, wick=False, vol_low=False)
+             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[])
     d.update(kw)
     return d
 
@@ -183,6 +187,12 @@ RULES = [
     rule("Wick", "V2cap + 創新高的長上影", chand_k=3, atr_cap=True, wick=True),
     rule("VolLow", "V2cap + 收盤跌破爆量 K 低點", chand_k=3, atr_cap=True, vol_low=True),
     rule("Dist3", "V2cap + 三種出貨訊號全開", chand_k=3, atr_cap=True, climax=1.5, wick=True, vol_low=True),
+    rule("Lock50@2R", "V2 + 到過 2R 後鎖住最大獲利的 50%(盤中觸價出)", chand_k=3, lock=[(2, 0.5)]),
+    rule("Lock2R/4R", "V2 + 到 2R 鎖 50%、到 4R 鎖 70%", chand_k=3, lock=[(2, 0.5), (4, 0.7)]),
+    rule("Lock3R/5R", "V2 + 到 3R 鎖 50%、到 5R 鎖 70%", chand_k=3, lock=[(3, 0.5), (5, 0.7)]),
+    rule("Lock1R", "V2 + 到 1R 保本、2R 鎖 50%、4R 鎖 70%", chand_k=3, lock=[(1, 0.0), (2, 0.5), (4, 0.7)]),
+    rule("LockP20", "V2 + 獲利到過 20% 鎖 50%、40% 鎖 70%", chand_k=3, lock_pct=[(20, 0.5), (40, 0.7)]),
+    rule("LockP30", "V2 + 獲利到過 30% 鎖 60%", chand_k=3, lock_pct=[(30, 0.6)]),
 ]
 
 
@@ -219,9 +229,14 @@ def replay(t, bars, rl):
         r = realized + left * gain(px)
         return dict(r=r, mfe=mfe, outcome=outcome, bars=i - i0 + 1, open=still_open)
 
+    lock_stop = None  # 鎖利移動停損(上一根收盤後算好,這一根盤中生效)
     for i in range(i0, len(bars)):
         ts, o, h, l, c, v = bars[i]
         fav, adv = (h, l) if long else (l, h)
+        # 0) 盤中:鎖利移動停損(跳空用開盤價)
+        if lock_stop is not None and ((long and l <= lock_stop) or (not long and h >= lock_stop)):
+            px = min(lock_stop, o) if long else max(lock_stop, o)
+            return done(px, "lock", i)
         # 1) 盤中:初始停損(跳空用開盤價)
         if (long and l <= stop) or (not long and h >= stop):
             px = min(stop, o) if long else max(stop, o)
@@ -242,6 +257,19 @@ def replay(t, bars, rl):
             ext_c = c
         if newhigh:
             ext_h = fav
+        if rl["lock"] or rl["lock_pct"]:
+            keep = None
+            for lv, k in rl["lock"]:
+                if mfe >= lv:
+                    keep = k
+            mfe_pct = mfe * R / entry * 100
+            for lv, k in rl["lock_pct"]:
+                if mfe_pct >= lv:
+                    keep = k if keep is None else max(keep, k)
+            if keep is not None:
+                ls = entry + sgn * keep * mfe * R
+                if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
+                    lock_stop = ls
         atr = atr_at(bars, i)
         avgv = st.mean(b[5] for b in bars[max(0, i - 24):i]) if i > 0 else 0
         if avgv > 0 and v >= 3 * avgv and (vol_bar is None or v > vol_bar[5]) and i > i0:

@@ -38,5 +38,7 @@ py dc_exit_bt.py --csv donchian.csv donchianv2.csv --out detail.csv   # 另存�
 | Wick | 創進場後新高、上影 ≥ 60% 全距 → 出 |
 | VolLow | 收盤跌破進場後爆量 K 的低點 → 出 |
 | Dist3 | 上面三種出貨訊號全開 |
+| Lock50@2R / Lock2R/4R / Lock3R/5R / Lock1R | 到幾 R 之後,移動停損鎖住最大獲利的幾成(盤中觸價出) |
+| LockP20 / LockP30 | 同上,門檻用獲利 %(例如獲利到過 30% 就鎖 60%) |
 
 要加新規則:在 `RULES` 加一行 `rule(...)`,參數說明在 `rule()` 的註解。
