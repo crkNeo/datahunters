@@ -153,11 +153,13 @@ type Store struct {
 	donchianBook   *microBook                   // 唐奇安長通道突破:1h 收盤破 168 根通道進、12 根通道 / 3×ATR 停損出 (donchian.go)
 	donchianV2Book *microBook                   // 唐奇安v2:同 v1,另加吊燈停利 3×ATR(進場後最高 / 最低收盤 ∓ 3×ATR)
 	donchianV3Book *microBook                   // 唐奇安v3:成交額前 30、336 根突破 + 通道寬度 < 2000 根中位數 + 48h 停損冷卻;24 根通道 + 吊燈 4×ATR
+	donchianV4Book *microBook                   // 唐奇安v4:v2 + 進場濾網(突破 K ≤ 2.2×ATR、前 24h ≤ 11%)+ 漸進鎖利
 	dcV3Hist       map[string][]exchange.Candle // 唐奇安v3 每個幣的長 1h 歷史(只在 ticker goroutine 用)
 	volBrkBook     *microBook                   // 波動突破:UTC 日開盤 + 0.5×前日振幅觸價做多、換日平倉 (volbrk.go)
 	dcEng, vbEng   *hourEngine                  // 上面兩本的每小時排程狀態
 	dcEng2         *hourEngine                  // 唐奇安v2 的每小時排程狀態
 	dcEng3         *hourEngine                  // 唐奇安v3 的每小時排程狀態
+	dcEng4         *hourEngine                  // 唐奇安v4 的每小時排程狀態
 	ptStore        *patternStore                // 型態掃描結果 + 排程(patterns.go,1H / 4H / 1D)
 	smcV2Books     []*microBook                 // 太陽(原訂單塊v2):SMC 訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星,三段止盈;1h/4h (orderblock.go)
 
@@ -307,8 +309,9 @@ func NewStore(coins []string) *Store {
 	s.donchianBook = s.newDonchianBook()
 	s.donchianV2Book = s.newDonchianV2Book()
 	s.donchianV3Book = s.newDonchianV3Book()
+	s.donchianV4Book = s.newDonchianV4Book()
 	s.volBrkBook = s.newVolBrkBook()
-	s.dcEng, s.vbEng, s.dcEng2, s.dcEng3 = &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}
+	s.dcEng, s.vbEng, s.dcEng2, s.dcEng3, s.dcEng4 = &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}
 	s.ptStore = newPatternStore()
 	s.newsBook = newNewsAlphaBook()
 	s.initNewsAlpha()
@@ -341,6 +344,7 @@ func NewStore(coins []string) *Store {
 		s.donchianBook.trades = db.loadTrades("donchian")
 		s.donchianV2Book.trades = db.loadTrades("donchianv2")
 		s.donchianV3Book.trades = db.loadTrades("donchianv3")
+		s.donchianV4Book.trades = db.loadTrades("donchianv4")
 		s.volBrkBook.trades = db.loadTrades("volbrk")
 		s.newsBook.trades = db.loadTrades("newsalpha")
 		s.news.events = db.loadRecentNews(naKeepEvents)

@@ -40,6 +40,15 @@ import (
 //	出場  24 根通道出場 + 吊燈停利 4 × ATR(24),先到先出(規則同 v2,只是參數不同)
 //	需要約 2340 根 1h K:每個幣開機時抓一次長歷史(每分鐘最多 8 個幣),之後每小時用共用的 1h K 快取接上。
 //
+// 唐奇安v4(donchianv4)= v2(168 根突破、3×ATR 初始停損、12 根通道 + 吊燈 3×ATR)再加:
+//
+//	進場濾網  ① 突破那根 K 的全距 ≤ 2.2 × 突破前的 ATR(24)(暴拉 / 暴跌那種大 K 不追)
+//	          ② 突破前 24 小時順向漲跌 ≤ 11%(做多看漲幅、做空看跌幅;已經噴過一段的不追)
+//	漸進鎖利  最大獲利(盤中最有利價)到過 2R → 停損移到最大獲利的 30%;到過 +15% → 40%;+30% → 60%;
+//	          +50% → 75%;+80% → 80%。停損只往有利方向移,盤中碰到就出(記 lock)。
+//	          重播時每根收盤後更新、下一根生效;盤中另由 20 秒即時價檢查(用目前最大獲利,立即生效)。
+//	規則來自 backtest/donchian_exit 的回測(11/04~11/14,403 筆實際單)。
+//
 // 實作:每小時收盤後處理一次(交易所新棒還沒生成的幣,下一分鐘再補)。持倉用 K 線從進場那根「重播」
 // 停損 / 通道出場 —— 結果只由 K 線決定,重複跑也一樣,停機期間該出場的開機後照樣補出場;
 // 新進場只看最新一根已收的 K,開機第一輪只管持倉、不進場。盤中另由 DonchianMarkTick 每 20 秒
@@ -53,6 +62,19 @@ const (
 	dcV3TopN      = 30   // v3 幣池:成交額前 30
 	dcV3Keep      = 2600 // v3 每個幣留幾根 1h 歷史
 	dcV3LoadPerMn = 8    // v3 每分鐘最多抓幾個幣的長歷史
+)
+
+const (
+	dcV4MaxBarATR = 2.2  // v4:突破 K 全距 ≤ 2.2 × ATR(24)
+	dcV4MaxRunPct = 11.0 // v4:突破前 24 根順向漲跌 ≤ 11%
+)
+
+// dcLockStep:最大獲利到過 at(R 或 %)之後,停損移到最大獲利的 keep。
+type dcLockStep struct{ at, keep float64 }
+
+var (
+	dcV4LockR   = []dcLockStep{{2, 0.3}}
+	dcV4LockPct = []dcLockStep{{15, 0.4}, {30, 0.6}, {50, 0.75}, {80, 0.8}}
 )
 
 const (
@@ -76,6 +98,12 @@ func (s *Store) newDonchianV2Book() *microBook {
 	return b
 }
 
+func (s *Store) newDonchianV4Book() *microBook {
+	b := s.newDonchianBook()
+	b.name = "donchianv4"
+	return b
+}
+
 func (s *Store) newDonchianV3Book() *microBook {
 	b := s.newDonchianBook()
 	b.name = "donchianv3"
@@ -93,13 +121,14 @@ func (s *Store) dcV3Universe() []string {
 }
 
 // dcRunner 是一本唐奇安書 + 它的每小時排程與出場參數:exitN = 出場通道根數;chandK = 吊燈停利幾倍 ATR(0 = 沒有);
-// v3 = 用 v3 的進場(336 根 + 通道寬度 + 48h 停損冷卻)和長歷史。
+// v3 = 用 v3 的進場(336 根 + 通道寬度 + 48h 停損冷卻)和長歷史;v4 = v2 + 進場濾網 + 漸進鎖利。
 type dcRunner struct {
 	b      *microBook
 	eng    *hourEngine
 	exitN  int
 	chandK float64
 	v3     bool
+	v4     bool
 }
 
 func (s *Store) dcRunners() []dcRunner {
@@ -112,6 +141,9 @@ func (s *Store) dcRunners() []dcRunner {
 	}
 	if s.donchianV3Book != nil && s.dcEng3 != nil {
 		out = append(out, dcRunner{b: s.donchianV3Book, eng: s.dcEng3, exitN: dcV3ExitN, chandK: dcV3ChandK, v3: true})
+	}
+	if s.donchianV4Book != nil && s.dcEng4 != nil {
+		out = append(out, dcRunner{b: s.donchianV4Book, eng: s.dcEng4, exitN: dcExitN, chandK: dcATRK, v4: true})
 	}
 	return out
 }
@@ -390,8 +422,11 @@ func (s *Store) dcTick(r dcRunner) {
 				open.ChandExit = dcChandLevelK(open, closed, r.chandK)
 			}
 			gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
-			px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK)
+			px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK, r.v4)
 			dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
+			if r.v4 {
+				open.LockExit = dcLockLevel(open, open.MaxGain)
+			}
 			if hit {
 				closeTrade(open, px, outcome, at)
 				exits = append(exits, open)
@@ -404,6 +439,8 @@ func (s *Store) dcTick(r dcRunner) {
 			sigFn := dcSignal
 			if r.v3 {
 				sigFn = dcSignalV3
+			} else if r.v4 {
+				sigFn = dcSignalV4
 			}
 			sig := closed[len(closed)-1]
 			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) {
@@ -507,13 +544,66 @@ func dcExitScanV(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Can
 	if chand {
 		k = dcATRK
 	}
-	return dcExitScanP(tr, closed, forming, dcExitN, k)
+	return dcExitScanP(tr, closed, forming, dcExitN, k, false)
+}
+
+// dcSignalV4:v2 的 168 根突破,再加兩個濾網 —— 突破 K 全距 ≤ 2.2 × 突破前 ATR(24),
+// 突破前 24 根順向漲跌 ≤ 11%。
+func dcSignalV4(closed []exchange.Candle, forming *exchange.Candle) (dir string, entry, sl float64, ok bool) {
+	dir, entry, sl, ok = dcSignal(closed, forming)
+	if !ok {
+		return
+	}
+	n := len(closed)
+	sig := closed[n-1]
+	atr := dcATR(closed[:n-1])
+	if n < 26 || atr <= 0 || sig.High-sig.Low > dcV4MaxBarATR*atr {
+		return "", 0, 0, false
+	}
+	base := closed[n-25].Close
+	if base <= 0 || pnl(dir, base, sig.Close) > dcV4MaxRunPct {
+		return "", 0, 0, false
+	}
+	return
+}
+
+// dcLockKeep:最大獲利 mfePct(%)到過哪一階,回該保留的比例(ok=false 表示還沒到第一階)。
+func dcLockKeep(tr *PaperTrade, mfePct float64) (keep float64, ok bool) {
+	rPct := math.Abs(tr.Entry-tr.SL) / tr.Entry * 100
+	for _, st := range dcV4LockR {
+		if rPct > 0 && mfePct/rPct >= st.at {
+			keep, ok = max(keep, st.keep), true
+		}
+	}
+	for _, st := range dcV4LockPct {
+		if mfePct >= st.at {
+			keep, ok = max(keep, st.keep), true
+		}
+	}
+	return
+}
+
+// dcLockLevel:最大獲利 mfePct 對應的鎖利停損價(0 = 還沒啟動)。
+func dcLockLevel(tr *PaperTrade, mfePct float64) float64 {
+	if tr.Entry <= 0 || tr.SL <= 0 || mfePct <= 0 {
+		return 0
+	}
+	keep, ok := dcLockKeep(tr, mfePct)
+	if !ok {
+		return 0
+	}
+	if tr.Dir == "long" {
+		return roundPx(tr.Entry * (1 + keep*mfePct/100))
+	}
+	return roundPx(tr.Entry * (1 - keep*mfePct/100))
 }
 
 // dcExitScanP:出場通道用前 exitN 根;chandK > 0 時加吊燈停利(進場後最高 / 最低收盤 ∓ chandK × 那根的 ATR(24))。
-func dcExitScanP(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Candle, exitN int, chandK float64) (px float64, outcome string, at time.Time, upto int, hit bool) {
+// lock = true 時(唐奇安v4)加漸進鎖利:每根收盤後依進場後最有利的盤中價更新鎖利停損,下一根盤中觸價就出(跳空用開盤價)。
+func dcExitScanP(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Candle, exitN int, chandK float64, lock bool) (px float64, outcome string, at time.Time, upto int, hit bool) {
 	from := tr.OpenTime.UnixMilli()
 	long := tr.Dir == "long"
+	lockStop, mfe := 0.0, 0.0
 	ext := 0.0 // 進場後(含這根)的最高收盤(多)/ 最低收盤(空)
 	seen := false
 	nextOpen := func(i int, c exchange.Candle) float64 {
@@ -529,6 +619,14 @@ func dcExitScanP(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Can
 			continue
 		}
 		end := time.UnixMilli(c.Ts + dcBarMs).UTC()
+		if lockStop > 0 {
+			if long && c.Low <= lockStop {
+				return min(lockStop, c.Open), "lock", end, i + 1, true
+			}
+			if !long && c.High >= lockStop {
+				return max(lockStop, c.Open), "lock", end, i + 1, true
+			}
+		}
 		if tr.SL > 0 {
 			if long && c.Low <= tr.SL {
 				return min(tr.SL, c.Open), "sl", end, i + 1, true
@@ -539,6 +637,16 @@ func dcExitScanP(tr *PaperTrade, closed []exchange.Candle, forming *exchange.Can
 		}
 		if !seen || (long && c.Close > ext) || (!long && c.Close < ext) {
 			ext, seen = c.Close, true
+		}
+		if lock {
+			fav := c.High
+			if !long {
+				fav = c.Low
+			}
+			mfe = max(mfe, pnl(tr.Dir, tr.Entry, fav))
+			if lv := dcLockLevel(tr, mfe); lv > 0 && (lockStop == 0 || (long && lv > lockStop) || (!long && lv < lockStop)) {
+				lockStop = lv
+			}
 		}
 		if i >= exitN {
 			lo, hi := closed[i-exitN].Low, closed[i-exitN].High
@@ -637,16 +745,17 @@ func (s *Store) DonchianMarkTick() {
 		if px == nil {
 			px = s.livePrices()
 		}
-		s.dcMarkBook(r.b, s.fillOpenPx(px, r.b), now)
+		s.dcMarkBook(r.b, s.fillOpenPx(px, r.b), now, r.v4)
 	}
 }
 
 // dcMark 用這組即時價(幣 → 價)更新唐奇安(v1)的持倉、出停損。
 func (s *Store) dcMark(px map[string]float64, now time.Time) {
-	s.dcMarkBook(s.donchianBook, px, now)
+	s.dcMarkBook(s.donchianBook, px, now, false)
 }
 
-func (s *Store) dcMarkBook(b *microBook, px map[string]float64, now time.Time) {
+// dcMarkBook:lock = true(v4)時,用目前的最大獲利算鎖利停損,即時價碰到就以鎖利價出場。
+func (s *Store) dcMarkBook(b *microBook, px map[string]float64, now time.Time, lock bool) {
 	if len(px) == 0 {
 		return
 	}
@@ -664,6 +773,16 @@ func (s *Store) dcMarkBook(b *microBook, px map[string]float64, now time.Time) {
 		}
 		if r2(g) < tr.MaxDD {
 			tr.MaxDD = r2(g)
+		}
+		if lock {
+			if lv := dcLockLevel(tr, tr.MaxGain); lv > 0 {
+				tr.LockExit = lv
+				if (tr.Dir == "long" && p <= lv) || (tr.Dir == "short" && p >= lv) {
+					closeTrade(tr, lv, "lock", now)
+					closed = append(closed, tr)
+					continue
+				}
+			}
 		}
 		if tr.SL > 0 && ((tr.Dir == "long" && p <= tr.SL) || (tr.Dir == "short" && p >= tr.SL)) {
 			closeTrade(tr, tr.SL, "sl", now)

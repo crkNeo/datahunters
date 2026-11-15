@@ -38,6 +38,7 @@ var pushTopicDefs = []pushTopicDef{
 	{"strat:donchian", "唐奇安", "strategy", "donchian"},
 	{"strat:donchianv2", "唐奇安v2", "strategy", "donchianv2"},
 	{"strat:donchianv3", "唐奇安v3", "strategy", "donchianv3"},
+	{"strat:donchianv4", "唐奇安v4", "strategy", "donchianv4"},
 	{"strat:volbrk", "波動突破", "strategy", "volbrk"},
 	{"strat:newsalpha", "消息雷達模擬單", "strategy", "newsalpha"},
 	{"strat:orderblockv2", "太陽 1H", "strategy", "orderblockv2"},

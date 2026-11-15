@@ -161,6 +161,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
 	mux.HandleFunc("/api/donchianv2", s.gateTab("donchianv2", s.handleDonchianV2))       // 唐奇安v2(+ 吊燈停利)
 	mux.HandleFunc("/api/donchianv3", s.gateTab("donchianv3", s.handleDonchianV3))       // 唐奇安v3(前 30、336 根 + 通道寬度)
+	mux.HandleFunc("/api/donchianv4", s.gateTab("donchianv4", s.handleDonchianV4))       // 唐奇安v4(v2 + 進場濾網 + 漸進鎖利)
 	mux.HandleFunc("/api/donchian", s.gateTab("donchian", s.handleDonchian))             // 唐奇安長通道突破
 	mux.HandleFunc("/api/volbrk", s.gateTab("volbrk", s.handleVolBrk))                   // 波動突破
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 太陽(原訂單塊v2,SMC 訂單塊 + 斐波 0-0.236,1h/4h)
@@ -580,7 +581,7 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch {
-	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "donchianv2", book == "donchianv3", book == "volbrk", cache.IsPulsarBook(book):
+	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "donchianv2", book == "donchianv3", book == "donchianv4", book == "volbrk", cache.IsPulsarBook(book):
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -807,6 +808,11 @@ func (s *Server) handleDonchianV2(w http.ResponseWriter, r *http.Request) {
 // handleDonchianV3 serves 唐奇安v3(成交額前 30、336 根突破 + 通道寬度、24 根通道 + 吊燈 4×ATR).
 func (s *Server) handleDonchianV3(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.DonchianV3State())
+}
+
+// handleDonchianV4 serves 唐奇安v4(v2 + 進場濾網:突破 K ≤ 2.2×ATR、前 24h ≤ 11%;漸進鎖利).
+func (s *Server) handleDonchianV4(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.DonchianV4State())
 }
 
 // handleVolBrk serves the 波動突破 (UTC 日內,觸上緣做多、換日平倉) tracker:今天待觸發的計畫 + 持倉 + 已結束。

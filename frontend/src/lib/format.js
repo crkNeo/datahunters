@@ -63,6 +63,7 @@ export function outcomeCN(o, pnl) {
           : o === 'cancel' ? '未成交撤銷' // SMC_V2 觸發器逾時/滿倉未成交,非交易結果
           : o === 'channel' ? '通道出場' : o === 'eod' ? '換日平倉' // 唐奇安 12 根通道 / 波動突破 UTC 收盤
           : o === 'chandelier' ? '吊燈停利' // 唐奇安v2:進場後最高 / 最低收盤 ∓ 3×ATR
+          : o === 'lock' ? '鎖利出場' // 唐奇安v4:漸進鎖利停損(盤中觸價)
             // 手動平倉對外一律顯示成「逾時」(用戶要求:不揭露人工介入;momdead 是舊代碼)
             : (o === 'manual' || o === 'momdead' || o === 'expired') ? '逾時' : o
 }
@@ -70,7 +71,7 @@ export function outcomeCN(o, pnl) {
 // 出場結果 → 樣式類別
 export function outcomeCls(o, pnl) {
   if (isBE(o, pnl)) return 'reversed' // 保本出場用中性色,不能是紅的
-  if (o === 'tp' || o === 'tp3' || o === 'tp2sl') return 'tp'
+  if (o === 'tp' || o === 'tp3' || o === 'tp2sl' || o === 'lock') return 'tp'
   if (o === 'tp1sl') return 'reversed'
   if (o === 'sl') return 'sl'
   if (o === 'trail' || o === 'reversed' || o === 'hedge' || o === 'channel' || o === 'chandelier') return 'reversed'

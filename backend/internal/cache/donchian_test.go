@@ -437,10 +437,10 @@ func TestDonchianV3Exit(t *testing.T) {
 	if !(11.7 < 13-3*atr && 11.7 > 13-4*atr) {
 		t.Fatalf("test setup: atr %v", atr)
 	}
-	if _, outcome, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK); !hit || outcome != "chandelier" {
+	if _, outcome, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, false); !hit || outcome != "chandelier" {
 		t.Fatal("3×ATR should exit")
 	}
-	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcV3ExitN, dcV3ChandK); hit {
+	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcV3ExitN, dcV3ChandK, false); hit {
 		t.Fatal("4×ATR should hold")
 	}
 	// 24 根通道:跌破 12 根低點但沒破 24 根低點 → v3 不出
@@ -493,3 +493,82 @@ func TestDonchianV3Tick(t *testing.T) {
 }
 
 func tptr(t time.Time) *time.Time { return &t }
+
+func TestDonchianV4Filter(t *testing.T) {
+	// 平盤 10 附近(全距 0.2,ATR ≈ 0.2),最後一根收盤突破 168 根高點
+	mk := func(sigHigh, sigLow, sigClose, base float64) []exchange.Candle {
+		cs := flatBars(0, 200)
+		cs[len(cs)-25].Close = base // 突破那根往前 24 根的收盤(漲跌幅基準)
+		s := &cs[len(cs)-1]
+		s.High, s.Low, s.Close = sigHigh, sigLow, sigClose
+		return cs
+	}
+	// 正常大小的突破:全距 0.4 ≈ 2×ATR → 進
+	if dir, _, _, ok := dcSignalV4(mk(10.35, 9.95, 10.3, 10), nil); !ok || dir != "long" {
+		t.Fatal("normal breakout should pass")
+	}
+	// 一根暴拉 K:全距 1.0 ≈ 5×ATR → v2 會進、v4 不進
+	if _, _, _, ok := dcSignal(mk(11, 10, 10.9, 10), nil); !ok {
+		t.Fatal("test setup: v2 breakout")
+	}
+	if _, _, _, ok := dcSignalV4(mk(11, 10, 10.9, 10), nil); ok {
+		t.Fatal("bar range > 2.2×ATR should be filtered")
+	}
+	// 突破前 24 根已經漲了 15%(基準 9 → 10.3)→ 不進
+	if _, _, _, ok := dcSignalV4(mk(10.35, 9.95, 10.3, 9), nil); ok {
+		t.Fatal("prior 24h run > 11% should be filtered")
+	}
+}
+
+func TestDonchianLockLevel(t *testing.T) {
+	tr := &PaperTrade{Dir: "long", Entry: 100, SL: 95} // R = 5%
+	cases := []struct{ mfe, want float64 }{
+		{9, 0},     // 還不到 2R(10%)
+		{10, 103},  // 2R → 鎖 30% → +3%
+		{20, 108},  // +15% → 鎖 40% → +8%
+		{40, 124},  // +30% → 60%
+		{60, 145},  // +50% → 75%
+		{100, 180}, // +80% → 80%
+	}
+	for _, c := range cases {
+		if got := dcLockLevel(tr, c.mfe); math.Abs(got-c.want) > 1e-9 {
+			t.Fatalf("long mfe %v%%: lock %v, want %v", c.mfe, got, c.want)
+		}
+	}
+	sh := &PaperTrade{Dir: "short", Entry: 100, SL: 110} // R = 10%:2R = 20%,但 +15% 那階先到
+	if got := dcLockLevel(sh, 16); math.Abs(got-93.6) > 1e-9 {
+		t.Fatalf("short mfe 16%%: lock %v, want 93.6", got)
+	}
+}
+
+func TestDonchianV4LockExit(t *testing.T) {
+	tr := &PaperTrade{Dir: "long", Entry: 10, SL: 9.5, Status: "open", OpenTime: time.UnixMilli(20 * dcBarMs)}
+	cs := flatBars(0, 40)
+	for i := 20; i < 40; i++ {
+		cs[i].Open, cs[i].High, cs[i].Low, cs[i].Close = 10.5, 10.6, 10.4, 10.5
+	}
+	cs[25].High = 12.2 // 最高 +22% → 鎖 40% → 停損 10.88(下一根開始生效)
+	cs[25].Low = 10.4
+	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, false); hit {
+		t.Fatal("without lock: stays open")
+	}
+	px, outcome, at, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, true)
+	if !hit || outcome != "lock" || at.UnixMilli() != cs[26].Ts+dcBarMs || math.Abs(px-10.5) > 1e-9 {
+		// 第 26 根開盤 10.5 已經在鎖利價 10.88 之下 → 用開盤價成交
+		t.Fatalf("lock exit: px=%v outcome=%v at=%v hit=%v", px, outcome, at, hit)
+	}
+	// 盤中:即時價跌破鎖利價 → 以鎖利價出場
+	s, _ := dcStore(t, "AAA", func([]exchange.Candle) {})
+	s.donchianV4Book = s.newDonchianV4Book()
+	b := s.donchianV4Book
+	live := &PaperTrade{ID: "x", Coin: "AAA", Dir: "long", Entry: 10, SL: 9.5, Status: "open", OpenTime: time.Now()}
+	b.trades = []*PaperTrade{live}
+	s.dcMarkBook(b, map[string]float64{"AAA": 12}, time.Now(), true) // +20%
+	if live.Status != "open" || live.LockExit != 10.8 {
+		t.Fatalf("lock level after +20%%: %+v", live)
+	}
+	s.dcMarkBook(b, map[string]float64{"AAA": 10.7}, time.Now(), true)
+	if live.Status != "closed" || live.Outcome != "lock" || live.Cur != 10.8 {
+		t.Fatalf("live lock exit: %+v", live)
+	}
+}
