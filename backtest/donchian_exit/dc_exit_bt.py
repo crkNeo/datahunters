@@ -165,9 +165,11 @@ def rule(name, desc, **kw):
     lock        [(到幾 R, 保留幾成)]:最大有利到過這麼多 R 之後,移動停損 = 進場 + 保留比例 × 最大有利(盤中價),
                 盤中碰到就出(像掛停損單);每根收盤後更新,下一根開始生效
     lock_pct    [(到幾 %, 保留幾成)]:同上,門檻用獲利 %(不是 R)
+    floor       [(到幾 %, 底線幾 %)]:獲利到過這麼多 % 之後,移動停損移到固定的獲利底線(不跟著最高點跑),
+                盤中碰到就出;可以多段,例如 [(40, 25), (80, 50)]
     """
     d = dict(name=name, desc=desc, chan=12, chand_k=0.0, atr_cap=False, use_high=False,
-             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[])
+             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[])
     d.update(kw)
     return d
 
@@ -257,6 +259,13 @@ def replay(t, bars, rl):
             ext_c = c
         if newhigh:
             ext_h = fav
+        if rl["floor"]:
+            mfe_pct = mfe * R / entry * 100
+            for lv, fl in rl["floor"]:
+                if mfe_pct >= lv:
+                    ls = entry * (1 + sgn * fl / 100)
+                    if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
+                        lock_stop = ls
         if rl["lock"] or rl["lock_pct"]:
             keep = None
             for lv, k in rl["lock"]:
