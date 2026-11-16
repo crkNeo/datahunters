@@ -1158,6 +1158,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.donchianV4Book.mu.Lock()
 		s.donchianV4Book.trades = keepIf(s.donchianV4Book.trades, closedOnly)
 		s.donchianV4Book.mu.Unlock()
+	case "donchianv5":
+		s.donchianV5Book.mu.Lock()
+		s.donchianV5Book.trades = keepIf(s.donchianV5Book.trades, closedOnly)
+		s.donchianV5Book.mu.Unlock()
 	case "volbrk":
 		s.volBrkBook.mu.Lock()
 		s.volBrkBook.trades = keepIf(s.volBrkBook.trades, closedOnly)
@@ -1236,5 +1240,6 @@ func (s *Store) DonchianState() PaperState   { return s.microState(s.donchianBoo
 func (s *Store) DonchianV2State() PaperState { return s.microState(s.donchianV2Book) }
 func (s *Store) DonchianV3State() PaperState { return s.microState(s.donchianV3Book) }
 func (s *Store) DonchianV4State() PaperState { return s.microState(s.donchianV4Book) }
+func (s *Store) DonchianV5State() PaperState { return s.microState(s.donchianV5Book) }
 func (s *Store) VolBrkState() PaperState     { return s.microState(s.volBrkBook) }
 func (s *Store) SMCV2State() PaperState      { return s.microState(s.smcV2Books...) }

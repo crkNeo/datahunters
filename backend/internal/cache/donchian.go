@@ -49,6 +49,13 @@ import (
 //	          重播時每根收盤後更新、下一根生效;盤中另由 20 秒即時價檢查(用目前最大獲利,立即生效)。
 //	規則來自 backtest/donchian_exit 的回測(11/04~11/14,403 筆實際單)。
 //
+// 唐奇安v5(donchianv5)= v2 的 168 根突破,進場濾網改成「二選一」,出場同 v4(漸進鎖利):
+//
+//	進場濾網  ① 突破 K 全距 ≤ 2.5 × 突破前 ATR(24)(緩漲型的突破)
+//	          或 ② 突破前 72 根順向漲跌 ≥ 15%(已經在走的強勢幣再突破 —— 回測裡大單幾乎都來自這群)
+//	          兩個都不符合(之前沒怎麼動、突然一根暴拉)才不進,這種最常是拉高出貨
+//	回測(11/04~11/14,403 筆):12 筆最高到過 +50% 的大單全部會進,總 +160R、回落 −6R(v2 +90R / −57R)
+//
 // 實作:每小時收盤後處理一次(交易所新棒還沒生成的幣,下一分鐘再補)。持倉用 K 線從進場那根「重播」
 // 停損 / 通道出場 —— 結果只由 K 線決定,重複跑也一樣,停機期間該出場的開機後照樣補出場;
 // 新進場只看最新一根已收的 K,開機第一輪只管持倉、不進場。盤中另由 DonchianMarkTick 每 20 秒
@@ -67,6 +74,8 @@ const (
 const (
 	dcV4MaxBarATR = 2.2  // v4:突破 K 全距 ≤ 2.2 × ATR(24)
 	dcV4MaxRunPct = 11.0 // v4:突破前 24 根順向漲跌 ≤ 11%
+	dcV5MaxBarATR = 2.5  // v5:突破 K 全距 ≤ 2.5 × ATR(24)……
+	dcV5MinRun72  = 15.0 // ……或突破前 72 根順向漲跌 ≥ 15%
 )
 
 // dcLockStep:最大獲利到過 at(R 或 %)之後,停損移到最大獲利的 keep。
@@ -95,6 +104,12 @@ func (s *Store) newDonchianBook() *microBook {
 func (s *Store) newDonchianV2Book() *microBook {
 	b := s.newDonchianBook()
 	b.name = "donchianv2"
+	return b
+}
+
+func (s *Store) newDonchianV5Book() *microBook {
+	b := s.newDonchianBook()
+	b.name = "donchianv5"
 	return b
 }
 
@@ -128,7 +143,9 @@ type dcRunner struct {
 	exitN  int
 	chandK float64
 	v3     bool
-	v4     bool
+	v4     bool // v4 進場濾網
+	v5     bool // v5 進場濾網
+	lock   bool // 漸進鎖利(v4 / v5)
 }
 
 func (s *Store) dcRunners() []dcRunner {
@@ -143,7 +160,10 @@ func (s *Store) dcRunners() []dcRunner {
 		out = append(out, dcRunner{b: s.donchianV3Book, eng: s.dcEng3, exitN: dcV3ExitN, chandK: dcV3ChandK, v3: true})
 	}
 	if s.donchianV4Book != nil && s.dcEng4 != nil {
-		out = append(out, dcRunner{b: s.donchianV4Book, eng: s.dcEng4, exitN: dcExitN, chandK: dcATRK, v4: true})
+		out = append(out, dcRunner{b: s.donchianV4Book, eng: s.dcEng4, exitN: dcExitN, chandK: dcATRK, v4: true, lock: true})
+	}
+	if s.donchianV5Book != nil && s.dcEng5 != nil {
+		out = append(out, dcRunner{b: s.donchianV5Book, eng: s.dcEng5, exitN: dcExitN, chandK: dcATRK, v5: true, lock: true})
 	}
 	return out
 }
@@ -422,9 +442,9 @@ func (s *Store) dcTick(r dcRunner) {
 				open.ChandExit = dcChandLevelK(open, closed, r.chandK)
 			}
 			gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
-			px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK, r.v4)
+			px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK, r.lock)
 			dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
-			if r.v4 {
+			if r.lock {
 				open.LockExit = dcLockLevel(open, open.MaxGain)
 			}
 			if hit {
@@ -441,6 +461,8 @@ func (s *Store) dcTick(r dcRunner) {
 				sigFn = dcSignalV3
 			} else if r.v4 {
 				sigFn = dcSignalV4
+			} else if r.v5 {
+				sigFn = dcSignalV5
 			}
 			sig := closed[len(closed)-1]
 			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) {
@@ -565,6 +587,26 @@ func dcSignalV4(closed []exchange.Candle, forming *exchange.Candle) (dir string,
 		return "", 0, 0, false
 	}
 	return
+}
+
+// dcSignalV5:v2 的 168 根突破,再要求「突破 K 全距 ≤ 2.5 × 突破前 ATR(24)」或「突破前 72 根順向漲跌 ≥ 15%」。
+func dcSignalV5(closed []exchange.Candle, forming *exchange.Candle) (dir string, entry, sl float64, ok bool) {
+	dir, entry, sl, ok = dcSignal(closed, forming)
+	if !ok {
+		return
+	}
+	n := len(closed)
+	if n < 74 {
+		return "", 0, 0, false
+	}
+	sig := closed[n-1]
+	if atr := dcATR(closed[:n-1]); atr > 0 && sig.High-sig.Low <= dcV5MaxBarATR*atr {
+		return
+	}
+	if base := closed[n-73].Close; base > 0 && pnl(dir, base, sig.Close) >= dcV5MinRun72 {
+		return
+	}
+	return "", 0, 0, false
 }
 
 // dcLockKeep:最大獲利 mfePct(%)到過哪一階,回該保留的比例(ok=false 表示還沒到第一階)。
@@ -745,7 +787,7 @@ func (s *Store) DonchianMarkTick() {
 		if px == nil {
 			px = s.livePrices()
 		}
-		s.dcMarkBook(r.b, s.fillOpenPx(px, r.b), now, r.v4)
+		s.dcMarkBook(r.b, s.fillOpenPx(px, r.b), now, r.lock)
 	}
 }
 

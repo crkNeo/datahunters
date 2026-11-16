@@ -572,3 +572,51 @@ func TestDonchianV4LockExit(t *testing.T) {
 		t.Fatalf("live lock exit: %+v", live)
 	}
 }
+
+func TestDonchianV5Filter(t *testing.T) {
+	// 平盤 10(ATR ≈ 0.2),最後一根收盤突破 168 根高點
+	mk := func(sigHigh, sigLow, sigClose, base72 float64) []exchange.Candle {
+		cs := flatBars(0, 200)
+		cs[len(cs)-73].Close = base72 // 突破那根往前 72 根的收盤(漲跌幅基準)
+		s := &cs[len(cs)-1]
+		s.High, s.Low, s.Close = sigHigh, sigLow, sigClose
+		return cs
+	}
+	// ① 緩漲型:突破 K 小(≈2×ATR)→ 進(72h 漲幅多少都沒關係)
+	if _, _, _, ok := dcSignalV5(mk(10.35, 9.95, 10.3, 10), nil); !ok {
+		t.Fatal("small breakout bar should pass")
+	}
+	// 暴拉 K(≈5×ATR)、之前 72h 沒怎麼動 → 不進(v2 會進)
+	if _, _, _, ok := dcSignal(mk(11, 10, 10.9, 10), nil); !ok {
+		t.Fatal("test setup: v2 breakout")
+	}
+	if _, _, _, ok := dcSignalV5(mk(11, 10, 10.9, 10), nil); ok {
+		t.Fatal("big bar without a prior run should be filtered")
+	}
+	// ② 暴拉 K,但 72h 前收盤 9 → 現在 10.9(+21%)= 已經在走的強勢幣 → 進
+	if _, _, _, ok := dcSignalV5(mk(11, 10, 10.9, 9), nil); !ok {
+		t.Fatal("big bar after a ≥15% 72h run should pass")
+	}
+}
+
+func TestDonchianV5Tick(t *testing.T) {
+	s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		sig := &cs[len(cs)-2]
+		sig.High, sig.Close = 10.35, 10.3 // 突破 168 根高點 10.1,突破 K 小
+		cs[len(cs)-1].Open = 10.32
+	})
+	s.donchianV5Book = s.newDonchianV5Book()
+	s.dcEng5 = &hourEngine{seeded: true}
+	s.dcEng.seeded = true
+	s.DonchianTick()
+	if tr := s.donchianV5Book.trades; len(tr) != 1 || tr[0].ID != fmt.Sprintf("donchianv5|AAA|%d", cs[len(cs)-1].Ts) || tr[0].Entry != 10.32 {
+		t.Fatalf("v5 should enter: %+v", tr)
+	}
+	// 盤中:漲到 +20% 後跌破鎖利價(+8%)→ 鎖利出場
+	tr := s.donchianV5Book.trades[0]
+	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.2}, time.Now(), true)
+	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.07}, time.Now(), true)
+	if tr.Status != "closed" || tr.Outcome != "lock" {
+		t.Fatalf("v5 lock exit: %+v", tr)
+	}
+}
