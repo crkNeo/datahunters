@@ -155,6 +155,7 @@ type Store struct {
 	donchianV3Book *microBook                   // 唐奇安v3:成交額前 30、336 根突破 + 通道寬度 < 2000 根中位數 + 48h 停損冷卻;24 根通道 + 吊燈 4×ATR
 	donchianV4Book *microBook                   // 唐奇安v4:v2 + 進場濾網(突破 K ≤ 2.2×ATR、前 24h ≤ 11%)+ 漸進鎖利
 	donchianV5Book *microBook                   // 唐奇安v5:v2 + 進場二選一(突破 K ≤ 2.5×ATR 或前 72h ≥ 15%)+ 漸進鎖利
+	donchianV6Book *microBook                   // 唐奇安v6:v2 進場 + 停損上限 10% + v6 鎖利(到 +10% 鎖 +5.5% 起)
 	dcV3Hist       map[string][]exchange.Candle // 唐奇安v3 每個幣的長 1h 歷史(只在 ticker goroutine 用)
 	volBrkBook     *microBook                   // 波動突破:UTC 日開盤 + 0.5×前日振幅觸價做多、換日平倉 (volbrk.go)
 	dcEng, vbEng   *hourEngine                  // 上面兩本的每小時排程狀態
@@ -162,6 +163,7 @@ type Store struct {
 	dcEng3         *hourEngine                  // 唐奇安v3 的每小時排程狀態
 	dcEng4         *hourEngine                  // 唐奇安v4 的每小時排程狀態
 	dcEng5         *hourEngine                  // 唐奇安v5 的每小時排程狀態
+	dcEng6         *hourEngine                  // 唐奇安v6 的每小時排程狀態
 	ptStore        *patternStore                // 型態掃描結果 + 排程(patterns.go,1H / 4H / 1D)
 	smcV2Books     []*microBook                 // 太陽(原訂單塊v2):SMC 訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星,三段止盈;1h/4h (orderblock.go)
 
@@ -313,8 +315,9 @@ func NewStore(coins []string) *Store {
 	s.donchianV3Book = s.newDonchianV3Book()
 	s.donchianV4Book = s.newDonchianV4Book()
 	s.donchianV5Book = s.newDonchianV5Book()
+	s.donchianV6Book = s.newDonchianV6Book()
 	s.volBrkBook = s.newVolBrkBook()
-	s.dcEng, s.vbEng, s.dcEng2, s.dcEng3, s.dcEng4, s.dcEng5 = &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}
+	s.dcEng, s.vbEng, s.dcEng2, s.dcEng3, s.dcEng4, s.dcEng5, s.dcEng6 = &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}, &hourEngine{}
 	s.ptStore = newPatternStore()
 	s.newsBook = newNewsAlphaBook()
 	s.initNewsAlpha()
@@ -349,6 +352,7 @@ func NewStore(coins []string) *Store {
 		s.donchianV3Book.trades = db.loadTrades("donchianv3")
 		s.donchianV4Book.trades = db.loadTrades("donchianv4")
 		s.donchianV5Book.trades = db.loadTrades("donchianv5")
+		s.donchianV6Book.trades = db.loadTrades("donchianv6")
 		s.volBrkBook.trades = db.loadTrades("volbrk")
 		s.newsBook.trades = db.loadTrades("newsalpha")
 		s.news.events = db.loadRecentNews(naKeepEvents)

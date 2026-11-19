@@ -27,6 +27,7 @@ var stratTabKey = [][2]string{
 	{"donchianv3", "donchianv3"},
 	{"donchianv4", "donchianv4"},
 	{"donchianv5", "donchianv5"},
+	{"donchianv6", "donchianv6"},
 	{"volbrk", "volbrk"},
 	{"newsalpha", "newsalpha"},
 	{"orderblockv2", "orderblockv2"},

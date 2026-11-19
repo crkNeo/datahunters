@@ -437,10 +437,10 @@ func TestDonchianV3Exit(t *testing.T) {
 	if !(11.7 < 13-3*atr && 11.7 > 13-4*atr) {
 		t.Fatalf("test setup: atr %v", atr)
 	}
-	if _, outcome, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, false); !hit || outcome != "chandelier" {
+	if _, outcome, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, nil); !hit || outcome != "chandelier" {
 		t.Fatal("3×ATR should exit")
 	}
-	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcV3ExitN, dcV3ChandK, false); hit {
+	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcV3ExitN, dcV3ChandK, nil); hit {
 		t.Fatal("4×ATR should hold")
 	}
 	// 24 根通道:跌破 12 根低點但沒破 24 根低點 → v3 不出
@@ -549,10 +549,10 @@ func TestDonchianV4LockExit(t *testing.T) {
 	}
 	cs[25].High = 12.2 // 最高 +22% → 鎖 40% → 停損 10.88(下一根開始生效)
 	cs[25].Low = 10.4
-	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, false); hit {
+	if _, _, _, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, nil); hit {
 		t.Fatal("without lock: stays open")
 	}
-	px, outcome, at, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, true)
+	px, outcome, at, _, hit := dcExitScanP(tr, cs, nil, dcExitN, dcATRK, dcV4Lock)
 	if !hit || outcome != "lock" || at.UnixMilli() != cs[26].Ts+dcBarMs || math.Abs(px-10.5) > 1e-9 {
 		// 第 26 根開盤 10.5 已經在鎖利價 10.88 之下 → 用開盤價成交
 		t.Fatalf("lock exit: px=%v outcome=%v at=%v hit=%v", px, outcome, at, hit)
@@ -563,11 +563,11 @@ func TestDonchianV4LockExit(t *testing.T) {
 	b := s.donchianV4Book
 	live := &PaperTrade{ID: "x", Coin: "AAA", Dir: "long", Entry: 10, SL: 9.5, Status: "open", OpenTime: time.Now()}
 	b.trades = []*PaperTrade{live}
-	s.dcMarkBook(b, map[string]float64{"AAA": 12}, time.Now(), true) // +20%
+	s.dcMarkBook(b, map[string]float64{"AAA": 12}, time.Now(), dcV4Lock) // +20%
 	if live.Status != "open" || live.LockExit != 10.8 {
 		t.Fatalf("lock level after +20%%: %+v", live)
 	}
-	s.dcMarkBook(b, map[string]float64{"AAA": 10.7}, time.Now(), true)
+	s.dcMarkBook(b, map[string]float64{"AAA": 10.7}, time.Now(), dcV4Lock)
 	if live.Status != "closed" || live.Outcome != "lock" || live.Cur != 10.8 {
 		t.Fatalf("live lock exit: %+v", live)
 	}
@@ -614,8 +614,8 @@ func TestDonchianV5Tick(t *testing.T) {
 	}
 	// 盤中:漲到 +20% 後跌破鎖利價(+8%)→ 鎖利出場
 	tr := s.donchianV5Book.trades[0]
-	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.2}, time.Now(), true)
-	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.07}, time.Now(), true)
+	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.2}, time.Now(), dcV4Lock)
+	s.dcMarkBook(s.donchianV5Book, map[string]float64{"AAA": tr.Entry * 1.07}, time.Now(), dcV4Lock)
 	if tr.Status != "closed" || tr.Outcome != "lock" {
 		t.Fatalf("v5 lock exit: %+v", tr)
 	}
@@ -655,5 +655,63 @@ func TestDonchianLockCooldown(t *testing.T) {
 	// v2 沒有鎖利 → 不受影響
 	if dcClosedRecently(nil, "AAA", "long", "lock", cur, dcLockCool) {
 		t.Fatal("no trades → no cooldown")
+	}
+}
+
+func TestDonchianV6Lock(t *testing.T) {
+	tr := &PaperTrade{Dir: "long", Entry: 100, SL: 90}
+	cases := []struct{ mfe, want float64 }{
+		{9.9, 0},      // 還沒到 +10%
+		{10, 105.5},   // +10% → 鎖 +5.5%
+		{12.5, 106.5}, // +12% 那階 → +6.5%
+		{15, 108},     // +15% → +8%
+		{19, 108},     // +15%~+20% 之間維持 +8%
+		{20, 111},     // +20% → 鎖 55% → +11%
+		{40, 130},     // +30% 以上 → 鎖 75% → +30%
+	}
+	for _, c := range cases {
+		if got := dcLockLevelS(tr, c.mfe, dcV6Lock); math.Abs(got-c.want) > 1e-9 {
+			t.Fatalf("v6 mfe %v%%: lock %v, want %v", c.mfe, got, c.want)
+		}
+	}
+	sh := &PaperTrade{Dir: "short", Entry: 100, SL: 110}
+	if got := dcLockLevelS(sh, 10, dcV6Lock); math.Abs(got-94.5) > 1e-9 {
+		t.Fatalf("v6 short +10%%: lock %v, want 94.5", got)
+	}
+	if dcLockLevelS(tr, 50, nil) != 0 {
+		t.Fatal("no schedule → no lock")
+	}
+}
+
+func TestDonchianV6Tick(t *testing.T) {
+	// 突破 K 很大、ATR 很大 → 3×ATR 停損超過 10% → v6 改成 −10%
+	s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		for i := len(cs) - 30; i < len(cs)-1; i++ {
+			cs[i].High, cs[i].Low = 10.8, 9.2 // 全距 1.6 → ATR ≈ 1.6(16%)
+		}
+		sig := &cs[len(cs)-2]
+		sig.High, sig.Close = 11.5, 11
+		cs[len(cs)-1].Open = 11
+	})
+	s.donchianV6Book = s.newDonchianV6Book()
+	s.dcEng6 = &hourEngine{seeded: true}
+	s.dcEng.seeded = true
+	s.DonchianTick()
+	v1, v6 := s.donchianBook.trades, s.donchianV6Book.trades
+	if len(v1) != 1 || len(v6) != 1 {
+		t.Fatalf("both should enter: v1 %d v6 %d", len(v1), len(v6))
+	}
+	if v1[0].SL >= 9.9 {
+		t.Fatalf("test setup: v1 stop should be wider than 10%%: %v", v1[0].SL)
+	}
+	if v6[0].SL != 9.9 || v6[0].ID != fmt.Sprintf("donchianv6|AAA|%d", cs[len(cs)-1].Ts) {
+		t.Fatalf("v6 stop capped at −10%%: %+v", v6[0])
+	}
+	// 盤中:漲到 +12% → 鎖 +6.5%;跌回 +6% → 鎖利出場在 +6.5%
+	tr := v6[0]
+	s.dcMarkBook(s.donchianV6Book, map[string]float64{"AAA": 11 * 1.12}, time.Now(), dcV6Lock)
+	s.dcMarkBook(s.donchianV6Book, map[string]float64{"AAA": 11 * 1.06}, time.Now(), dcV6Lock)
+	if tr.Status != "closed" || tr.Outcome != "lock" || math.Abs(tr.Cur-roundPx(11*1.065)) > 1e-9 {
+		t.Fatalf("v6 lock exit: %+v", tr)
 	}
 }

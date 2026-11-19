@@ -163,6 +163,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/donchianv3", s.gateTab("donchianv3", s.handleDonchianV3))       // 唐奇安v3(前 30、336 根 + 通道寬度)
 	mux.HandleFunc("/api/donchianv4", s.gateTab("donchianv4", s.handleDonchianV4))       // 唐奇安v4(v2 + 進場濾網 + 漸進鎖利)
 	mux.HandleFunc("/api/donchianv5", s.gateTab("donchianv5", s.handleDonchianV5))       // 唐奇安v5(v2 + 進場二選一 + 漸進鎖利)
+	mux.HandleFunc("/api/donchianv6", s.gateTab("donchianv6", s.handleDonchianV6))       // 唐奇安v6(v2 + 停損上限 10% + v6 鎖利)
 	mux.HandleFunc("/api/donchian", s.gateTab("donchian", s.handleDonchian))             // 唐奇安長通道突破
 	mux.HandleFunc("/api/volbrk", s.gateTab("volbrk", s.handleVolBrk))                   // 波動突破
 	mux.HandleFunc("/api/orderblockv2", s.gateTab("orderblockv2", s.handleOrderBlockV2)) // 太陽(原訂單塊v2,SMC 訂單塊 + 斐波 0-0.236,1h/4h)
@@ -582,7 +583,7 @@ func (s *Server) handleGamble(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	book := r.URL.Query().Get("book")
 	switch {
-	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "donchianv2", book == "donchianv3", book == "donchianv4", book == "donchianv5", book == "volbrk", cache.IsPulsarBook(book):
+	case book == "main", book == "gamble", book == "emaonly", book == "donchian", book == "donchianv2", book == "donchianv3", book == "donchianv4", book == "donchianv5", book == "donchianv6", book == "volbrk", cache.IsPulsarBook(book):
 	default:
 		http.Error(w, "unknown book", http.StatusBadRequest)
 		return
@@ -819,6 +820,11 @@ func (s *Server) handleDonchianV4(w http.ResponseWriter, r *http.Request) {
 // handleDonchianV5 serves 唐奇安v5(v2 + 進場:突破 K ≤ 2.5×ATR 或前 72h ≥ 15%;漸進鎖利).
 func (s *Server) handleDonchianV5(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.DonchianV5State())
+}
+
+// handleDonchianV6 serves 唐奇安v6(v2 進場;停損上限 10%;鎖利 到 +10% 鎖 +5.5%… / 20% 鎖 55% / 30% 鎖 75%).
+func (s *Server) handleDonchianV6(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.DonchianV6State())
 }
 
 // handleVolBrk serves the 波動突破 (UTC 日內,觸上緣做多、換日平倉) tracker:今天待觸發的計畫 + 持倉 + 已結束。
