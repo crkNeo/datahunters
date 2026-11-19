@@ -297,11 +297,13 @@ def rule(name, desc, **kw):
     stall       (到幾 %, 幾根):最大獲利到過這麼多 %、而且已經這麼多根沒創新高(收盤)→ 下一根開盤出
     ind         (指標, 獲利到過幾 %):最大獲利到過這麼多 % 之後,指標出場訊號出現 → 下一根開盤出。
                 指標:rsi / rsidiv / macd / ema / st(SuperTrend)/ boll / ha(Heikin-Ashi)/ sar
+    step        (起點 %, 每幾 %, 加幾 %):最大獲利到過起點 → 停損移到保本;之後每多漲「每幾 %」,停損再往上加「加幾 %」
+                (例如 (10, 3, 1):到 +10% 保本、+13% 鎖 +1%、+16% 鎖 +2%…),盤中觸價出,跟 lock 類一起取最緊的
     floor       [(到幾 %, 底線幾 %)]:獲利到過這麼多 % 之後,移動停損移到固定的獲利底線(不跟著最高點跑),
                 盤中碰到就出;可以多段,例如 [(40, 25), (80, 50)]
     """
     d = dict(name=name, desc=desc, chan=12, chand_k=0.0, atr_cap=False, use_high=False,
-             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[], lock_close=[], overext=None, stall=None, lock_peak_close=False, ind=None)
+             tight=[], partial=[], climax=0.0, wick=False, vol_low=False, lock=[], lock_pct=[], floor=[], lock_close=[], overext=None, stall=None, lock_peak_close=False, ind=None, step=None)
     d.update(kw)
     return d
 
@@ -401,6 +403,14 @@ def replay(t, bars, rl):
             ema20 = ema20 + (c - ema20) * 2 / 21
         if newhigh:
             ext_h = fav
+        if rl["step"]:
+            st0, every, add = rl["step"]
+            mfe_pct = mfe * R / entry * 100
+            if mfe_pct >= st0:
+                lvl = int((mfe_pct - st0) // every) * add
+                ls = entry * (1 + sgn * lvl / 100)
+                if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
+                    lock_stop = ls
         if rl["floor"]:
             mfe_pct = mfe * R / entry * 100
             for lv, fl in rl["floor"]:

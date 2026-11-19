@@ -43,6 +43,7 @@ py dc_exit_bt.py --csv donchian.csv donchianv2.csv --out detail.csv   # 另存�
 
 另外 `rule()` 支援 `floor=[(到幾 %, 底線幾 %)]`:獲利到過門檻後,停損移到固定的獲利底線(不跟著最高點跑),例如階梯底線 `floor=[(40, 25), (80, 50), (120, 80)]`。
 其他移動止盈參數:`lock_peak_close`(鎖利的最大獲利改用最高收盤)、`lock_close`(收盤版鎖利)、`overext`(離 EMA20 太遠才收緊)、`stall`(太久沒創新高就出),說明見 `rule()` 註解。
+保本階梯:`step=(起點 %, 每幾 %, 加幾 %)`,例如 `(10, 3, 1)` = 到 +10% 保本、之後每多 3% 停損往上 1%。
 指標出場:`ind=(指標, 獲利到過幾 %)`,指標有 rsi / rsidiv / macd / ema / st(SuperTrend)/ boll / ha(Heikin-Ashi)/ sar。
 
 要加新規則:在 `RULES` 加一行 `rule(...)`,參數說明在 `rule()` 的註解。
