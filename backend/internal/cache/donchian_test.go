@@ -715,3 +715,66 @@ func TestDonchianV6Tick(t *testing.T) {
 		t.Fatalf("v6 lock exit: %+v", tr)
 	}
 }
+
+func TestDonchianRetailShift(t *testing.T) {
+	at := int64(1_800_000_000_000) / dcBarMs * dcBarMs
+	pts := []exchange.LSPoint{
+		{Ts: at - 24*dcBarMs - 5*60_000, LongAccount: 0.60}, // 24h 前:多空比 1.5
+		{Ts: at - 5*60_000, LongAccount: 0.62},              // 現在:多空比 ≈ 1.63
+		{Ts: at + 5*60_000, LongAccount: 0.90},              // 進場之後的資料不能用
+	}
+	sh, cur, ok := dcRetailShift(pts, "long", at)
+	want := math.Log(0.62/0.38) - math.Log(1.5)
+	if !ok || math.Abs(sh-want) > 1e-12 || cur != 0.62 {
+		t.Fatalf("long shift %v %v %v want %v", sh, cur, ok, want)
+	}
+	if sh2, _, _ := dcRetailShift(pts, "short", at); math.Abs(sh2+want) > 1e-12 {
+		t.Fatalf("short shift should flip sign: %v", sh2)
+	}
+	// 缺 24h 前的資料 → ok=false(照常進場)
+	if _, cur, ok := dcRetailShift(pts[1:], "long", at); ok || cur != 0.62 {
+		t.Fatalf("missing old point should be !ok")
+	}
+	// 太舊(超過 15 分鐘)的不算
+	if _, _, ok := dcRetailShift([]exchange.LSPoint{{Ts: at - 24*dcBarMs - 20*60_000, LongAccount: .6}, {Ts: at - 20*60_000, LongAccount: .6}}, "long", at); ok {
+		t.Fatalf("stale points should be !ok")
+	}
+}
+
+func TestDonchianV7Tick(t *testing.T) {
+	// 同一個突破:散戶 24h 往做多方向擠(0.55 → 0.60,log 變化 ≈ 0.20)→ v7 不進,v6 照進;
+	// 散戶往反方向(0.60 → 0.55)→ v7 也進,停損上限同 v6
+	for _, tc := range []struct {
+		from, to float64
+		enter    bool
+	}{{0.55, 0.60, false}, {0.60, 0.55, true}} {
+		s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+			for i := len(cs) - 30; i < len(cs)-1; i++ {
+				cs[i].High, cs[i].Low = 10.8, 9.2
+			}
+			sig := &cs[len(cs)-2]
+			sig.High, sig.Close = 11.5, 11
+			cs[len(cs)-1].Open = 11
+		})
+		at := cs[len(cs)-1].Ts
+		old := dcFetchLS
+		dcFetchLS = func(*Store, string) ([]exchange.LSPoint, error) {
+			return []exchange.LSPoint{{Ts: at - 24*dcBarMs, LongAccount: tc.from}, {Ts: at, LongAccount: tc.to}}, nil
+		}
+		s.donchianV6Book, s.dcEng6 = s.newDonchianV6Book(), &hourEngine{seeded: true}
+		s.donchianV7Book, s.dcEng7 = s.newDonchianV7Book(), &hourEngine{seeded: true}
+		s.dcEng.seeded = true
+		s.DonchianTick()
+		dcFetchLS = old
+		v6, v7 := s.donchianV6Book.trades, s.donchianV7Book.trades
+		if len(v6) != 1 {
+			t.Fatalf("v6 should enter: %d", len(v6))
+		}
+		if tc.enter != (len(v7) == 1) {
+			t.Fatalf("retail %v→%v: v7 entered %d, want enter=%v", tc.from, tc.to, len(v7), tc.enter)
+		}
+		if tc.enter && (v7[0].SL != 9.9 || v7[0].LongAcct != tc.to) {
+			t.Fatalf("v7 trade: %+v", v7[0])
+		}
+	}
+}

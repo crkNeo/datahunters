@@ -64,6 +64,15 @@ import (
 //	其他      v2 的 12 根通道 + 吊燈 3×ATR 保留;鎖利出場後同幣同方向 48 小時冷卻(同 v4 / v5)
 //	回測(11/04~11/18,453 筆,每筆同倉位):+472%、回落 −163%(v2 +336% / −448%),到過 +10% 的單 94% 出場 ≥ +5%
 //
+// 唐奇安v7(donchianv7)= v6 全部規則 + 散戶過濾:
+//
+//	進場前 24 小時,散戶多空帳戶比(Binance globalLongShortAccountRatio,5 分鐘)往我們的方向變動
+//	超過 5%(log(多/空) 的變化 > 0.05,例如做多時多空比 1.50 → 1.58)就不進 —— 散戶已經追進同一邊,
+//	突破後沒人接,最常從進場那根開始回落。反過來散戶還在做反方向時,突破會逼他們停損(軋空 / 軋多)。
+//	抓不到資料(新幣、API 失敗)照常進場,跟回測的處理一樣。
+//	回測(11/04~11/18,453 筆,出場都用 v6):+614%、回落 −123%(v6 +472% / −174%),≥ +20% 的 14 筆大單全部保留;
+//	多 / 空分開、排除同小時大量同向訊號後也都變好,門檻 3%~8% 都比 v6 好
+//
 // 實作:每小時收盤後處理一次(交易所新棒還沒生成的幣,下一分鐘再補)。持倉用 K 線從進場那根「重播」
 // 停損 / 通道出場 —— 結果只由 K 線決定,重複跑也一樣,停機期間該出場的開機後照樣補出場;
 // 新進場只看最新一根已收的 K,開機第一輪只管持倉、不進場。盤中另由 DonchianMarkTick 每 20 秒
@@ -108,6 +117,8 @@ var (
 
 const dcV6MaxSLPct = 10.0 // v6:停損離進場最多 10%
 
+const dcV7MaxRetailShift = 0.05 // v7:進場前 24h 散戶 log(多/空) 往同方向變動超過這個就不進
+
 const (
 	dcEntryN = 168 // 進場通道:前 168 根(7 天)
 	dcExitN  = 12  // 出場通道:前 12 根(12 小時)
@@ -132,6 +143,12 @@ func (s *Store) newDonchianV2Book() *microBook {
 func (s *Store) newDonchianV6Book() *microBook {
 	b := s.newDonchianBook()
 	b.name = "donchianv6"
+	return b
+}
+
+func (s *Store) newDonchianV7Book() *microBook {
+	b := s.newDonchianBook()
+	b.name = "donchianv7"
 	return b
 }
 
@@ -174,7 +191,8 @@ type dcRunner struct {
 	v4     bool         // v4 進場濾網
 	v5     bool         // v5 進場濾網
 	lock   *dcLockSched // 漸進鎖利階梯(nil = 沒有;v4 / v5 / v6)
-	slCap  float64      // 初始停損離進場最多幾 %(0 = 不限;v6)
+	slCap  float64      // 初始停損離進場最多幾 %(0 = 不限;v6 / v7)
+	retail bool         // v7:進場前 24h 散戶多空比往同方向擠就不進
 }
 
 func (s *Store) dcRunners() []dcRunner {
@@ -196,6 +214,9 @@ func (s *Store) dcRunners() []dcRunner {
 	}
 	if s.donchianV6Book != nil && s.dcEng6 != nil {
 		out = append(out, dcRunner{b: s.donchianV6Book, eng: s.dcEng6, exitN: dcExitN, chandK: dcATRK, lock: dcV6Lock, slCap: dcV6MaxSLPct})
+	}
+	if s.donchianV7Book != nil && s.dcEng7 != nil {
+		out = append(out, dcRunner{b: s.donchianV7Book, eng: s.dcEng7, exitN: dcExitN, chandK: dcATRK, lock: dcV6Lock, slCap: dcV6MaxSLPct, retail: true})
 	}
 	return out
 }
@@ -468,6 +489,17 @@ func (s *Store) dcTick(r dcRunner) {
 			continue
 		}
 		delete(r.eng.pend, coin)
+		// v7:有突破訊號才去抓散戶多空比(網路請求放在鎖外面)
+		retailSkip, longAcct := false, 0.0
+		if r.retail && enabled && !r.eng.boot {
+			if dir, _, _, ok := dcSignal(closed, forming); ok {
+				var shift float64
+				retailSkip, shift, longAcct = s.dcRetailCheck(coin, dir, closed[len(closed)-1].Ts+dcBarMs)
+				if retailSkip {
+					log.Printf("策略[%s] %s %s 突破,散戶 24h 已往同方向擠 %.3f > %.2f,不進", b.name, coin, dir, shift, dcV7MaxRetailShift)
+				}
+			}
+		}
 		var exits, entries, dirty []*PaperTrade
 		b.mu.Lock()
 		var open *PaperTrade
@@ -508,7 +540,7 @@ func (s *Store) dcTick(r dcRunner) {
 			}
 			sig := closed[len(closed)-1]
 			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) &&
-				!(r.lock != nil && dcClosedRecently(b.trades, coin, dir, "lock", sig.Ts+dcBarMs, dcLockCool)) {
+				!(r.lock != nil && dcClosedRecently(b.trades, coin, dir, "lock", sig.Ts+dcBarMs, dcLockCool)) && !retailSkip {
 				if r.slCap > 0 && math.Abs(entry-sl)/entry*100 > r.slCap { // v6:停損最多離進場 slCap %
 					if dir == "long" {
 						sl = roundPx(entry * (1 - r.slCap/100))
@@ -521,6 +553,9 @@ func (s *Store) dcTick(r dcRunner) {
 					ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevelN(closed, dir, r.exitN)}
 				if r.chandK > 0 {
 					tr.ChandExit = dcChandLevelK(tr, closed, r.chandK) // 還沒有進場後的收盤 → 0,下一小時才有
+				}
+				if r.retail {
+					tr.LongAcct = longAcct // 進場當下散戶做多帳戶比例(CSV 的 long_acct)
 				}
 				b.trades = append(b.trades, tr)
 				entries = append(entries, tr)
@@ -548,6 +583,53 @@ func (s *Store) dcTick(r dcRunner) {
 	if opened+closedN > 0 {
 		log.Printf("策略[%s] 進場 %d 筆、出場 %d 筆", b.name, opened, closedN)
 	}
+}
+
+// dcFetchLS 抓最近 300 筆(25 小時)5 分鐘的散戶多空帳戶比;測試會換掉它。
+var dcFetchLS = func(s *Store, coin string) ([]exchange.LSPoint, error) {
+	if s.ex == nil {
+		return nil, fmt.Errorf("no exchange client")
+	}
+	return s.ex.BinanceLongShortHist(coin+"USDT", "5m", 300)
+}
+
+// dcRetailCheck(v7):at = 進場時間。skip = 散戶 24h 往 dir 方向擠超過門檻;抓不到資料 → 不擋(照常進場)。
+func (s *Store) dcRetailCheck(coin, dir string, at int64) (skip bool, shift, longAcct float64) {
+	pts, err := dcFetchLS(s, coin)
+	if err != nil {
+		return false, 0, 0
+	}
+	shift, longAcct, ok := dcRetailShift(pts, dir, at)
+	return ok && shift > dcV7MaxRetailShift, shift, longAcct
+}
+
+// dcRetailShift:at 當下 vs 24 小時前的散戶 log(多/空) 變化,換成 dir 方向(正 = 散戶跟著擠到同一邊)。
+// 兩個時間點各取「不晚於該時間、最多早 15 分鐘」的最後一筆;缺任何一筆 → ok=false。cur = at 當下做多帳戶比例。
+func dcRetailShift(pts []exchange.LSPoint, dir string, at int64) (shift, cur float64, ok bool) {
+	pick := func(t int64) (float64, bool) {
+		var v float64
+		found := false
+		for _, p := range pts {
+			if p.Ts <= t && p.Ts >= t-15*60_000 && p.LongAccount > 0 && p.LongAccount < 1 {
+				v, found = p.LongAccount, true
+			}
+		}
+		return v, found
+	}
+	now, ok1 := pick(at)
+	prev, ok2 := pick(at - 24*dcBarMs)
+	if !ok1 {
+		return 0, 0, false
+	}
+	if !ok2 {
+		return 0, now, false
+	}
+	lr := func(l float64) float64 { return math.Log(l / (1 - l)) }
+	shift = lr(now) - lr(prev)
+	if dir == "short" {
+		shift = -shift
+	}
+	return shift, now, true
 }
 
 // dcSignal 看最新一根已收的 1h:收盤突破前 168 根的最高 / 最低 → 以下一根開盤進場,停損 = 進場 ∓ 3×ATR(24)。

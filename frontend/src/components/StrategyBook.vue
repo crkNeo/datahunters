@@ -93,8 +93,8 @@ const AFTER = computed(() => AFTER_ALL.slice(0, props.book === 'volbrk' ? 5 : 4)
 // 唐奇安 / 唐奇安v2(v2 = 多一條吊燈停利:進場後最高 / 最低收盤 ∓ 3 × ATR(24))
 // v3 = 成交額前 30、336 根突破 + 通道寬度;出場 24 根通道 + 吊燈 4 × ATR。頁面規格跟 v2 一樣。
 // v4 = v2 + 進場濾網 + 漸進鎖利(lock_exit:盤中觸價的鎖利停損,也算進止盈線)
-const isDC = computed(() => ['donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6'].includes(props.book))
-const isDC2 = computed(() => ['donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6'].includes(props.book))
+const isDC = computed(() => ['donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7'].includes(props.book))
+const isDC2 = computed(() => ['donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7'].includes(props.book))
 const dcExitN = computed(() => (props.book === 'donchianv3' ? 24 : 12))
 const dcChandK = computed(() => (props.book === 'donchianv3' ? 4 : 3))
 const hasDD = computed(() => props.book === 'volbrk' || isDC.value)
@@ -143,7 +143,7 @@ function exitTip(t) {
   const lines = ['止盈線 = 下面幾條裡最緊的那條,每根 1h 收盤破它 → 下一根開盤出場(每小時更新)']
   if (L && !exitActive(t)) lines.push(`⚠️ 目前出場線都比初始停損 ${fmtPrice(t.sl)}(${lvlPct(t, t.sl)})還鬆,價格會先碰到停損 → 止盈線還沒作用(未啟動)`)
   lines.push(`吊燈停利:${t.chand_exit ? fmtPrice(t.chand_exit) + '(' + lvlPct(t, t.chand_exit) + ')' : '進場那根收盤後才有'}` + '——進場後' + (t.dir === 'short' ? '最低收盤 + ' : '最高收盤 − ') + dcChandK.value + ' × ATR(24)')
-  if (props.book === 'donchianv6') lines.push(`鎖利停損:${t.lock_exit ? fmtPrice(t.lock_exit) + '(' + lvlPct(t, t.lock_exit) + ')' : '還沒啟動(最大獲利到過 +10% 才有)'}——到過 +10% 鎖 +5.5%、每多 1% 加 0.5%(+15% 時 +8%)、+20% 鎖 55%、+30% 以上鎖 75%,盤中碰到就出`)
+  if (props.book === 'donchianv6' || props.book === 'donchianv7') lines.push(`鎖利停損:${t.lock_exit ? fmtPrice(t.lock_exit) + '(' + lvlPct(t, t.lock_exit) + ')' : '還沒啟動(最大獲利到過 +10% 才有)'}——到過 +10% 鎖 +5.5%、每多 1% 加 0.5%(+15% 時 +8%)、+20% 鎖 55%、+30% 以上鎖 75%,盤中碰到就出`)
   if (props.book === 'donchianv4' || props.book === 'donchianv5') lines.push(`鎖利停損:${t.lock_exit ? fmtPrice(t.lock_exit) + '(' + lvlPct(t, t.lock_exit) + ')' : '還沒啟動(最大獲利到過 2R 或 +15% 才有)'}——依最大獲利到過的階梯鎖住 30～80%,盤中碰到就出`)
   lines.push(`通道出場:${t.chan_exit ? fmtPrice(t.chan_exit) + '(' + lvlPct(t, t.chan_exit) + ')' : '—'}` + '——最近 ' + dcExitN.value + ' 根 1h 的' + (t.dir === 'short' ? '最高價' : '最低價'))
   if (L && exitActive(t)) {
