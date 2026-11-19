@@ -405,9 +405,19 @@ func dcSignalV3(closed []exchange.Candle, forming *exchange.Candle) (dir string,
 
 // dcStoppedRecently:這本書同幣同方向,在 at 之前 48 小時內有沒有被初始停損(sl)打掉過。
 func dcStoppedRecently(trades []*PaperTrade, coin, dir string, at int64) bool {
+	return dcClosedRecently(trades, coin, dir, "sl", at, dcV3StopCool)
+}
+
+// dcLockCool:v4 / v5 鎖利出場後,同幣同方向冷卻多久才能再進場。
+// 實盤發現:鎖利先出場後,同一波行情再突破一次就又追進去(v1 / v2 那時還抱著第一筆、不會重進),
+// 11/16~11/19 這種重新進場 7 筆只有 1 筆賺、合計 −93%。回測是拿 v1 / v2 的單重播,看不到這種情況。
+const dcLockCool = 48 * dcBarMs
+
+// dcClosedRecently:同幣同方向、出場碼 outcome 的單,在 at 之前 cool 毫秒內有沒有平倉過。
+func dcClosedRecently(trades []*PaperTrade, coin, dir, outcome string, at, cool int64) bool {
 	for _, tr := range trades {
-		if tr.Coin == coin && tr.Dir == dir && tr.Status == "closed" && tr.Outcome == "sl" && tr.CloseTime != nil &&
-			tr.CloseTime.UnixMilli() > at-dcV3StopCool && tr.CloseTime.UnixMilli() <= at {
+		if tr.Coin == coin && tr.Dir == dir && tr.Status == "closed" && tr.Outcome == outcome && tr.CloseTime != nil &&
+			tr.CloseTime.UnixMilli() > at-cool && tr.CloseTime.UnixMilli() <= at {
 			return true
 		}
 	}
@@ -465,7 +475,8 @@ func (s *Store) dcTick(r dcRunner) {
 				sigFn = dcSignalV5
 			}
 			sig := closed[len(closed)-1]
-			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) {
+			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) &&
+				!(r.lock && dcClosedRecently(b.trades, coin, dir, "lock", sig.Ts+dcBarMs, dcLockCool)) {
 				tr := &PaperTrade{ID: fmt.Sprintf("%s|%s|%d", b.name, coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
 					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
 					ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevelN(closed, dir, r.exitN)}

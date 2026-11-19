@@ -620,3 +620,40 @@ func TestDonchianV5Tick(t *testing.T) {
 		t.Fatalf("v5 lock exit: %+v", tr)
 	}
 }
+
+func TestDonchianLockCooldown(t *testing.T) {
+	s, cs := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		sig := &cs[len(cs)-2]
+		sig.High, sig.Close = 10.35, 10.3
+		cs[len(cs)-1].Open = 10.32
+	})
+	s.donchianV5Book = s.newDonchianV5Book()
+	s.dcEng5 = &hourEngine{seeded: true}
+	s.dcEng.seeded = true
+	b := s.donchianV5Book
+	cur := cs[len(cs)-1].Ts
+	// 同方向 3 小時前鎖利出場 → 不進
+	b.trades = []*PaperTrade{{ID: "a", Coin: "AAA", Dir: "long", Status: "closed", Outcome: "lock", CloseTime: tptr(time.UnixMilli(cur - 3*dcBarMs))}}
+	s.DonchianTick()
+	if len(b.trades) != 1 {
+		t.Fatalf("lock cooldown should block re-entry, got %d", len(b.trades))
+	}
+	// 一般出場(通道)不冷卻 → 進
+	b.trades = []*PaperTrade{{ID: "a", Coin: "AAA", Dir: "long", Status: "closed", Outcome: "channel", CloseTime: tptr(time.UnixMilli(cur - 3*dcBarMs))}}
+	s.dcEng5.bucket = 0
+	s.DonchianTick()
+	if len(b.trades) != 2 {
+		t.Fatalf("channel exit has no cooldown, got %d", len(b.trades))
+	}
+	// 49 小時前鎖利出場 → 冷卻過了 → 進
+	b.trades = []*PaperTrade{{ID: "a", Coin: "AAA", Dir: "long", Status: "closed", Outcome: "lock", CloseTime: tptr(time.UnixMilli(cur - 49*dcBarMs))}}
+	s.dcEng5.bucket = 0
+	s.DonchianTick()
+	if len(b.trades) != 2 {
+		t.Fatalf("after 48h cooldown re-entry is allowed, got %d", len(b.trades))
+	}
+	// v2 沒有鎖利 → 不受影響
+	if dcClosedRecently(nil, "AAA", "long", "lock", cur, dcLockCool) {
+		t.Fatal("no trades → no cooldown")
+	}
+}
