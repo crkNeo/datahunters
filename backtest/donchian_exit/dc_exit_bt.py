@@ -332,10 +332,25 @@ RULES = [
 ]
 
 
+_ATR = {}
+
+
 def atr_at(bars, i):
-    """bars[i] 收盤時的 ATR(24):第 i-23..i 根真實波幅平均(跟系統 dcATR 一樣)。"""
+    """bars[i] 收盤時的 ATR(24):第 i-23..i 根真實波幅平均(跟系統 dcATR 一樣)。每個 bars 算一次存起來。"""
     if i < ATR_N:
         return 0.0
+    key = id(bars)
+    hit = _ATR.get(key)
+    if hit is not None and hit[0] is bars:
+        return hit[1][i]
+    arr = [0.0] * len(bars)
+    for k in range(ATR_N, len(bars)):
+        arr[k] = _atr_raw(bars, k)
+    _ATR[key] = (bars, arr)
+    return arr[i]
+
+
+def _atr_raw(bars, i):
     s = 0.0
     for j in range(i - ATR_N + 1, i + 1):
         h, l, pc = bars[j][2], bars[j][3], bars[j - 1][4]
@@ -437,7 +452,7 @@ def replay(t, bars, rl):
             ls = entry + sgn * rl["overext"][1] * mfe * R
             if lock_stop is None or (long and ls > lock_stop) or (not long and ls < lock_stop):
                 lock_stop = ls
-        avgv = st.mean(b[5] for b in bars[max(0, i - 24):i]) if i > 0 else 0
+        avgv = st.mean(b[5] for b in bars[max(0, i - 24):i]) if i > 0 and (rl["climax"] or rl["vol_low"]) else 0
         if avgv > 0 and v >= 3 * avgv and (vol_bar is None or v > vol_bar[5]) and i > i0:
             vol_bar = bars[i]
         nxt = bars[i + 1][1] if i + 1 < len(bars) else None
