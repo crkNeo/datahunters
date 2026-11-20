@@ -166,6 +166,9 @@ type Store struct {
 	dcEng5         *hourEngine                  // 唐奇安v5 的每小時排程狀態
 	dcEng6         *hourEngine                  // 唐奇安v6 的每小時排程狀態
 	dcEng7         *hourEngine                  // 唐奇安v7 的每小時排程狀態
+	dcHourMu       sync.Mutex                   // 保護下面兩個
+	dcHourBkt      int64                        // dcHourBars 是哪一小時的
+	dcHourBars     map[string][]exchange.Candle // 這一小時已抓到的 1h K(hourBars,各唐奇安版本 / 波動突破 / 型態掃描共用)
 	ptStore        *patternStore                // 型態掃描結果 + 排程(patterns.go,1H / 4H / 1D)
 	smcV2Books     []*microBook                 // 太陽(原訂單塊v2):SMC 訂單塊拉斐波,回撤 0-0.236 + 頭槌/射擊星,三段止盈;1h/4h (orderblock.go)
 

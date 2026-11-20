@@ -243,6 +243,7 @@ type hourEngine struct {
 	seeded bool            // 開機第一輪(只管持倉、不進場)跑過了沒
 	boot   bool            // 這一小時是不是開機第一輪
 	pend   map[string]bool // 這一小時還沒處理到的幣(交易所新棒還沒生成 → 下一分鐘再試)
+	drop   int             // 上一次放棄時還有幾個幣沒處理到(記 log 用)
 }
 
 // due 回傳這一分鐘要處理的幣;新的一小時重新排入整個宇宙 + 持倉幣。過了 10 分鐘還沒生成的就放棄這一小時。
@@ -257,6 +258,9 @@ func (e *hourEngine) due(now time.Time, coins func() []string) []string {
 			e.pend[c] = true
 		}
 	} else if now.Unix()-bkt*3600 > 600 {
+		if len(e.pend) > 0 {
+			e.drop = len(e.pend)
+		}
 		e.pend = nil
 	}
 	out := make([]string, 0, len(e.pend))
@@ -266,24 +270,36 @@ func (e *hourEngine) due(now time.Time, coins func() []string) []string {
 	return out
 }
 
-// hourBars 抓 1h K(走短 TTL 快取,唐奇安和波動突破同一小時共用),切成已收的 + 還在走的那根。
+// hourBars 抓 1h K,切成已收的 + 還在走的那根。
+// 同一小時第一次抓到「新的一根已生成」的資料就記住,這一小時內所有唐奇安版本 / 波動突破 / 型態掃描都用同一份,
+// 不再各自重抓:①排在後面的版本不會因為 90 秒快取過期、交易所限流而抓不到(v2 有進、v6 沒進);②請求量少很多。
 // ok=false:抓不到,或交易所還沒生成新的一根(剛收的那根還被當成「還在走」)→ 下一分鐘再試。
 func (s *Store) hourBars(coin string, now time.Time) (closed []exchange.Candle, forming *exchange.Candle, ok bool) {
-	v, err := s.candleCache.get(fmt.Sprintf("%s|1h|%d", coin, dcKlines), func() (any, error) {
-		return s.ex.BinanceKlines(coin+"USDT", "1h", dcKlines)
-	})
-	if err != nil {
-		return nil, nil, false
-	}
-	cs := v.([]exchange.Candle)
-	if len(cs) < 2 {
-		return nil, nil, false
-	}
 	cur := now.UnixMilli() / dcBarMs * dcBarMs
-	last := cs[len(cs)-1]
-	if last.Ts != cur {
-		return nil, nil, false
+	s.dcHourMu.Lock()
+	if s.dcHourBkt != cur {
+		s.dcHourBkt, s.dcHourBars = cur, map[string][]exchange.Candle{}
 	}
+	cs, hit := s.dcHourBars[coin]
+	s.dcHourMu.Unlock()
+	if !hit {
+		v, err := s.candleCache.get(fmt.Sprintf("%s|1h|%d", coin, dcKlines), func() (any, error) {
+			return s.ex.BinanceKlines(coin+"USDT", "1h", dcKlines)
+		})
+		if err != nil {
+			return nil, nil, false
+		}
+		cs = v.([]exchange.Candle)
+		if len(cs) < 2 || cs[len(cs)-1].Ts != cur {
+			return nil, nil, false
+		}
+		s.dcHourMu.Lock()
+		if s.dcHourBkt == cur {
+			s.dcHourBars[coin] = cs
+		}
+		s.dcHourMu.Unlock()
+	}
+	last := cs[len(cs)-1]
 	return cs[:len(cs)-1], &last, true
 }
 
@@ -481,6 +497,10 @@ func (s *Store) dcTick(r dcRunner) {
 	b := r.b
 	now := time.Now().UTC()
 	coins := r.eng.due(now, func() []string { return donchianCoins(b) })
+	if r.eng.drop > 0 {
+		log.Printf("⚠️ 策略[%s] 整點過了 10 分鐘還有 %d 個幣抓不到新的 1h K,這一小時放棄(這些幣這小時不會進場 / 不會用收盤出場)", b.name, r.eng.drop)
+		r.eng.drop = 0
+	}
 	enabled := s.StrategyEnabled(b.strat())
 	opened, closedN, loads := 0, 0, 0
 	for _, coin := range coins {

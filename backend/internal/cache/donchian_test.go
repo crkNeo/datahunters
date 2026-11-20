@@ -778,3 +778,27 @@ func TestDonchianV7Tick(t *testing.T) {
 		}
 	}
 }
+
+func TestHourBarsShared(t *testing.T) {
+	// 同一小時第一次抓到新棒就記住:之後快取過期 / 抓到舊資料,後面的版本還是拿得到同一份
+	s, cs := dcStore(t, "AAA", func([]exchange.Candle) {})
+	now := time.Now()
+	c1, f1, ok := s.hourBars("AAA", now)
+	if !ok || f1.Ts != cs[len(cs)-1].Ts || len(c1) != len(cs)-1 {
+		t.Fatalf("first fetch should be ok")
+	}
+	s.candleCache = newTTLCache(time.Hour)
+	s.candleCache.get(fmt.Sprintf("%s|1h|%d", "AAA", dcKlines), func() (any, error) { return cs[:len(cs)-1], nil }) // 舊的(沒有新棒)
+	if _, f2, ok := s.hourBars("AAA", now); !ok || f2.Ts != f1.Ts {
+		t.Fatalf("later runner should reuse this hour's bars")
+	}
+	// 沒抓到過的幣:舊資料 → ok=false(下一分鐘再試),不會被記住
+	s.candleCache.get(fmt.Sprintf("%s|1h|%d", "BBB", dcKlines), func() (any, error) { return cs[:len(cs)-1], nil })
+	if _, _, ok := s.hourBars("BBB", now); ok {
+		t.Fatalf("stale bars must not be ok")
+	}
+	// 下一小時重新抓
+	if _, _, ok := s.hourBars("AAA", now.Add(time.Hour)); ok {
+		t.Fatalf("next hour must not reuse last hour's bars")
+	}
+}
