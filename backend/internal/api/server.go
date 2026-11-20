@@ -159,6 +159,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/surge", s.gateTab("surge", s.handleSurge))                // 爆量脈搏面板
 	mux.HandleFunc("/api/pulsarv3", s.gateTab("pulsarv3", s.handlePulsarV3))             // 脈衝星 (VIP, 原 v3: ATR + runner)
 	mux.HandleFunc("/api/pulsarv12", s.gateTab("pulsarv12", s.handlePulsarV12))          // 脈衝星v12 (盤中即進)
+	mux.HandleFunc("/api/pulsarv13", s.gateTab("pulsarv13", s.handlePulsarV13))          // 脈衝星v13 (跌深強勢反彈,0.75R 全出)
 	mux.HandleFunc("/api/donchianv2", s.gateTab("donchianv2", s.handleDonchianV2))       // 唐奇安v2(+ 吊燈停利)
 	mux.HandleFunc("/api/donchianv3", s.gateTab("donchianv3", s.handleDonchianV3))       // 唐奇安v3(前 30、336 根 + 通道寬度)
 	mux.HandleFunc("/api/donchianv4", s.gateTab("donchianv4", s.handleDonchianV4))       // 唐奇安v4(v2 + 進場濾網 + 漸進鎖利)
@@ -603,7 +604,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		"oi_1h", "cvd_1h", "long_acct", "chg_24", "surge_x", "btc_1h", "vol_24",
 		"wick_pct", "ema_dist", "bar_atr", "spike_x", "btc_15m",
 		"after_1h", "after_2h", "after_4h", "after_8h",
-		"ema200_dist", "btc_ema200", "breadth", "after_16h", "after_24h", "max_dd", "peak_ms"})
+		"ema200_dist", "btc_ema200", "breadth", "after_16h", "after_24h", "max_dd", "peak_ms", "high24_dist", "btc_4h"})
 	// 進場後 1H…24H 的價格漲跌%(脈衝星v12 補到 8H、流星補到 24H;空白 = 還沒補)
 	pf := func(v *float64) string {
 		if v == nil {
@@ -625,7 +626,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			f(t.OI1h), f(t.CVD1h), f(t.LongAcct), f(t.Chg24), f(t.SurgeX), f(t.BTC1h), f(t.Vol24),
 			f(t.WickPct), f(t.EMADist), f(t.BarATR), f(t.SpikeX), f(t.BTC15m),
 			pf(t.After1h), pf(t.After2h), pf(t.After4h), pf(t.After8h),
-			f(t.Ema200Dist), f(t.BtcEma200), f(t.Breadth), pf(t.After16h), pf(t.After24h), f(t.MaxDD), strconv.FormatInt(t.PeakMs, 10),
+			f(t.Ema200Dist), f(t.BtcEma200), f(t.Breadth), pf(t.After16h), pf(t.After24h), f(t.MaxDD), strconv.FormatInt(t.PeakMs, 10), f(t.High24Dist), f(t.BTC4h),
 		})
 	}
 	cw.Flush()
@@ -841,6 +842,11 @@ func (s *Server) handleVolBrk(w http.ResponseWriter, r *http.Request) {
 // handlePulsarV12 serves the 脈衝星v12 (v3 條件盤中成立即進) tracker.
 func (s *Server) handlePulsarV12(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.store.PulsarV12State())
+}
+
+// handlePulsarV13 serves 脈衝星v13(v3 訊號 + 離 24h 高點 ≥4% + 爆量 ≥3.5x + 高於 EMA20 ≥0.5ATR + BTC 4h 沒漲;0.75R 全出).
+func (s *Server) handlePulsarV13(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.PulsarV13State())
 }
 
 func (s *Server) handleOrderBlockV2(w http.ResponseWriter, r *http.Request) {

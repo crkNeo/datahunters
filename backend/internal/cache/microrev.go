@@ -318,6 +318,113 @@ func surgeV3Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok 
 	return surgeV3Core(cs, false)
 }
 
+// 脈衝星v13 = 脈衝星(v3)的收盤訊號,只做「跌下來之後的強勢爆量反彈」,一次全出:
+//
+//	① 收盤離前 24h(96 根,不含這根)最高價 ≥ 4%(不追在高點附近的爆量)
+//	② 近 6 根(含這根)最大量 ≥ 3.5 × 截尾基準量(= 進場因子的 SpikeX;量不夠的反彈最常彈一下就回落)
+//	③ 收盤高於 15m EMA20 ≥ 0.5 × ATR(= 進場因子的 EMADist;反彈已經有力道)
+//	④ BTC 前 4h(16 根 15m)沒有上漲(pulsarV13Gate)
+//	出場:止損同 v3(R);止盈 = 進場 + 0.75R 一次全出;4h(16 根)逾時;冷卻 4h
+//
+// 回測(脈衝星 v3 8/28~11/18 + v12 10/04~11/20 的實際訊號,15m K 線重播,扣 0.1% 費用):
+// v3 127 筆 +0.72%/筆、v12 143 筆 +0.68%/筆,兩本每個月都是正的;三個門檻各換 3 種值(27 組)全部為正。
+const (
+	v13High24Drop = 4.0  // ① 離 24h 高點至少幾 %
+	v13SpikeMin   = 3.5  // ② 近 6 根最大量 / 基準量
+	v13EMAMinATR  = 0.5  // ③ 收盤 − EMA20 至少幾個 ATR
+	v13TPR        = 0.75 // 止盈 = 0.75R
+)
+
+// v13Feats 算 v13 用到的三個量(cs 最後一根 = 訊號根)。ok=false:資料不足。
+func v13Feats(cs []exchange.Candle) (high24Dist, spikeX, emaATR float64, ok bool) {
+	n := len(cs)
+	if n < 98 {
+		return 0, 0, 0, false
+	}
+	hi := cs[n-97].High
+	for _, c := range cs[n-97 : n-1] {
+		hi = math.Max(hi, c.High)
+	}
+	last := cs[n-1]
+	atr := robustATR(cs, 14, 2)
+	base := trimmedBaseVol(cs)
+	if hi <= 0 || atr <= 0 || base <= 0 {
+		return 0, 0, 0, false
+	}
+	peak := 0.0
+	for _, c := range cs[n-6:] {
+		peak = math.Max(peak, c.Volume)
+	}
+	return (last.Close/hi - 1) * 100, peak / base, (last.Close - emaSeries(cs, 20)[n-1]) / atr, true
+}
+
+// surgeV13Signal:v3 訊號 + ①②③,止盈改成 0.75R(一次全出)。
+func surgeV13Signal(cs []exchange.Candle) (dir string, entry, sl, tp float64, ok bool) {
+	dir, entry, sl, _, ok = surgeV3Signal(cs)
+	if !ok {
+		return
+	}
+	d24, spx, ema, fok := v13Feats(cs)
+	if !fok || d24 > -v13High24Drop || spx < v13SpikeMin || ema < v13EMAMinATR || entry <= sl {
+		return "", 0, 0, 0, false
+	}
+	return dir, entry, sl, roundPx(entry + v13TPR*(entry-sl)), true
+}
+
+// surgeV13Why:給 log 的子原因(v3 沒過就沿用 v3 的原因)。
+func surgeV13Why(cs []exchange.Candle) string {
+	if _, _, _, _, ok := surgeV3Signal(cs); !ok {
+		return surgeV3Why(cs)
+	}
+	d24, spx, ema, fok := v13Feats(cs)
+	switch {
+	case !fok:
+		return "資料不足"
+	case d24 > -v13High24Drop:
+		return "離24h高點不夠遠"
+	case spx < v13SpikeMin:
+		return "爆量不夠"
+	case ema < v13EMAMinATR:
+		return "離EMA20不夠"
+	}
+	return ""
+}
+
+func fmtBTCKey(ts int64) string { return fmt.Sprintf("BTC|15m|200|at%d", ts) }
+
+// btc4hAt:BTC 在 ts 那根 15m(含)收盤,相對 16 根前收盤的漲跌 %。ok=false:抓不到 / 對不上。
+func (s *Store) btc4hAt(ts int64) (float64, bool) {
+	if s.candleCache == nil {
+		return 0, false
+	}
+	// key 帶 ts:每根收盤後重抓一次,拿到的才含剛收的那根(共用的 90 秒快取可能是收盤前抓的)
+	v, err := s.candleCache.get(fmtBTCKey(ts), func() (any, error) {
+		if s.ex == nil {
+			return nil, fmt.Errorf("no exchange client")
+		}
+		return s.ex.BinanceKlines("BTCUSDT", "15m", 200)
+	})
+	if err != nil {
+		return 0, false
+	}
+	cs := v.([]exchange.Candle)
+	for j := len(cs) - 1; j >= 16; j-- {
+		if cs[j].Ts == ts {
+			if cs[j-16].Close <= 0 {
+				return 0, false
+			}
+			return (cs[j].Close/cs[j-16].Close - 1) * 100, true
+		}
+	}
+	return 0, false
+}
+
+// pulsarV13Gate:④ BTC 前 4h 沒有上漲(抓不到 BTC 就不進,跟回測一致)。
+func (s *Store) pulsarV13Gate(coin string, cs []exchange.Candle) bool {
+	r, ok := s.btc4hAt(cs[len(cs)-1].Ts)
+	return ok && r <= 0
+}
+
 // surgeV3Core 是 v3 的進場本體。fastCap=true(脈衝星v11)時,只有「止損可行性上限」改用
 // max(截尾ATR, 近5根不截尾ATR) —— 讓剛突破、ATR 還停在盤整水位時不會被「止損過寬」擋掉;
 // 拋物線護欄、不追高、止損下限仍用截尾 ATR,不跟著放鬆。
@@ -1087,6 +1194,8 @@ func (s *Store) PulsarV3Tick()      { s.microTick(s.pulsarV3Book) }
 func (s *Store) PulsarV3MarkTick()  { s.microMarkTick(s.pulsarV3Book) }
 func (s *Store) PulsarV12Tick()     { s.microTick(s.pulsarV12Book) }
 func (s *Store) PulsarV12MarkTick() { s.microMarkTick(s.pulsarV12Book) }
+func (s *Store) PulsarV13Tick()     { s.microTick(s.pulsarV13Book) }
+func (s *Store) PulsarV13MarkTick() { s.microMarkTick(s.pulsarV13Book) }
 
 // PulsarIntraTick:脈衝星v12 盤中進場(見 microIntraTick)。
 func (s *Store) PulsarIntraTick() { s.microIntraTick(s.pulsarV12Book) }
@@ -1149,6 +1258,10 @@ func (s *Store) ClearStrategy(book string, closedOnly bool) bool {
 		s.pulsarV12Book.mu.Lock()
 		s.pulsarV12Book.trades = keepIf(s.pulsarV12Book.trades, closedOnly)
 		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv13":
+		s.pulsarV13Book.mu.Lock()
+		s.pulsarV13Book.trades = keepIf(s.pulsarV13Book.trades, closedOnly)
+		s.pulsarV13Book.mu.Unlock()
 	case "donchian":
 		s.donchianBook.mu.Lock()
 		s.donchianBook.trades = keepIf(s.donchianBook.trades, closedOnly)
@@ -1251,6 +1364,7 @@ func (s *Store) retrofitMultiTP() {
 func (s *Store) BollEMAState() PaperState    { return s.microState(s.bollEMABook) }
 func (s *Store) PulsarV3State() PaperState   { return s.microState(s.pulsarV3Book) }
 func (s *Store) PulsarV12State() PaperState  { return s.microState(s.pulsarV12Book) }
+func (s *Store) PulsarV13State() PaperState  { return s.microState(s.pulsarV13Book) }
 func (s *Store) DonchianState() PaperState   { return s.microState(s.donchianBook) }
 func (s *Store) DonchianV2State() PaperState { return s.microState(s.donchianV2Book) }
 func (s *Store) DonchianV3State() PaperState { return s.microState(s.donchianV3Book) }

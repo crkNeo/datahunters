@@ -121,8 +121,22 @@ func (s *Store) tagEntry(b *microBook, tr *PaperTrade, cs []exchange.Candle) {
 	btc, _ := s.btc1hRet()
 	btc15, _ := s.btc15mRet()
 	tags := ComputeEntryTags(cs, s.oiHist1h(coin, 13), s.lastFunding(coin), s.longShortCached(coin).LongAccount, btc*100, btc15*100, s.surgeXOf(coin))
+	var d24, b4h float64
+	if n := len(cs); n >= 98 {
+		hi := cs[n-97].High
+		for _, c := range cs[n-97 : n-1] {
+			hi = math.Max(hi, c.High)
+		}
+		if hi > 0 {
+			d24 = (cs[n-1].Close/hi - 1) * 100
+		}
+		if r, ok := s.btc4hAt(cs[n-1].Ts); ok {
+			b4h = r
+		}
+	}
 	b.mu.Lock()
 	tags.apply(tr)
+	tr.High24Dist, tr.BTC4h = round2(d24), round2(b4h)
 	b.mu.Unlock()
 	s.tagRegime(b, tr) // EMA200 / 大盤環境(regime.go)
 }

@@ -132,6 +132,9 @@ type PaperTrade struct {
 	MaxDD float64 `json:"max_dd,omitempty"`
 	// 最大獲利(MaxGain)出現的時間(epoch ms;K 線算的記那根的開盤時間)。唐奇安、波動突破會記。
 	PeakMs int64 `json:"peak_ms,omitempty"`
+	// 脈衝星進場因子(entrytags.go):收盤離前 24h 最高價 %(負 = 在高點下方)、BTC 前 4h 漲跌 %
+	High24Dist float64 `json:"high24_dist,omitempty"`
+	BTC4h      float64 `json:"btc_4h,omitempty"`
 	// 唐奇安持倉:目前的通道出場價(多單 = 最近 12 根已收 1h 的最低價,空單 = 最高價),
 	// 下一根收盤破這個價就在再下一根開盤平倉。每小時收盤後更新,只放記憶體。
 	ChanExit float64 `json:"chan_exit,omitempty"`
@@ -516,6 +519,8 @@ func bookLabel(name string) string {
 		return "脈衝星"
 	case "pulsarv12":
 		return "脈衝星v12"
+	case "pulsarv13":
+		return "脈衝星v13"
 	case "donchian":
 		return "唐奇安"
 	case "donchianv2":
@@ -587,7 +592,7 @@ func (s *Store) notifyBEHit(name string, tr *PaperTrade) {
 // deep-link straight to that strategy page (via /?tab=<tab>).
 func bookTab(name string) string {
 	switch name {
-	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "donchianv3", "donchianv4", "donchianv5", "donchianv6", "donchianv7", "volbrk", "orderblockv2", "newsalpha":
+	case "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv13", "donchian", "donchianv2", "donchianv3", "donchianv4", "donchianv5", "donchianv6", "donchianv7", "volbrk", "orderblockv2", "newsalpha":
 		return name
 	case "orderblockv2_4h": // 週期共用一個分頁
 		return "orderblockv2"
@@ -920,7 +925,7 @@ func (s *Store) ExportTrades(book string) []*PaperTrade {
 // IsPulsarBook 回報 book 是否為脈衝星家族(可匯出 CSV)。
 func IsPulsarBook(book string) bool {
 	switch book {
-	case "pulsarv3", "pulsarv12":
+	case "pulsarv3", "pulsarv12", "pulsarv13":
 		return true
 	}
 	return false
@@ -941,6 +946,8 @@ func (s *Store) pulsarBookByName(book string) *microBook {
 		return s.pulsarV3Book
 	case "pulsarv12":
 		return s.pulsarV12Book
+	case "pulsarv13":
+		return s.pulsarV13Book
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ import (
 //   3. manual exit of an open trade at market, recorded as 動能衰弱 (momdead).
 
 // allStrategies is the canonical strategy set for the admin 開關 UI.
-var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "donchian", "donchianv2", "donchianv3", "donchianv4", "donchianv5", "donchianv6", "donchianv7", "volbrk", "orderblockv2", "newsalpha"}
+var allStrategies = []string{"main", "gamble", "emaonly", "conv", "bollema", "pulsarv3", "pulsarv12", "pulsarv13", "donchian", "donchianv2", "donchianv3", "donchianv4", "donchianv5", "donchianv6", "donchianv7", "volbrk", "orderblockv2", "newsalpha"}
 
 // StratCfg is the admin-editable per-strategy tuning, persisted as one JSON blob
 // in site_config ("strat_cfg"). Every field is seeded from stratDefaults — which
@@ -86,6 +86,8 @@ var stratDefaults = map[string]StratCfg{
 	"pulsarv3": {Tags: []string{"爆量", "埋伏", "多單", "ATR", "runner"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
 	// 脈衝星v12:盤中書(不等收K),出場同 v3 家族。
 	"pulsarv12": {Tags: []string{"爆量", "盤中", "多單"}, ExitMode: "split", SplitA: 50, SplitB: 75, SplitW1: 50, SplitW2: 25, SplitW3: 25, BeBufPct: 0.05},
+	// 脈衝星v13:跌深後的強勢爆量反彈,0.75R 一次全出(單段,止盈價由訊號給)。
+	"pulsarv13": {Tags: []string{"爆量", "反彈", "多單"}, ExitMode: "single"},
 	// 唐奇安 / 波動突破:出場邏輯各自在 donchian.go / volbrk.go(通道 / 停損、換日平倉),不吃分批設定。
 	"donchian": {Tags: []string{"趨勢", "通道突破", "多空", "1h"}, ExitMode: "single"},
 	// 唐奇安v2:v1 + 吊燈停利 3×ATR(donchian.go)。
@@ -476,6 +478,10 @@ func (s *Store) ManualExit(book, id string) bool {
 		s.pulsarV12Book.mu.Lock()
 		done = closeIn(s.pulsarV12Book.trades)
 		s.pulsarV12Book.mu.Unlock()
+	case "pulsarv13":
+		s.pulsarV13Book.mu.Lock()
+		done = closeIn(s.pulsarV13Book.trades)
+		s.pulsarV13Book.mu.Unlock()
 	case "donchian":
 		s.donchianBook.mu.Lock()
 		done = closeIn(s.donchianBook.trades)

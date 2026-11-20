@@ -150,6 +150,7 @@ type Store struct {
 	ema200         *ema200Engine                // EMA200 穿越監控(4H,爆量脈搏面板的幣)(ema200.go)
 	pulsarV3Book   *microBook                   // 脈衝星(VIP):ATR 自適應止損 + 追尾 runner (microrev.go)
 	pulsarV12Book  *microBook                   // 脈衝星v12:v3 條件盤中成立即進(不等收K)(microrev.go)
+	pulsarV13Book  *microBook                   // 脈衝星v13:v3 訊號只做跌深後的強勢爆量反彈,0.75R 一次全出(microrev.go)
 	donchianBook   *microBook                   // 唐奇安長通道突破:1h 收盤破 168 根通道進、12 根通道 / 3×ATR 停損出 (donchian.go)
 	donchianV2Book *microBook                   // 唐奇安v2:同 v1,另加吊燈停利 3×ATR(進場後最高 / 最低收盤 ∓ 3×ATR)
 	donchianV3Book *microBook                   // 唐奇安v3:成交額前 30、336 根突破 + 通道寬度 < 2000 根中位數 + 48h 停損冷卻;24 根通道 + 吊燈 4×ATR
@@ -315,6 +316,8 @@ func NewStore(coins []string) *Store {
 	s.pulsarV3Book = &microBook{name: "pulsarv3", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, signalWhy: surgeV3Why, tagEntry: true}
 	// 脈衝星v12:盤中書。進場由 microIntraTick 每分鐘用形成中的 K 評估;signal 保留 v3 只給收盤管理流程佔位(不會用來進場)。
 	s.pulsarV12Book = &microBook{name: "pulsarv12", tf: "15m", barSec: 900, klimit: 200, minBars: 40, expiry: 16, runnerExpiry: 96, cooldown: 16, keep: 500, plan: tpPulsarV3, universe: s.surgeBoardCoins, signal: surgeV3Signal, intraSignal: surgeV12Signal, tagEntry: true}
+	s.pulsarV13Book = &microBook{name: "pulsarv13", tf: "15m", barSec: 900, klimit: 200, minBars: 110, expiry: 16, cooldown: 16, keep: 500, universe: s.surgeBoardCoins, signal: surgeV13Signal, signalWhy: surgeV13Why, tagEntry: true}
+	s.pulsarV13Book.gate = s.pulsarV13Gate
 	s.donchianBook = s.newDonchianBook()
 	s.donchianV2Book = s.newDonchianV2Book()
 	s.donchianV3Book = s.newDonchianV3Book()
@@ -353,6 +356,7 @@ func NewStore(coins []string) *Store {
 		s.bollEMABook.trades = db.loadTrades("bollema")
 		s.pulsarV3Book.trades = db.loadTrades("pulsarv3")
 		s.pulsarV12Book.trades = db.loadTrades("pulsarv12")
+		s.pulsarV13Book.trades = db.loadTrades("pulsarv13")
 		s.donchianBook.trades = db.loadTrades("donchian")
 		s.donchianV2Book.trades = db.loadTrades("donchianv2")
 		s.donchianV3Book.trades = db.loadTrades("donchianv3")

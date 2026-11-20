@@ -300,6 +300,9 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		"max_dd": "ADD COLUMN max_dd DOUBLE NOT NULL DEFAULT 0",
 		// 最大獲利出現的時間(唐奇安)
 		"peak_ms": "ADD COLUMN peak_ms BIGINT NOT NULL DEFAULT 0",
+		// 脈衝星進場因子:離 24h 高點 %、BTC 前 4h %
+		"high24_dist": "ADD COLUMN high24_dist DOUBLE NOT NULL DEFAULT 0",
+		"btc_4h":      "ADD COLUMN btc_4h DOUBLE NOT NULL DEFAULT 0",
 	} {
 		var has int
 		d.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paper_trades' AND COLUMN_NAME=?`, col).Scan(&has)
@@ -522,8 +525,8 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 	db.sql.Exec(`INSERT INTO paper_trades
 	  (id,book,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
 	   oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m,
-	   ema200_dist,btc_ema200,breadth,max_dd,peak_ms)
-	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	   ema200_dist,btc_ema200,breadth,max_dd,peak_ms,high24_dist,btc_4h)
+	  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	  ON DUPLICATE KEY UPDATE
 	    cur=VALUES(cur), pnl_pct=VALUES(pnl_pct), status=VALUES(status),
 	    outcome=VALUES(outcome), close_time=VALUES(close_time), sl=VALUES(sl),
@@ -536,7 +539,7 @@ func (db *DB) upsertTrade(book string, t *PaperTrade) {
 		t.TP1, t.TP2, t.TP3, t.Legs, t.Filled, t.Realized, t.BEHit, t.BEPrice, t.MaxGain,
 		t.OI1h, t.CVD1h, t.LongAcct, t.Chg24, t.SurgeX, t.BTC1h, t.Vol24,
 		t.WickPct, t.EMADist, t.BarATR, t.SpikeX, t.BTC15m,
-		t.Ema200Dist, t.BtcEma200, t.Breadth, t.MaxDD, t.PeakMs)
+		t.Ema200Dist, t.BtcEma200, t.Breadth, t.MaxDD, t.PeakMs, t.High24Dist, t.BTC4h)
 }
 
 // deleteTrade 刪掉一筆(獵戶座撤掉的待觸發計畫)。
@@ -584,7 +587,7 @@ func (db *DB) clearClosedTrades(book string) {
 func (db *DB) loadTrades(book string) []*PaperTrade {
 	rows, err := db.sql.Query(`SELECT id,coin,dir,score,entry,tp,sl,cur,pnl_pct,status,outcome,open_time,close_time,oi,cvd,funding,tp1,tp2,tp3,legs,filled,realized,be_hit,be_price,max_gain,
 	  oi_1h,cvd_1h,long_acct,chg_24,surge_x,btc_1h,vol_24,wick_pct,ema_dist,bar_atr,spike_x,btc_15m,
-	  after_1h,after_2h,after_4h,after_8h,ema200_dist,btc_ema200,breadth,after_16h,after_24h,max_dd,peak_ms
+	  after_1h,after_2h,after_4h,after_8h,ema200_dist,btc_ema200,breadth,after_16h,after_24h,max_dd,peak_ms,high24_dist,btc_4h
 	  FROM paper_trades WHERE book=? ORDER BY open_time ASC`, book)
 	if err != nil {
 		return nil
@@ -600,7 +603,7 @@ func (db *DB) loadTrades(book string) []*PaperTrade {
 			&t.TP1, &t.TP2, &t.TP3, &t.Legs, &t.Filled, &t.Realized, &t.BEHit, &t.BEPrice, &t.MaxGain,
 			&t.OI1h, &t.CVD1h, &t.LongAcct, &t.Chg24, &t.SurgeX, &t.BTC1h, &t.Vol24,
 			&t.WickPct, &t.EMADist, &t.BarATR, &t.SpikeX, &t.BTC15m, &a1, &a2, &a4, &a8,
-			&t.Ema200Dist, &t.BtcEma200, &t.Breadth, &a16, &a24, &t.MaxDD, &t.PeakMs); err != nil {
+			&t.Ema200Dist, &t.BtcEma200, &t.Breadth, &a16, &a24, &t.MaxDD, &t.PeakMs, &t.High24Dist, &t.BTC4h); err != nil {
 			continue
 		}
 		t.After1h, t.After2h, t.After4h, t.After8h = nullPtr(a1), nullPtr(a2), nullPtr(a4), nullPtr(a8)

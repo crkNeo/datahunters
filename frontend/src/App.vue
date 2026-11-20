@@ -721,6 +721,15 @@ async function loadPulsarV12() {
     /* secondary */
   }
 }
+const pulsarv13 = ref(null)
+async function loadPulsarV13() {
+  try {
+    const res = await authFetch('/api/pulsarv13')
+    if (res.ok) pulsarv13.value = await res.json()
+  } catch (e) {
+    /* secondary */
+  }
+}
 const donchian = ref(null)
 async function loadDonchian() {
   try {
@@ -874,7 +883,11 @@ const microMeta = {
   pulsarv12: {
     title: '脈衝星v12 · 不等收K、條件成立就進 · 15m', load: loadPulsarV12, get: () => pulsarv12.value,
     help: '<b>一句話：不等 15 分鐘 K 線收完，條件一成立就馬上進場。</b><br><b>【跟 v3 的差別】</b>v3 要等這根 K 收完、確認長得對才買；v12 每分鐘看一次還在跑的那根，這一刻符合 v3 的條件就買，最多比 v3 早 15 分鐘。<br><b>【風險】</b>K 線還沒收完，形狀隨時會變。常見情況：拉上去那幾分鐘看起來是漂亮的大漲 K 棒 → v12 買進 → 收盤前被砸回來、變成長上影線（v3 收盤看到這種形狀就不會買）。所以 v12 比較容易買在高點。<br><b>【怎麼看結果】</b>同一個幣、同一根 K，如果 v3 沒開單、v12 有開，那筆就是「盤中看起來對、收盤後不對」的單，可以拿來算這種單的勝率。<br><b>【其他跟 v3 一樣】</b>挑幣方式一樣；出場一樣：賺到 1 倍風險先賣一半、2 倍再賣 1/4，最後 1/4 跟著漲勢移動停利；主倉最多抱 4 小時、最後那份最多 24 小時；同一個幣平倉後 4 小時內不再進。<br><b>【1H / 2H / 4H / 8H 欄】</b>進場後過了 1、2、4、8 小時，價格比進場價漲跌多少（不管那時有沒有出場，看的是「一直抱著」會怎樣）。時間到了約 1 分鐘內自動補上，「待」= 時間還沒到。用來判斷出場是不是太早或太晚。<br><b>【健康燈號】</b>🟢 0～1 個紅旗、🟡 2 個、🔴 3 個以上，滑鼠移上去看是哪幾個；只是標示、不會擋單。四個紅旗：① 最近 1 小時買盤過熱（1 小時 CVD 超過 10%）② 24 小時漲幅不到 2% ③ 台灣時間下午 14～19 點進場 ④ 散戶做多不到 64%。⚠️ 用 10/04～10/12 的資料驗證，紅燈單並沒有比較差，只有 ③ 時段這一項前後都站得住，燈號僅供參考。<br><b>【EMA200 / 大盤欄】</b>進場當下記下的三個數字（只記錄）：「幣」= 進場價離這個幣 4H EMA200 幾 %（正 = 在上方）；「BTC ▲／▼」= BTC 4H 收盤站上／跌破 EMA200 幾 %；「廣度」= 成交額前 200 的幣有幾 % 在 4H EMA200 之上。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
+  },  pulsarv13: {
+    title: '脈衝星v13 · 跌深後的強勢爆量反彈 · 0.75R 全出 · 15m', load: loadPulsarV13, get: () => pulsarv13.value,
+    help: '<b>一句話：脈衝星的爆量訊號，只做「跌了一段之後、帶量的強勢反彈」，到 0.75R 一次全出。</b><br><b>【為什麼】</b>回測脈衝星 v3 / v12 共 6,000 多筆實際訊號（15 分鐘 K 線重播、照分批實際計算）：在 24 小時高點附近的爆量追多最容易回落，整體是虧的；跌下來後才出現、量夠大、已經站上均線的反彈，才有後續。<br><b>【進場：脈衝星（v3）的收盤訊號 + 四個條件都要成立】</b><br>　① 收盤價離前 24 小時（96 根 15m）最高價 <b>≥ 4%</b>（不追在高點附近的爆量）；<br>　② 最近 6 根（含這根）最大量 <b>≥ 3.5 倍</b>基準量（量不夠的反彈最常彈一下就回落；v3 原本是 2.5 倍）；<br>　③ 收盤高於 15m EMA20 <b>≥ 0.5 個 ATR</b>（反彈已經有力道）；<br>　④ BTC 前 4 小時<b>沒有上漲</b>（大盤偏弱時的反彈表現反而比較好；抓不到 BTC 資料就不進）。<br><b>【出場】</b>止損同脈衝星（收盤 − 前 10 根最低價，0.8～4 ATR）= 1R；<b>止盈 = 進場 + 0.75R，一次全部出場</b>（不分批、不移保本、不追尾——回測裡追尾很少跑得出來，反而常把已經到手的吐回去）；4 小時沒碰到就以收盤出場；同一幣出場後冷卻 4 小時。<br><b>【欄位 / CSV】</b>每筆會記：離 24h 高點 %（high24_dist）、近 6 根最大量倍數（spike_x）、離 EMA20 幾個 ATR（ema_dist）、BTC 前 4h %（btc_4h），以及進場後 1 / 2 / 4 / 8 小時的價格變化，之後拿實盤資料回頭驗證每個條件。<br><b>【回測（扣 0.1% 手續費）】</b>v3 訊號（8/28～11/18）127 筆、每筆平均 +0.72%；v12 訊號（10/04～11/20）143 筆、每筆 +0.68%；勝率約 60%，兩本資料每個月都是正的。三個門檻各換 3 種數值（27 組）也全部為正。單量約一天 1～2 筆。<br><b>【要注意】</b>每筆優勢不大（停損 / 止盈都約 ±3%，靠勝率），實際停損滑價會吃掉一部分；樣本約 130 筆、門檻是從同一批資料找的，要看實盤。<br><b>【幣池】</b>同脈衝星：爆量脈搏熱名單。<br><br>⚠️ 觀察用，只記錄、不會自動下真單。非投資建議。',
   },
+
   donchian: {
     title: '唐奇安 · 長通道突破 168 / 12 · 1h', load: loadDonchian, get: () => donchian.value,
     help: '<b>一句話：價格收盤突破過去 7 天的最高價就追多（跌破 7 天最低就追空），讓趨勢一路跑，跌破 12 小時低點才出場。</b><br><b>【進場】</b>每根 1 小時 K 收盤時檢查：收盤價高於前 168 根（7 天）的最高價 → 下一根開盤做多；低於前 168 根的最低價 → 下一根開盤做空。只看收盤，盤中衝破又收回去不算。同一個幣同時只有一個方向，不加碼。<br><b>【出場：先碰到哪個用哪個】</b>① <b>通道出場</b>（等於移動停利）：多單收盤跌破前 12 根的最低價、空單收盤突破前 12 根的最高價 → 下一根開盤平倉。這條線會跟著價格走，賺錢時會自動鎖住大部分獲利。② <b>初始停損</b>（固定不動）：進場價 ∓ 3 × ATR(24)。ATR 是進場訊號那根往前 24 根的平均真實波幅。盤中碰到就出場；跳空直接越過停損價就用開盤價成交。<br><b>沒有固定止盈</b>，獲利全靠通道出場，讓趨勢單一路抱著。平倉的那一根如果剛好反向突破，可以馬上<b>反手</b>。<br><b>【ATR(24) 欄】</b>因為沒有止盈，原本的 TP 欄改成顯示<b>目前的 ATR(24)</b>（最新 24 根已收 1 小時 K 的平均真實波幅），下面的小字是它佔現價的 %，每個整點收盤後更新。滑鼠移上去可以看進場時的 ATR（停損用的那個），和現價離停損還有幾個 ATR。<br><b>【給之後調整止盈止損用的欄位】</b>R = 進場到停損的距離（3 × 進場時 ATR），用 R 看不同波動的幣才能放在一起比。<b>最大獲利 / 最大回撤</b>：進場後最有利 / 最不利到哪，下面小字是幾 R（例如最後賺錢的單大多沒跌超過 −0.5R，就代表停損可以縮）；<b>高點時間</b>：最大獲利出現在進場後第幾小時（看要不要加時間出場、或過多久收緊出場線）；<b>回吐</b>：最大獲利 − 目前 / 最後損益，從最高點吐回多少 R（常常漲到 +2R 卻只剩 +0.5R 出場，就值得考慮分批止盈）；<b>通道出場</b>（進行中）：目前的移動出場線在哪、離現價幾個 ATR，滑鼠移上去看在這個價出場大約賺賠多少（實盤可以直接拿來掛單）。<br><b>【幣池】</b>成交額前 200 的加密幣（排除代幣化股票），時間以 UTC 為準。<br><b>【實盤注意】</b>訊號要等 1 小時 K 收盤才確認，每個整點後要立刻處理；進場後停損單要馬上掛上去。系統每個整點收盤後約 1 分鐘內處理完，停損另外每 20 秒用即時價檢查。伺服器停機期間該出場的，開機後會照 K 線補出場。<br><b>【看結果的方式】</b>趨勢策略勝率通常不高，靠少數大波段賺回來；要看的是平均每筆損益和「最大獲利」欄，不要只看勝率。<br><br>⚠️ 觀察用，只記錄、不會自動下真單（實盤設定成「全部跟單」也不會帶到）。非投資建議。',
@@ -1520,6 +1533,7 @@ function loadAll() {
   if (canTab('bollema')) loadBollema()
   if (canTab('pulsarv3')) loadPulsarV3()
   if (canTab('pulsarv12')) loadPulsarV12()
+  if (canTab('pulsarv13')) loadPulsarV13()
   if (canTab('donchian')) loadDonchian()
   if (canTab('donchianv2')) loadDonchianV2()
   if (canTab('donchianv3')) loadDonchianV3()
@@ -1620,7 +1634,7 @@ async function installApp() {
 
 // tabs a push notification may deep-link to (from the ?tab= query on cold start
 // or a SW postMessage when the app is already open).
-const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7', 'volbrk', 'orderblockv2', 'srmtf', 'newsalpha', 'patterns', 'referral']
+const NAV_TABS = ['paper', 'gamble', 'emaonly', 'ranking', 'radar', 'signals', 'scorelog', 'sr', 'ema200', 'upbit', 'news', 'funding', 'unlock', 'robinhood', 'sectors', 'articles', 'conv', 'bollema', 'surge', 'pulsarv3', 'pulsarv12', 'pulsarv13', 'donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7', 'volbrk', 'orderblockv2', 'srmtf', 'newsalpha', 'patterns', 'referral']
 function gotoTab(t) { if (NAV_TABS.includes(t)) mainTab.value = t }
 
 // ---- 網址 ↔ 分頁 雙向同步 ----
@@ -1769,7 +1783,7 @@ const TAB_MIN_ROLE_FALLBACK = {
   paper: 'vip', emaonly: 'vip',
   sr: 'vip', ema200: 'vip',
   admin: 'admin', referral: 'admin', conv: 'vip', pulsarv3: 'vip',
-  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', donchian: 'admin', donchianv2: 'admin', donchianv3: 'admin', donchianv4: 'admin', donchianv5: 'admin', donchianv6: 'admin', donchianv7: 'admin', volbrk: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin', patterns: 'admin',
+  gamble: 'admin', bollema: 'admin', surge: 'admin', pulsarv12: 'admin', pulsarv13: 'admin', donchian: 'admin', donchianv2: 'admin', donchianv3: 'admin', donchianv4: 'admin', donchianv5: 'admin', donchianv6: 'admin', donchianv7: 'admin', volbrk: 'admin', orderblockv2: 'admin', srmtf: 'admin', polyscout: 'admin', newsalpha: 'admin', patterns: 'admin',
 }
 const tabPerms = ref({})
 const tabKinds = ref({}) // tab → 'info' | 'signal'(後台可調,見 /api/tab-kinds)
@@ -1833,7 +1847,7 @@ const TAB_NAMES = {
   sectors: '板塊強弱', robinhood: 'Robinhood', whales: '名人動向', articles: '文章專欄', oi: 'OI 儀表板', signals: '多空推薦',
   radar: '爆發雷達', scorelog: '訊號紀錄', paper: '星軌', gamble: '超新星', emaonly: '銀河', conv: '冥王星',
   sr: '支撐壓力', ema200: 'EMA200 穿越', bollema: '海王星', surge: '爆量脈搏', pulsarv3: '脈衝星',
-  pulsarv12: '脈衝星v12', donchian: '唐奇安', donchianv2: '唐奇安v2', donchianv3: '唐奇安v3', donchianv4: '唐奇安v4', donchianv5: '唐奇安v5', donchianv6: '唐奇安v6', donchianv7: '唐奇安v7', volbrk: '波動突破', orderblockv2: '太陽', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達', patterns: '型態掃描',
+  pulsarv12: '脈衝星v12', pulsarv13: '脈衝星v13', donchian: '唐奇安', donchianv2: '唐奇安v2', donchianv3: '唐奇安v3', donchianv4: '唐奇安v4', donchianv5: '唐奇安v5', donchianv6: '唐奇安v6', donchianv7: '唐奇安v7', volbrk: '波動突破', orderblockv2: '太陽', srmtf: '反轉訊號', polyscout: '聰明錢共識', newsalpha: '消息雷達', patterns: '型態掃描',
 }
 function tabName(t) { return TAB_NAMES[t] || '' }
 // 導覽列改為「身分 × 類型」二維:每個身分列(公開/會員/VIP)再拆資訊 / 訊號兩列。
@@ -1853,7 +1867,7 @@ const NAV_GROUPS = computed(() => {
 const TAB_KIND_FALLBACK = {
   signals: 'signal', scorelog: 'signal', radar: 'signal',
   paper: 'signal', gamble: 'signal', emaonly: 'signal', conv: 'signal',
-  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', donchian: 'signal', donchianv2: 'signal', donchianv3: 'signal', donchianv4: 'signal', donchianv5: 'signal', donchianv6: 'signal', donchianv7: 'signal', volbrk: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
+  bollema: 'signal', surge: 'signal', pulsarv3: 'signal', pulsarv12: 'signal', pulsarv13: 'signal', donchian: 'signal', donchianv2: 'signal', donchianv3: 'signal', donchianv4: 'signal', donchianv5: 'signal', donchianv6: 'signal', donchianv7: 'signal', volbrk: 'signal', orderblockv2: 'signal', srmtf: 'signal', newsalpha: 'signal',
 }
 // 導覽列的顯示順序;分組是動態的,這裡只決定同一格內的先後。
 // 注意:跟上面的 NAV_TABS 是兩回事 —— 那個是推播深連結的白名單,少了 admin/oi/list 等。
@@ -1861,7 +1875,7 @@ const NAV_ORDER = [
   'ranking', 'list', 'heatmap', 'events', 'flow', 'capital', 'upbit', 'news', 'funding', 'unlock', 'sectors', 'robinhood', 'whales', 'articles',
   'oi', 'signals', 'scorelog', 'radar',
   'paper', 'emaonly', 'conv', 'sr', 'ema200', 'pulsarv3',
-  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7', 'volbrk', 'orderblockv2', 'srmtf', 'newsalpha', 'patterns',
+  'admin', 'referral', 'polyscout', 'gamble', 'bollema', 'surge', 'pulsarv12', 'pulsarv13', 'donchian', 'donchianv2', 'donchianv3', 'donchianv4', 'donchianv5', 'donchianv6', 'donchianv7', 'volbrk', 'orderblockv2', 'srmtf', 'newsalpha', 'patterns',
 ]
 // 這個標籤該不該出現在這一格:身分列與類型對得上就顯示。
 // 公開/會員/VIP 三列「一律顯示」(不論目前身分能否進入)—— 未登入者也看得到會員/VIP
@@ -2414,6 +2428,9 @@ watch([role, tabPerms, authReady], () => {
           </button>
           <button v-if="inGroup('pulsarv12', grp[0])" :class="{ active: mainTab === 'pulsarv12', lk: !canTab('pulsarv12') }" @click="navTo('pulsarv12', loadPulsarV12)">
             脈衝星v12<em v-if="pulsarv12 && pulsarv12.open.length" class="navbadge">{{ pulsarv12.open.length }}</em><i v-if="!canTab('pulsarv12')" class="navlk">🔒</i>
+          </button>
+          <button v-if="inGroup('pulsarv13', grp[0])" :class="{ active: mainTab === 'pulsarv13', lk: !canTab('pulsarv13') }" @click="navTo('pulsarv13', loadPulsarV13)">
+            脈衝星v13<em v-if="pulsarv13 && pulsarv13.open.length" class="navbadge">{{ pulsarv13.open.length }}</em><i v-if="!canTab('pulsarv13')" class="navlk">🔒</i>
           </button>
           <button v-if="inGroup('donchian', grp[0])" :class="{ active: mainTab === 'donchian', lk: !canTab('donchian') }" @click="navTo('donchian', loadDonchian)">
             唐奇安<em v-if="donchian && donchian.open.length" class="navbadge">{{ donchian.open.length }}</em><i v-if="!canTab('donchian')" class="navlk">🔒</i>

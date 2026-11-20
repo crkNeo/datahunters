@@ -64,6 +64,7 @@ var tabMeta = []struct {
 	{"srmtf", "反轉訊號", "admin", false},
 	{"surge", "爆量脈搏", "admin", false},
 	{"pulsarv12", "脈衝星v12", "admin", false},
+	{"pulsarv13", "脈衝星v13", "admin", false}, // v3 訊號只做跌深強勢反彈,0.75R 全出
 	{"donchian", "唐奇安", "admin", false},     // 長通道突破(1h,多空)
 	{"donchianv2", "唐奇安v2", "admin", false}, // 唐奇安 + 吊燈停利 3×ATR
 	{"donchianv3", "唐奇安v3", "admin", false}, // 前 30、336 根 + 通道寬度;24 根通道 + 吊燈 4×ATR
@@ -91,7 +92,7 @@ var tabDefaultKind = map[string]string{
 	"paper": "signal", "gamble": "signal", "emaonly": "signal", "conv": "signal",
 	"bollema": "signal",
 	"srmtf":   "signal",
-	"surge":   "signal", "pulsarv3": "signal", "pulsarv12": "signal", "donchian": "signal", "donchianv2": "signal", "donchianv3": "signal", "donchianv4": "signal", "donchianv5": "signal", "donchianv6": "signal", "donchianv7": "signal", "volbrk": "signal",
+	"surge":   "signal", "pulsarv3": "signal", "pulsarv12": "signal", "pulsarv13": "signal", "donchian": "signal", "donchianv2": "signal", "donchianv3": "signal", "donchianv4": "signal", "donchianv5": "signal", "donchianv6": "signal", "donchianv7": "signal", "volbrk": "signal",
 	"newsalpha":    "signal",
 	"orderblockv2": "signal",
 }
@@ -262,7 +263,7 @@ var tabOfRoute = map[string]string{
 	"/api/conv": "conv", "/api/sr": "sr", "/api/ema200": "ema200", "/api/ema200-history": "ema200", "/api/whales": "whales",
 	"/api/admin/bollema": "bollema",
 	"/api/srmtf":         "srmtf",
-	"/api/admin/surge":   "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/patterns": "patterns", "/api/donchian": "donchian", "/api/donchianv2": "donchianv2", "/api/donchianv3": "donchianv3", "/api/donchianv4": "donchianv4", "/api/donchianv5": "donchianv5", "/api/donchianv6": "donchianv6", "/api/donchianv7": "donchianv7", "/api/volbrk": "volbrk",
+	"/api/admin/surge":   "surge", "/api/pulsarv3": "pulsarv3", "/api/pulsarv12": "pulsarv12", "/api/pulsarv13": "pulsarv13", "/api/patterns": "patterns", "/api/donchian": "donchian", "/api/donchianv2": "donchianv2", "/api/donchianv3": "donchianv3", "/api/donchianv4": "donchianv4", "/api/donchianv5": "donchianv5", "/api/donchianv6": "donchianv6", "/api/donchianv7": "donchianv7", "/api/volbrk": "volbrk",
 	"/api/newsalpha": "newsalpha", "/api/newsalpha-events": "newsalpha", "/api/newsalpha-stats": "newsalpha", "/api/newsalpha-book": "newsalpha",
 	"/api/orderblockv2": "orderblockv2",
 }
