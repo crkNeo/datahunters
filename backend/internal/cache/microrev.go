@@ -25,9 +25,10 @@ import (
 
 // microBook is one strategy's config + simulated trade state.
 type microBook struct {
-	name    string // db book name + trade-id prefix (bollfade|meanrev|bgv2dev…)
-	tf      string // "30m" | "1h"
-	barSec  int64  // bar length in seconds (bucketing + expiry)
+	dcDiag  *DCDiag // 唐奇安:這一小時的處理紀錄(頁面顯示),在 mu 底下讀寫
+	name    string  // db book name + trade-id prefix (bollfade|meanrev|bgv2dev…)
+	tf      string  // "30m" | "1h"
+	barSec  int64   // bar length in seconds (bucketing + expiry)
 	klimit  int
 	minBars int
 	expiry  int // max hold in bars → market exit ("expired")
@@ -993,6 +994,12 @@ func (s *Store) microState(bs ...*microBook) PaperState {
 		px = s.fillOpenPx(px, bs...)
 	}
 	st := PaperState{Open: []*PaperTrade{}, Closed: []*PaperTrade{}}
+	bs[0].mu.Lock()
+	if d := bs[0].dcDiag; d != nil {
+		c := *d
+		st.DCDiag = &c
+	}
+	bs[0].mu.Unlock()
 	st.Stats.MultiTP = bs[0].plan != nil
 	var sum, grossWin, grossLoss float64
 	var all []*PaperTrade

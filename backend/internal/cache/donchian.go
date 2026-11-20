@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime/debug"
 	"sort"
 	"time"
 
@@ -244,6 +245,7 @@ type hourEngine struct {
 	boot   bool            // 這一小時是不是開機第一輪
 	pend   map[string]bool // 這一小時還沒處理到的幣(交易所新棒還沒生成 → 下一分鐘再試)
 	drop   int             // 上一次放棄時還有幾個幣沒處理到(記 log 用)
+	st     DCDiag          // 這一小時的處理紀錄(頁面顯示)
 }
 
 // due 回傳這一分鐘要處理的幣;新的一小時重新排入整個宇宙 + 持倉幣。過了 10 分鐘還沒生成的就放棄這一小時。
@@ -257,6 +259,7 @@ func (e *hourEngine) due(now time.Time, coins func() []string) []string {
 		for _, c := range coins() {
 			e.pend[c] = true
 		}
+		e.st = DCDiag{Hour: bkt * 3600_000, Coins: len(e.pend), Boot: e.boot}
 	} else if now.Unix()-bkt*3600 > 600 {
 		if len(e.pend) > 0 {
 			e.drop = len(e.pend)
@@ -310,20 +313,34 @@ func donchianCoins(b *microBook) []string {
 		seen[c] = true
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	for _, tr := range b.trades {
 		if tr.Status == "open" && !seen[tr.Coin] { // 掉出宇宙的持倉幣也要繼續管
 			seen[tr.Coin] = true
 			coins = append(coins, tr.Coin)
 		}
 	}
-	b.mu.Unlock()
 	return coins
 }
 
 // DonchianTick 每分鐘由 main 呼叫:整點收盤後處理出場、新進場(唐奇安、唐奇安v2 依序跑,共用 1h K 快取)。
 func (s *Store) DonchianTick() {
 	for _, r := range s.dcRunners() {
-		s.dcTick(r)
+		func() {
+			defer func() { // 一本書出錯不能拖垮其他版本(也不能讓整個伺服器掛掉)
+				if p := recover(); p != nil {
+					log.Printf("⚠️ 策略[%s] 每小時處理出錯,這本這一輪略過:%v\n%s", r.b.name, p, debug.Stack())
+					r.eng.st.Err = fmt.Sprint(p)
+					if r.b.mu.TryLock() { // 出錯時鎖應該已放掉;萬一沒放,不能在這裡卡死
+						r.b.mu.Unlock()
+						s.dcSaveDiag(r)
+					} else {
+						log.Printf("⚠️ 策略[%s] 出錯後鎖沒有放掉", r.b.name)
+					}
+				}
+			}()
+			s.dcTick(r)
+		}()
 	}
 }
 
@@ -497,11 +514,15 @@ func (s *Store) dcTick(r dcRunner) {
 	b := r.b
 	now := time.Now().UTC()
 	coins := r.eng.due(now, func() []string { return donchianCoins(b) })
+	st := &r.eng.st
 	if r.eng.drop > 0 {
 		log.Printf("⚠️ 策略[%s] 整點過了 10 分鐘還有 %d 個幣抓不到新的 1h K,這一小時放棄(這些幣這小時不會進場 / 不會用收盤出場)", b.name, r.eng.drop)
-		r.eng.drop = 0
+		st.Drop, r.eng.drop = r.eng.drop, 0
 	}
 	enabled := s.StrategyEnabled(b.strat())
+	st.Disabled = !enabled
+	st.Calls++
+	defer s.dcSaveDiag(r)
 	opened, closedN, loads := 0, 0, 0
 	for _, coin := range coins {
 		closed, forming, ok := s.dcBarsFor(r, coin, now, &loads)
@@ -509,6 +530,7 @@ func (s *Store) dcTick(r dcRunner) {
 			continue
 		}
 		delete(r.eng.pend, coin)
+		st.Done++
 		// v7:有突破訊號才去抓散戶多空比(網路請求放在鎖外面)
 		retailSkip, longAcct := false, 0.0
 		if r.retail && enabled && !r.eng.boot {
@@ -521,35 +543,39 @@ func (s *Store) dcTick(r dcRunner) {
 			}
 		}
 		var exits, entries, dirty []*PaperTrade
-		b.mu.Lock()
-		var open *PaperTrade
-		for _, tr := range b.trades {
-			if tr.Coin == coin && tr.Status == "open" {
-				open = tr
-				break
+		func() {
+			b.mu.Lock()
+			defer b.mu.Unlock() // 中途出錯也要放鎖,不然 20 秒的盤中檢查會卡死
+			var open *PaperTrade
+			for _, tr := range b.trades {
+				if tr.Coin == coin && tr.Status == "open" {
+					open = tr
+					break
+				}
 			}
-		}
-		if open != nil {
-			open.ATR = roundPx(dcATR(closed)) // 目前的 ATR(24),頁面顯示用
-			open.ChanExit = dcChanLevelN(closed, open.Dir, r.exitN)
-			if r.chandK > 0 {
-				open.ChandExit = dcChandLevelK(open, closed, r.chandK)
+			if open != nil {
+				open.ATR = roundPx(dcATR(closed)) // 目前的 ATR(24),頁面顯示用
+				open.ChanExit = dcChanLevelN(closed, open.Dir, r.exitN)
+				if r.chandK > 0 {
+					open.ChandExit = dcChandLevelK(open, closed, r.chandK)
+				}
+				gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
+				px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK, r.lock)
+				dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
+				if r.lock != nil {
+					open.LockExit = dcLockLevelS(open, open.MaxGain, r.lock)
+				}
+				if hit {
+					closeTrade(open, px, outcome, at)
+					exits = append(exits, open)
+					open = nil
+				} else if open.MaxGain != gain || open.MaxDD != dd || open.PeakMs != peak {
+					dirty = append(dirty, open)
+				}
 			}
-			gain, dd, peak := open.MaxGain, open.MaxDD, open.PeakMs
-			px, outcome, at, upto, hit := dcExitScanP(open, closed, forming, r.exitN, r.chandK, r.lock)
-			dcExcursion(open, closed[:upto]) // 最大獲利 / 回撤只算到出場那根
-			if r.lock != nil {
-				open.LockExit = dcLockLevelS(open, open.MaxGain, r.lock)
+			if !enabled || r.eng.boot {
+				return
 			}
-			if hit {
-				closeTrade(open, px, outcome, at)
-				exits = append(exits, open)
-				open = nil
-			} else if open.MaxGain != gain || open.MaxDD != dd || open.PeakMs != peak {
-				dirty = append(dirty, open)
-			}
-		}
-		if open == nil && enabled && !r.eng.boot {
 			sigFn := dcSignal
 			if r.v3 {
 				sigFn = dcSignalV3
@@ -559,32 +585,48 @@ func (s *Store) dcTick(r dcRunner) {
 				sigFn = dcSignalV5
 			}
 			sig := closed[len(closed)-1]
-			if dir, entry, sl, ok := sigFn(closed, forming); ok && !(r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) &&
-				!(r.lock != nil && dcClosedRecently(b.trades, coin, dir, "lock", sig.Ts+dcBarMs, dcLockCool)) && !retailSkip {
-				if r.slCap > 0 && math.Abs(entry-sl)/entry*100 > r.slCap { // v6:停損最多離進場 slCap %
-					if dir == "long" {
-						sl = roundPx(entry * (1 - r.slCap/100))
-					} else {
-						sl = roundPx(entry * (1 + r.slCap/100))
-					}
-				}
-				tr := &PaperTrade{ID: fmt.Sprintf("%s|%s|%d", b.name, coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
-					Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
-					ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevelN(closed, dir, r.exitN)}
-				if r.chandK > 0 {
-					tr.ChandExit = dcChandLevelK(tr, closed, r.chandK) // 還沒有進場後的收盤 → 0,下一小時才有
-				}
-				if r.retail {
-					tr.LongAcct = longAcct // 進場當下散戶做多帳戶比例(CSV 的 long_acct)
-				}
-				b.trades = append(b.trades, tr)
-				entries = append(entries, tr)
+			dir, entry, sl, ok := sigFn(closed, forming)
+			if !ok {
+				return
 			}
-		}
+			st.Sigs++
+			switch {
+			case open != nil:
+				st.Held++
+				return
+			case (r.v3 && dcStoppedRecently(b.trades, coin, dir, sig.Ts+dcBarMs)) ||
+				(r.lock != nil && dcClosedRecently(b.trades, coin, dir, "lock", sig.Ts+dcBarMs, dcLockCool)):
+				st.Cool++
+				return
+			case retailSkip:
+				st.Retail++
+				return
+			}
+			if r.slCap > 0 && math.Abs(entry-sl)/entry*100 > r.slCap { // v6:停損最多離進場 slCap %
+				if dir == "long" {
+					sl = roundPx(entry * (1 - r.slCap/100))
+				} else {
+					sl = roundPx(entry * (1 + r.slCap/100))
+				}
+			}
+			tr := &PaperTrade{ID: fmt.Sprintf("%s|%s|%d", b.name, coin, sig.Ts+dcBarMs), Coin: coin, Dir: dir,
+				Entry: entry, SL: sl, Cur: entry, Status: "open", OpenTime: time.UnixMilli(sig.Ts + dcBarMs).UTC(),
+				ATR: roundPx(dcATR(closed)), ChanExit: dcChanLevelN(closed, dir, r.exitN)}
+			if r.chandK > 0 {
+				tr.ChandExit = dcChandLevelK(tr, closed, r.chandK) // 還沒有進場後的收盤 → 0,下一小時才有
+			}
+			if r.retail {
+				tr.LongAcct = longAcct // 進場當下散戶做多帳戶比例(CSV 的 long_acct)
+			}
+			b.trades = append(b.trades, tr)
+			entries = append(entries, tr)
+			st.Entered++
+		}()
 		if len(exits) > 0 {
+			b.mu.Lock()
 			microTrim(b)
+			b.mu.Unlock()
 		}
-		b.mu.Unlock()
 		for _, tr := range append(append(exits, entries...), dirty...) {
 			if s.db != nil {
 				s.db.upsertTrade(b.name, tr)
@@ -603,6 +645,33 @@ func (s *Store) dcTick(r dcRunner) {
 	if opened+closedN > 0 {
 		log.Printf("策略[%s] 進場 %d 筆、出場 %d 筆", b.name, opened, closedN)
 	}
+}
+
+// DCDiag 是唐奇安一本書「目前這一小時」的處理紀錄,顯示在策略頁上(查「為什麼 v2 有進、這本沒進」用)。
+type DCDiag struct {
+	Hour     int64  `json:"hour"`     // 哪一小時(這一小時開始的 ms;處理的是上一根收盤)
+	Coins    int    `json:"coins"`    // 這小時要處理的幣數(幣池 + 持倉)
+	Done     int    `json:"done"`     // 已處理(抓到新的一根 1h K)
+	Drop     int    `json:"drop"`     // 整點過 10 分鐘還沒抓到、放棄的幣數
+	Sigs     int    `json:"sigs"`     // 突破訊號數
+	Entered  int    `json:"entered"`  // 進場
+	Held     int    `json:"held"`     // 有訊號但這本已持有該幣
+	Cool     int    `json:"cool"`     // 有訊號但在冷卻中
+	Retail   int    `json:"retail"`   // 有訊號但散戶擠同邊(v7)
+	Boot     bool   `json:"boot"`     // 開機第一小時(只管持倉、不進場)
+	Disabled bool   `json:"disabled"` // 進場開關關閉
+	Calls    int    `json:"calls"`    // 這小時跑了幾輪
+	Err      string `json:"err,omitempty"`
+	At       int64  `json:"at"` // 最後更新時間 ms
+}
+
+// dcSaveDiag 把這一小時的處理紀錄存到書上(頁面讀)。
+func (s *Store) dcSaveDiag(r dcRunner) {
+	d := r.eng.st
+	d.At = time.Now().UnixMilli()
+	r.b.mu.Lock()
+	r.b.dcDiag = &d
+	r.b.mu.Unlock()
 }
 
 // dcFetchLS 抓最近 300 筆(25 小時)5 分鐘的散戶多空帳戶比;測試會換掉它。

@@ -775,6 +775,23 @@ async function loadDonchianV6() {
     /* secondary */
   }
 }
+// 唐奇安:這一小時的處理紀錄(後端 dc_diag),查「v2 有進、這本沒進」用
+const dcDiag = computed(() => {
+  const d = microState.value && microState.value.dc_diag
+  if (!d) return null
+  const hm = (ms) => { const t = new Date(ms); return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') }
+  const warns = []
+  if (d.disabled) warns.push('⚠️ 進場開關是關的(後台 → 策略設定)')
+  if (d.boot) warns.push('開機後第一小時:只管持倉、不進場')
+  if (d.drop) warns.push(`⚠️ ${d.drop} 個幣整點過 10 分鐘還抓不到 K 線,這小時放棄`)
+  if (d.err) warns.push('⚠️ 處理出錯:' + d.err)
+  const parts = [`${hm(d.hour)} 這一輪:處理 ${d.done}/${d.coins} 個幣`, `突破訊號 ${d.sigs}`, `進場 ${d.entered}`]
+  if (d.held) parts.push(`已持有 ${d.held}`)
+  if (d.cool) parts.push(`冷卻中 ${d.cool}`)
+  if (d.retail) parts.push(`散戶擠同邊 ${d.retail}`)
+  parts.push(`更新 ${hm(d.at)}`)
+  return { text: [parts.join(' · '), ...warns].join(' ｜ '), warn: warns.some((w) => w.startsWith('⚠️')) }
+})
 const donchianv7 = ref(null)
 async function loadDonchianV7() {
   try {
@@ -2822,6 +2839,7 @@ watch([role, tabPerms, authReady], () => {
         <h2>{{ micro.title }}<span class="help" tabindex="0">?<span class="help-pop" v-html="micro.help"></span></span></h2>
         <span class="mk-actions"><span class="mk-count" v-if="microState">進行中 {{ microState.open.length }}</span><button v-if="can('admin') && (mainTab.startsWith('pulsar') || mainTab === 'donchian' || mainTab === 'donchianv2' || mainTab === 'donchianv3' || mainTab === 'donchianv4' || mainTab === 'donchianv5' || mainTab === 'donchianv6' || mainTab === 'donchianv7' || mainTab === 'volbrk')" class="csvbtn" @click="exportCSV">⬇ 匯出 CSV</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, true)">清已結束</button><button class="clearbtn" @click="clearStrat(mainTab, micro.load, false)">全部</button></span>
       </div>
+      <p v-if="dcDiag" class="dcdiag" :class="{ warn: dcDiag.warn }">{{ dcDiag.text }}</p>
       <div class="shead-row" v-if="stratTagsOf(curStrat).length"><span class="shead-badge">{{ stratBadge(mainTab) }}</span><span v-for="tg in stratTagsOf(curStrat)" :key="tg" class="stag2"># {{ tg }}</span></div>
 
       <StrategyBook
@@ -3935,6 +3953,8 @@ body::before {
 .sec-chip { display: inline-block; font-size: 11.5px; padding: 2px 7px; margin: 2px 4px 2px 0; border-radius: 5px; }
 .sec-chip.up { background: #133027; color: #5fd39a; }
 .sec-chip.down { background: #2f1a1a; color: #e0857f; }
+.dcdiag { margin: 2px 0 8px; font-size: 12px; color: var(--muted, #8b93a7); }
+.dcdiag.warn { color: #f0616d; }
 .strat-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 14px; margin: 4px 0 6px; }
 .stratcfg { border: 1px solid #2b2e36; border-radius: 8px; padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; }
 .stratcfg-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

@@ -802,3 +802,34 @@ func TestHourBarsShared(t *testing.T) {
 		t.Fatalf("next hour must not reuse last hour's bars")
 	}
 }
+
+func TestDonchianTickIsolatesPanicAndDiag(t *testing.T) {
+	// v2 出錯(壞掉的持倉資料)不能拖垮 v6;v2 的鎖要放掉;頁面診斷記下錯誤與 v6 的訊號 / 進場數
+	s, _ := dcStore(t, "AAA", func(cs []exchange.Candle) {
+		for i := len(cs) - 30; i < len(cs)-1; i++ {
+			cs[i].High, cs[i].Low = 10.8, 9.2
+		}
+		sig := &cs[len(cs)-2]
+		sig.High, sig.Close = 11.5, 11
+		cs[len(cs)-1].Open = 11
+	})
+	s.donchianBook = nil
+	s.donchianV2Book, s.dcEng2 = s.newDonchianV2Book(), &hourEngine{seeded: true}
+	s.donchianV2Book.trades = []*PaperTrade{nil}
+	s.donchianV6Book, s.dcEng6 = s.newDonchianV6Book(), &hourEngine{seeded: true}
+	s.DonchianTick()
+	if !s.donchianV2Book.mu.TryLock() {
+		t.Fatalf("v2 lock must be released after a panic")
+	}
+	s.donchianV2Book.mu.Unlock()
+	if d := s.donchianV2Book.dcDiag; d == nil || d.Err == "" {
+		t.Fatalf("v2 diag should record the error: %+v", d)
+	}
+	if len(s.donchianV6Book.trades) != 1 {
+		t.Fatalf("v6 should still enter")
+	}
+	d := s.donchianV6Book.dcDiag
+	if d == nil || d.Coins != 1 || d.Done != 1 || d.Sigs != 1 || d.Entered != 1 || d.Boot || d.Disabled {
+		t.Fatalf("v6 diag: %+v", d)
+	}
+}
